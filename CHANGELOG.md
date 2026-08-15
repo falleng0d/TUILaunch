@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-15
+
 ### Fixed
 
 - Escape now reaches the running TUI app instead of moving focus to the editor.
@@ -19,5 +21,6 @@
      - Sessions are managed in their own TUILaunch tool window.
 - Added tmux-like prefix keybindings inside TUI terminals.
 
-[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/atm1020/TUILaunch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/atm1020/TUILaunch/commits/v0.1.0
