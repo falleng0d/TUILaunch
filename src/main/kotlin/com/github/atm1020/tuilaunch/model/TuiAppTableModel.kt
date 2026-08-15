@@ -1,11 +1,10 @@
-package com.github.atm1020.tuilaunchmodel
+package com.github.atm1020.tuilaunch.model
 
-import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import javax.swing.table.AbstractTableModel
 
 class TuiAppTableModel(private val apps: MutableList<TuiAppConfig>) : AbstractTableModel() {
-    private val  actionId  = "ActionId"
-    private val columnNames = arrayOf("Name", "Command", "Options", actionId)
+    private val actionIdColumnName = "ActionId"
+    private val columnNames = arrayOf("Name", "Command", "Options", actionIdColumnName)
 
     override fun getRowCount(): Int = apps.size
     override fun getColumnCount(): Int = columnNames.size
@@ -16,14 +15,13 @@ class TuiAppTableModel(private val apps: MutableList<TuiAppConfig>) : AbstractTa
             0 -> apps[rowIndex].name
             1 -> apps[rowIndex].command
             2 -> apps[rowIndex].options
-            3 -> "TUILauncher.${apps[rowIndex].name}"
+            3 -> ACTION_ID_PREFIX + apps[rowIndex].name
             else -> ""
         }
     }
 
-
     override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean {
-        return this.columnNames[columnIndex] != actionId
+        return this.columnNames[columnIndex] != actionIdColumnName
     }
 
     override fun setValueAt(aValue: Any, rowIndex: Int, columnIndex: Int) {
@@ -32,7 +30,6 @@ class TuiAppTableModel(private val apps: MutableList<TuiAppConfig>) : AbstractTa
             0 -> apps[rowIndex].name = value
             1 -> apps[rowIndex].command = value
             2 -> apps[rowIndex].options = value
-            3 -> apps[rowIndex].description = value
         }
         fireTableCellUpdated(rowIndex, columnIndex)
     }

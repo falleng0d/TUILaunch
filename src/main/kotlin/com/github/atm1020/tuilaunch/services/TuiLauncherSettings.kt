@@ -1,6 +1,7 @@
 package com.github.atm1020.tuilaunch.services
 
 import com.github.atm1020.tuilaunch.action.DynamicUserAction
+import com.github.atm1020.tuilaunch.model.ACTION_ID_PREFIX
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.Constraints

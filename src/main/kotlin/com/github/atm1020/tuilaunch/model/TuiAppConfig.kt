@@ -1,5 +1,7 @@
 package com.github.atm1020.tuilaunch.model
 
+internal const val ACTION_ID_PREFIX = "TUILauncher."
+
 data class TuiAppConfig(
     var name: String = "",
     var command: String = "",

@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch.services
 
+import com.github.atm1020.tuilaunch.model.ACTION_ID_PREFIX
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
@@ -17,8 +18,6 @@ import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
 
 const val TUI_TOOL_WINDOW_ID = "TUILaunch"
-
-internal const val ACTION_ID_PREFIX = "TUILauncher."
 
 internal fun uniqueSessionTitle(base: String, taken: Set<String>): String {
     if (base !in taken) return base

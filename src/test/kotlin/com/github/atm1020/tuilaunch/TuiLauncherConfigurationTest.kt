@@ -1,9 +1,9 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
+import com.github.atm1020.tuilaunch.model.TuiAppTableModel
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
-import com.github.atm1020.tuilaunchmodel.TuiAppTableModel
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.awt.Component
