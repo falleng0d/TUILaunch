@@ -144,7 +144,6 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             configurable.apply()
             fail("Expected ConfigurationException")
         } catch (_: ConfigurationException) {
-            // expected
         }
 
         assertEquals(1, settings.state.tuiApps.size)

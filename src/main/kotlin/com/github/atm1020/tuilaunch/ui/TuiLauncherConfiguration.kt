@@ -43,7 +43,6 @@ class TuiLauncherConfiguration : Configurable {
     private var shortcutsTable: JBTable? = null
     private var shortcutsModel: ShortcutTableModel? = null
 
-    /** The captured prefix key (an AWT [KeyEvent] VK_ code), combined with the modifier. */
     private var escapeKeyCode: Int? = settings.state.escapeKeyCode
     private var focusEditorKeyCode: Int? = settings.state.focusEditorKeyCode
     private var closeTuiKeyCode: Int? = settings.state.closeTuiKeyCode

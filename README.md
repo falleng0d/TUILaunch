@@ -144,6 +144,30 @@ Example workflow after configuring <kbd>Ctrl</kbd> + <kbd>Space</kbd> as the pre
   Download the [latest release](https://github.com/atm1020/TUILaunch/releases/latest) and install it manually using
   <kbd>Settings/Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>⚙️</kbd> > <kbd>Install plugin from disk...</kbd>
 
+## Implementation notes
+
+Platform behaviour this plugin depends on, collected so it does not have to be rediscovered:
+
+- `Content.setDisplayName` fires the property change the tab UI repaints on; `setTabName` does not.
+- `ToolWindowFactory.init(ToolWindow)` runs before `createToolWindowContent` and before any content exists, which is the only point where `ToolWindowEx.setTabActions` can install the tab bar's "+" button.
+- A tab only gets an X and enabled "Close Tab"/"Close Other Tabs"/"Close All Tabs" actions when `Content.isCloseable` is true *and* the `<toolWindow>` element declares `canCloseContents="true"`; either one alone leaves them disabled.
+- Once content is closeable the platform removes tabs without calling back into plugin code, so a `ContentManagerListener.contentRemoved` hook is the only way to learn that a session is gone.
+- Register `ContentManager` listeners on the tool window's disposable, not on a tab's, or they are unhooked when the first session closes.
+- The `ContentManager`'s `contents` array is the single source of truth for tab order and the current index; deriving order from an internal map desyncs during a close (the removal lands an event-queue turn later) and after the user drags a tab.
+- Resolve the active tab *inside* the deferred block when moving the selection: reading it up front makes a burst of key presses all measure from the same pre-burst tab and advance a single step in total.
+- `ToolWindowEx.stretchWidth`/`stretchHeight` are relative, so re-applying a size to a docked tool window whose selection change is already restoring it doubles the stretch and overshoots.
+- Programmatic resizing emits the same `componentResized` events as a user drag, so size recording has to be suppressed while a saved size is applied and re-armed on the next event-queue pass.
+- `Disposer.dispose` on an already-disposed object is a no-op, which is what lets a plugin-initiated dispose race the platform's own disposal of the `Content`.
+- `JBTerminalWidget.asJediTermWidget` only unwraps the classic Gen-1 widget; that widget's `terminalStarter` is the only write path to the child process.
+- JediTerm's `TerminalKeyEncoder` has no `VK_ESCAPE` entry, so `TerminalStarter.getCode(27, 0)` returns null and callers must fall back to sending the character themselves, exactly as `TerminalPanel` does.
+- Sending with `userInput = true` also scrolls to the cursor and clears the selection, which is what makes a forwarded key indistinguishable from real typing.
+- The platform's `TerminalEscapeKeyListener` moves focus to the editor on bare Escape in any tool window other than the bundled "Terminal", so a custom terminal window has to intercept Escape before it.
+- IntelliJ delivers each `KEY_PRESSED` to a global `KeyEventDispatcher` twice; de-duplicate on (timestamp, key code) or a forwarded Escape reaches the child process twice.
+- Consuming a `KEY_PRESSED` does not suppress the matching `KEY_TYPED`, which has to be swallowed separately or its character still lands in the terminal.
+- `NextTab`/`PreviousTab` keystrokes differ across the default, macOS and system-shortcut keymaps, so resolve them from `ActionManager` at event time rather than hardcoding them.
+- A `KeyEventDispatcher` sees one keystroke at a time and cannot arbitrate a chord, so two-stroke shortcuts must be ignored rather than matched on their first stroke.
+- `ToolWindowTabRenameActionBase` hardcodes `Balloon.Position.above`, which is wrong for a bottom-anchored tool window.
+
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].
 

@@ -14,9 +14,12 @@
                                  id="com.example.tuilauncher.TuiLauncherConfigurable"
                                  displayName="TUI Launcher"/>
         <postStartupActivity implementation="com.github.atm1020.tuilaunch.LoadDynamicActions"/>
+        <!-- canCloseContents: without it the shared tab context menu's Close Tab / Close Other Tabs /
+             Close All Tabs stay disabled and no X appears on a tab, no matter what
+             Content.isCloseable says (TSK-9016). -->
         <toolWindow id="TUILaunch"
                     anchor="bottom"
-                    canCloseContents="false"
+                    canCloseContents="true"
                     factoryClass="com.github.atm1020.tuilaunch.toolwindow.TuiLaunchToolWindowFactory"/>
     </extensions>
 
@@ -80,6 +83,18 @@
                 text="TUILaunch Previous TUI Tab Without Focus"
                 description="Move to the previous open TUI session tab without requesting terminal focus">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+        <!-- Not added to any menu group: looked up by id from TuiLaunchToolWindowFactory.init and
+             installed as the tool window tab bar's "+" button (TSK-9013). -->
+        <action id="TUILaunch.NewSession"
+                class="com.github.atm1020.tuilaunch.action.TuiNewSessionAction"
+                text="New Session"
+                description="Start a new TUI session"/>
+        <action id="TUILaunch.RenameSession"
+                class="com.github.atm1020.tuilaunch.action.TuiRenameSessionAction"
+                text="Rename Session"
+                description="Rename this TUI session's tab">
+            <add-to-group group-id="ToolWindowContextMenu" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>

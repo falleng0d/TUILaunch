@@ -22,7 +22,11 @@ import kotlin.math.min
 
 data class ToolWindowSize(val width: Int, val height: Int)
 
-private data class ContentTabHandle(val content: Content)
+private class ContentTabHandle(val content: Content) {
+    override fun equals(other: Any?): Boolean = this === other || (other is ContentTabHandle && other.content === content)
+    override fun hashCode(): Int = System.identityHashCode(content)
+    override fun toString(): String = "ContentTabHandle(${content.displayName})"
+}
 
 private const val MIN_TOOL_WINDOW_WIDTH = 400
 private const val MIN_TOOL_WINDOW_HEIGHT = 250
@@ -32,7 +36,6 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
 
     open fun isVisible(): Boolean = requireToolWindow().isVisible
 
-    /** Pinned = stays open on focus loss. Unpinned (auto-hide) windows hide themselves. */
     open fun isPinned(): Boolean = !requireToolWindow().isAutoHide
 
     open fun show() = requireToolWindow().show(null)
@@ -41,7 +44,7 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
     open fun addTab(component: JComponent, title: String, disposable: Disposable): Any {
         val toolWindow = requireToolWindow()
         val content = ContentFactory.getInstance().createContent(component, title, false)
-        content.isCloseable = false
+        content.isCloseable = true
         Disposer.register(content, disposable)
         toolWindow.contentManager.addContent(content)
         return ContentTabHandle(content)
@@ -55,6 +58,9 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
 
     open fun activeTab(): Any? =
         requireToolWindow().contentManager.selectedContent?.let { ContentTabHandle(it) }
+
+    open fun orderedHandles(): List<Any> =
+        requireToolWindow().contentManager.contents.map { ContentTabHandle(it) }
 
     open fun removeTab(handle: Any) {
         val toolWindow = requireToolWindow()
@@ -107,6 +113,26 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
                 }
             }
         })
+    }
+
+    open fun onTabRemoved(listener: (Any) -> Unit) {
+        val toolWindow = requireToolWindow()
+        val contentManager = toolWindow.contentManager
+        val contentManagerListener = object : ContentManagerListener {
+            override fun contentRemoved(event: ContentManagerEvent) {
+                listener(ContentTabHandle(event.content))
+            }
+        }
+        contentManager.addContentManagerListener(contentManagerListener)
+        Disposer.register(toolWindow.disposable) {
+            contentManager.removeContentManagerListener(contentManagerListener)
+        }
+    }
+
+    open fun handleFor(content: Content): Any = ContentTabHandle(content)
+
+    open fun setTabTitle(handle: Any, title: String) {
+        (handle as ContentTabHandle).content.setDisplayName(title)
     }
 
     private fun canResizeWindowDirectly(): Boolean =

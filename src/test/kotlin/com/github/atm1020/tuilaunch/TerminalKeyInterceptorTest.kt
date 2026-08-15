@@ -11,20 +11,10 @@ import java.awt.event.KeyEvent
 import javax.swing.JPanel
 import javax.swing.KeyStroke
 
-/**
- * A [java.awt.KeyEventDispatcher] returns `true` to mean "I handled this; do NOT dispatch further"
- * — i.e. the terminal never receives the event. So "the terminal must not get the combo" is exactly
- * `dispatchKeyEvent(combo)` returning `true`.
- *
- * For Escape and tab navigation the meaning is inverted: `true` means *we* took over, so the key
- * reaches the TUI (via `sendKey`) or switches a TUI tab instead of being consumed by the IDE.
- */
 class TerminalKeyInterceptorTest {
 
-    /** Stands in for the focused terminal component and is the source of the synthetic key events. */
     private val terminal = JPanel()
 
-    /** A component that is NOT inside the terminal, for the "combo while not focused" case. */
     private val elsewhere = JPanel()
 
     private var switchCount = 0
@@ -35,13 +25,8 @@ class TerminalKeyInterceptorTest {
     private var nextTabCount = 0
     private var previousTabCount = 0
 
-    /** Every (keyCode, modifiers, keyChar) triple forwarded to the child process. */
     private val sentKeys = mutableListOf<Triple<Int, Int, Char>>()
 
-    /**
-     * Sample bindings only. Production resolves these from `ActionManager` because they differ per
-     * keymap; the interceptor just matches whatever list it is handed.
-     */
     private val nextTabShortcut = KeyboardShortcut(KeyStroke.getKeyStroke("alt RIGHT"), null)
     private val previousTabShortcut = KeyboardShortcut(KeyStroke.getKeyStroke("alt LEFT"), null)
 
@@ -113,7 +98,6 @@ class TerminalKeyInterceptorTest {
     @Test
     fun duplicateDeliveryFiresOnce() {
         val dispatcher = newDispatcher()
-        // IntelliJ delivers the same KEY_PRESSED twice (same timestamp). Reuse one event object.
         val event = keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)
         assertTrue(dispatcher.dispatchKeyEvent(event))
         assertTrue(dispatcher.dispatchKeyEvent(event))
@@ -123,25 +107,22 @@ class TerminalKeyInterceptorTest {
     @Test
     fun comboTrailingTypedCharIsSwallowed() {
         val dispatcher = newDispatcher()
-        // The combo's KEY_PRESSED is consumed...
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
-        // ...and so is the trailing KEY_TYPED space, so the terminal never types a space.
         assertTrue(dispatcher.dispatchKeyEvent(keyTyped(' ')))
     }
 
     @Test
     fun typedCharWithoutComboPassesThrough() {
         val dispatcher = newDispatcher()
-        // A typed char with no preceding combo must reach the terminal untouched.
         assertFalse(dispatcher.dispatchKeyEvent(keyTyped('a')))
     }
 
     @Test
     fun keyPressAfterComboStopsSwallowingTyped() {
         val dispatcher = newDispatcher()
-        dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)) // arms swallow
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_A))) // unrelated prefix command is swallowed
-        assertFalse(dispatcher.dispatchKeyEvent(keyTyped('a'))) // its typed char now passes through
+        dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK))
+        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_A)))
+        assertFalse(dispatcher.dispatchKeyEvent(keyTyped('a')))
     }
 
     @Test
@@ -211,14 +192,9 @@ class TerminalKeyInterceptorTest {
         assertEquals(1, switchCount)
     }
 
-    // --- Escape (the platform would otherwise move focus to the editor) ---
-
     @Test
     fun escapeWhileFocusedIsForwardedToTheTui() {
         val dispatcher = newDispatcher()
-        // A real Escape KEY_PRESSED carries the ESC control char, unlike most other keys whose
-        // KEY_PRESSED reports CHAR_UNDEFINED; the interceptor must pass that char through untouched so
-        // JediTermSession's fallback (for keys its encoder has no byte mapping for) has it available.
         val escapeChar = KeyEvent.VK_ESCAPE.toChar()
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_ESCAPE, keyChar = escapeChar)))
         assertEquals(listOf(Triple(KeyEvent.VK_ESCAPE, 0, escapeChar)), sentKeys)
@@ -227,7 +203,6 @@ class TerminalKeyInterceptorTest {
     @Test
     fun duplicateEscapePressIsSentOnce() {
         val dispatcher = newDispatcher()
-        // A missed de-dup would type 0x1B into the CLI twice.
         val event = keyPress(KeyEvent.VK_ESCAPE, keyChar = KeyEvent.VK_ESCAPE.toChar())
         assertTrue(dispatcher.dispatchKeyEvent(event))
         assertTrue(dispatcher.dispatchKeyEvent(event))
@@ -244,7 +219,6 @@ class TerminalKeyInterceptorTest {
     @Test
     fun modifiedEscapeIsLeftToTheIde() {
         val dispatcher = newDispatcher()
-        // shift ESCAPE is HideActiveWindow — the user's keyboard escape hatch out of the terminal.
         assertFalse(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_ESCAPE, KeyEvent.SHIFT_DOWN_MASK)))
         assertTrue(sentKeys.isEmpty())
     }
@@ -252,7 +226,6 @@ class TerminalKeyInterceptorTest {
     @Test
     fun escapeIsNotConsumedWhenTheSessionCannotSend() {
         val dispatcher = newDispatcher(canSendKeys = false)
-        // Without a write path, consuming Escape would make the key vanish; leave the old behaviour.
         assertFalse(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_ESCAPE)))
         assertTrue(sentKeys.isEmpty())
     }
@@ -268,12 +241,9 @@ class TerminalKeyInterceptorTest {
     fun armedPrefixWinsOverEscape() {
         val dispatcher = newDispatcher()
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
-        // Escape is not a prefix command, so it is swallowed as an unknown one — never forwarded.
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_ESCAPE)))
         assertTrue(sentKeys.isEmpty())
     }
-
-    // --- Tab navigation ---
 
     @Test
     fun nextTabShortcutWhileFocusedSwitchesTuiTabs() {
@@ -313,7 +283,6 @@ class TerminalKeyInterceptorTest {
                 KeyboardShortcut(KeyStroke.getKeyStroke("alt RIGHT"), KeyStroke.getKeyStroke("alt UP")),
             ),
         )
-        // We see one keystroke at a time, so claiming the first stroke would break the chord.
         assertFalse(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_RIGHT, KeyEvent.ALT_DOWN_MASK)))
         assertEquals(0, nextTabCount)
     }

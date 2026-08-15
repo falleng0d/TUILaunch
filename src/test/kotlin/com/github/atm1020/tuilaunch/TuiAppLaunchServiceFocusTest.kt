@@ -9,6 +9,7 @@ import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.awt.event.KeyEvent
@@ -66,16 +67,14 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         var showCount = 0
         private var selected: Any? = null
         val tabs = mutableListOf<Any>()
+        val titles = mutableListOf<String>()
+        val disposables = mutableListOf<CheckedDisposable>()
         var size: ToolWindowSize? = null
         val appliedSizes = mutableListOf<ToolWindowSize>()
-        /**
-         * When true, [applySize] fires a resize event while [currentSize] still reports the
-         * pre-resize dimensions, mirroring how a real tool window emits componentResized events
-         * mid-transition when its size is changed programmatically.
-         */
         var emitStaleResizeOnApply = false
         private var sizeChanged: (() -> Unit)? = null
         private var tabSelected: ((Any) -> Unit)? = null
+        private var tabRemoved: ((Any) -> Unit)? = null
 
         override fun isVisible(): Boolean = visible
         override fun isPinned(): Boolean = pinned
@@ -91,7 +90,8 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         override fun addTab(component: JComponent, title: String, disposable: Disposable): Any {
             val handle = Any()
             tabs.add(handle)
-            // ContentManager auto-selects the first content, firing selectionChanged.
+            titles.add(title)
+            (disposable as? CheckedDisposable)?.let { disposables.add(it) }
             if (selected == null) {
                 selected = handle
                 tabSelected?.invoke(handle)
@@ -105,9 +105,22 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         }
 
         override fun activeTab(): Any? = selected
+
+        override fun orderedHandles(): List<Any> = tabs.toList()
+
         override fun removeTab(handle: Any) {
-            tabs.remove(handle)
-            if (selected === handle) selected = null
+            val index = tabs.indexOf(handle)
+            if (index < 0) return
+            tabs.removeAt(index)
+            if (selected === handle) {
+                selected = tabs.getOrNull(index) ?: tabs.getOrNull(index - 1)
+                selected?.let { tabSelected?.invoke(it) }
+            }
+            tabRemoved?.invoke(handle)
+        }
+
+        fun moveTab(from: Int, to: Int) {
+            tabs.add(to, tabs.removeAt(from))
         }
 
         override fun currentSize(): ToolWindowSize? = size
@@ -115,8 +128,6 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         override fun applySize(size: ToolWindowSize) {
             appliedSizes.add(size)
             if (emitStaleResizeOnApply) {
-                // The window has not finished resizing yet: a componentResized event fires while
-                // currentSize() still reports the previous dimensions.
                 sizeChanged?.invoke()
             }
             this.size = size
@@ -130,6 +141,10 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             tabSelected = listener
         }
 
+        override fun onTabRemoved(listener: (Any) -> Unit) {
+            tabRemoved = listener
+        }
+
         fun triggerSizeChanged() {
             sizeChanged?.invoke()
         }
@@ -137,6 +152,19 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         fun triggerTabSelected(handle: Any) {
             tabSelected?.invoke(handle)
         }
+
+        fun triggerTabRemoved(handle: Any) {
+            tabRemoved?.invoke(handle)
+        }
+    }
+
+    private fun launchTabs(count: Int): Pair<TuiAppLaunchService, FakeHost> {
+        val service = TuiAppLaunchService(project)
+        val host = FakeHost()
+        service.host = host
+        service.sessionFactory = FakeFactory(List(count + 2) { FakeSession() })
+        repeat(count) { service.launchNew("claude", "claude") }
+        return service to host
     }
 
     private fun configureApps(vararg apps: TuiAppConfig) {
@@ -205,10 +233,6 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
 
-        // The window is currently sized for "second". The user clicks the "first" tab directly:
-        // the content manager selects it and fires the selection listener, which restores first's
-        // saved size via applySize. The resize event that applySize triggers reports the stale
-        // ("second") dimensions and must NOT be recorded onto "first".
         host.size = ToolWindowSize(1100, 800)
         host.selectTab(host.tabs[0])
 
@@ -231,9 +255,6 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         service.toggle("TUILauncher.second", "second", "second")
         host.appliedSizes.clear()
 
-        // Switching back to the already-open "first" tab via the launcher action. selectTab fires
-        // the selection listener which restores the size; selectTuiTab must not apply it a second
-        // time, or a relative (docked) resize would double the stretch and overshoot.
         service.toggle("TUILauncher.first", "first", "first")
 
         assertEquals(listOf(ToolWindowSize(700, 400)), host.appliedSizes)
@@ -579,5 +600,227 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
         assertEquals(1, host.tabs.size)
+    }
+
+    fun testLaunchNewOpensASecondInstanceOfTheSameAppWithANumberedTitle() {
+        val service = TuiAppLaunchService(project)
+        val host = FakeHost()
+        service.host = host
+        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession()))
+
+        service.launchNew("claude", "claude")
+        val firstHandle = host.activeTab()
+        service.launchNew("claude", "claude")
+        val secondHandle = host.activeTab()
+
+        assertEquals(2, host.tabs.size)
+        assertNotSame(firstHandle, secondHandle)
+        assertEquals(listOf("claude", "claude 1"), host.titles)
+    }
+
+    fun testNextAndPreviousTuiTabCycleThroughMultipleInstancesOfTheSameApp() {
+        val service = TuiAppLaunchService(project)
+        val host = FakeHost()
+        service.host = host
+        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession()))
+
+        service.launchNew("claude", "claude")
+        service.launchNew("claude", "claude")
+        host.selectTab(host.tabs[0])
+
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(host.tabs[1], host.activeTab())
+
+        service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(host.tabs[0], host.activeTab())
+    }
+
+    fun testClosingOneInstanceLeavesTheOtherOpenAndSelectable() {
+        val service = TuiAppLaunchService(project)
+        val host = FakeHost()
+        val firstSession = FakeSession()
+        val secondSession = FakeSession()
+        service.host = host
+        service.sessionFactory = FakeFactory(listOf(firstSession, secondSession))
+
+        service.launchNew("claude", "claude")
+        val remaining = host.activeTab()
+        service.launchNew("claude", "claude")
+
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(listOf(remaining), host.tabs)
+
+        firstSession.focusCount = 0
+        service.focusTui()
+
+        assertSame(remaining, host.activeTab())
+        assertEquals(1, firstSession.focusCount)
+    }
+
+    fun testRenameTabUpdatesTitleAndLaunchNewNumbersAroundIt() {
+        val service = TuiAppLaunchService(project)
+        val host = FakeHost()
+        service.host = host
+        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession(), FakeSession()))
+
+        service.launchNew("claude", "claude")
+        service.launchNew("helper", "helper")
+        val helperHandle = host.tabs[1]
+
+        service.renameTab(helperHandle, "claude 1")
+        service.launchNew("claude", "claude")
+
+        assertEquals(listOf("claude", "helper", "claude 2"), host.titles)
+    }
+
+    fun testNextTuiTabWalksTheStripLeftToRightAndWrapsPastTheLastTab() {
+        val (service, host) = launchTabs(3)
+        val (first, second, third) = Triple(host.tabs[0], host.tabs[1], host.tabs[2])
+        host.selectTab(first)
+
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(second, host.activeTab())
+
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(third, host.activeTab())
+
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(first, host.activeTab())
+    }
+
+    fun testPreviousTuiTabWalksTheStripRightToLeftAndWrapsPastTheFirstTab() {
+        val (service, host) = launchTabs(3)
+        val (first, second, third) = Triple(host.tabs[0], host.tabs[1], host.tabs[2])
+        host.selectTab(first)
+
+        service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(third, host.activeTab())
+
+        service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(second, host.activeTab())
+
+        service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(first, host.activeTab())
+    }
+
+    fun testWrappingBackwardThenGoingForwardStaysInStripOrder() {
+        val (service, host) = launchTabs(3)
+        val (first, second, third) = Triple(host.tabs[0], host.tabs[1], host.tabs[2])
+        host.selectTab(first)
+
+        service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(third, host.activeTab())
+
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(first, host.activeTab())
+
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(second, host.activeTab())
+    }
+
+    fun testTwoNextPressesInOneEventTurnAdvanceTwoTabs() {
+        val (service, host) = launchTabs(3)
+        val (first, _, third) = Triple(host.tabs[0], host.tabs[1], host.tabs[2])
+        host.selectTab(first)
+
+        service.nextTuiTab()
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(third, host.activeTab())
+    }
+
+    fun testTraversalFollowsTheStripAfterATabIsDragged() {
+        val (service, host) = launchTabs(3)
+        val (first, second, third) = Triple(host.tabs[0], host.tabs[1], host.tabs[2])
+
+        host.moveTab(0, 1)
+        host.selectTab(first)
+
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(third, host.activeTab())
+
+        host.selectTab(first)
+        service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertSame(second, host.activeTab())
+    }
+
+    fun testTraversalImmediatelyAfterACloseUsesTheRemainingStrip() {
+        val (service, host) = launchTabs(4)
+        val tabs = host.tabs.toList()
+        host.selectTab(tabs[1])
+
+        service.closeActiveTui()
+        service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(listOf(tabs[0], tabs[2], tabs[3]), host.tabs)
+        assertSame(tabs[0], host.activeTab())
+    }
+
+    fun testPlatformInitiatedRemovalForgetsTheSession() {
+        val (service, host) = launchTabs(2)
+        val first = host.tabs[0]
+
+        host.removeTab(host.tabs[1])
+
+        assertEquals(listOf(first), host.tabs)
+        service.launchNew("claude", "claude")
+        assertEquals("claude 1", host.titles.last())
+    }
+
+    fun testPlatformInitiatedRemovalDisposesOnlyThatSession() {
+        val (_, host) = launchTabs(2)
+
+        host.removeTab(host.tabs[1])
+
+        assertTrue(host.disposables[1].isDisposed)
+        assertFalse(host.disposables[0].isDisposed)
+    }
+
+    fun testClosingEveryTabFromThePlatformLeavesNoSessionsBehind() {
+        val (service, host) = launchTabs(3)
+
+        host.tabs.toList().forEach { host.removeTab(it) }
+
+        assertTrue(host.tabs.isEmpty())
+        assertTrue(host.disposables.all { it.isDisposed })
+        host.showCount = 0
+        service.focusTui()
+        assertEquals(0, host.showCount)
+    }
+
+    fun testReconcilingAnAlreadyClosedTabIsANoOp() {
+        val (service, host) = launchTabs(2)
+        val first = host.tabs[0]
+        val second = host.tabs[1]
+        host.selectTab(second)
+
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertEquals(listOf(first), host.tabs)
+
+        host.triggerTabRemoved(second)
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(listOf(first), host.tabs)
+        assertFalse(host.disposables[0].isDisposed)
+        service.focusTui()
+        assertSame(first, host.activeTab())
     }
 }

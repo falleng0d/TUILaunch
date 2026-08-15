@@ -18,25 +18,15 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
 
     data class State(
         var tuiApps: MutableList<TuiAppConfig> = mutableListOf(),
-        /** Enables tmux-style prefix keybindings inside TUI terminals. */
         var tmuxKeybindingsEnabled: Boolean = true,
-        /** Modifier for the tmux-style escape prefix: "CTRL" or "ALT". */
         var escapeModifier: String = "CTRL",
-        /** Prefix key (an AWT VK_ code) combined with [escapeModifier]. Null means unassigned. */
         var escapeKeyCode: Int? = null,
-        /** Key pressed after the prefix to return focus to the editor. Null means unassigned. */
         var focusEditorKeyCode: Int? = null,
-        /** Key pressed after the prefix to close the active TUI tab. Null means unassigned. */
         var closeTuiKeyCode: Int? = null,
-        /** Key pressed after the prefix to select the next TUI tab. Null means unassigned. */
         var nextTuiKeyCode: Int? = null,
-        /** Key pressed after the prefix to select the previous TUI tab. Null means unassigned. */
         var previousTuiKeyCode: Int? = null,
-        /** Key pressed after the prefix to show or hide the TUILaunch tool window. Null means unassigned. */
         var toggleToolWindowKeyCode: Int? = null,
-        /** Key pressed after the prefix to select the next TUI tab without moving focus to it. Null means unassigned. */
         var nextTuiWithoutFocusKeyCode: Int? = null,
-        /** Key pressed after the prefix to select the previous TUI tab without moving focus to it. Null means unassigned. */
         var previousTuiWithoutFocusKeyCode: Int? = null,
     )
 
