@@ -74,6 +74,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         var emitStaleResizeOnApply = false
         private var sizeChanged: (() -> Unit)? = null
         private var tabSelected: ((Any) -> Unit)? = null
+        private var tabRemoving: ((Any) -> Unit)? = null
         private var tabRemoved: ((Any) -> Unit)? = null
 
         override fun isVisible(): Boolean = visible
@@ -111,12 +112,15 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         override fun removeTab(handle: Any) {
             val index = tabs.indexOf(handle)
             if (index < 0) return
+            tabRemoving?.invoke(handle)
+            val removingSelectedTab = selected === handle
+            if (removingSelectedTab) selected = null
             tabs.removeAt(index)
-            if (selected === handle) {
+            tabRemoved?.invoke(handle)
+            if (removingSelectedTab) {
                 selected = tabs.getOrNull(index) ?: tabs.getOrNull(index - 1)
                 selected?.let { tabSelected?.invoke(it) }
             }
-            tabRemoved?.invoke(handle)
         }
 
         fun moveTab(from: Int, to: Int) {
@@ -141,8 +145,9 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             tabSelected = listener
         }
 
-        override fun onTabRemoved(listener: (Any) -> Unit) {
-            tabRemoved = listener
+        override fun onTabRemoved(beforeRemoval: (Any) -> Unit, afterRemoval: (Any) -> Unit) {
+            tabRemoving = beforeRemoval
+            tabRemoved = afterRemoval
         }
 
         fun triggerSizeChanged() {
@@ -738,5 +743,157 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         assertFalse(host.disposables[0].isDisposed)
         service.focusTui()
         assertSame(first, host.activeTab())
+    }
+
+    fun testPlatformInitiatedRemovalRecordsTheClosedTabSize() {
+        configureApps(TuiAppConfig(name = "htop", command = "htop"))
+        val (service, host) = newService(FakeFactory(FakeSession()))
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        host.size = ToolWindowSize(940, 520)
+
+        host.removeTab(host.tabs.single())
+
+        val app = TuiLauncherSettings.getInstance().state.tuiApps.single()
+        assertEquals(940, app.windowWidth)
+        assertEquals(520, app.windowHeight)
+    }
+
+    fun testPlatformInitiatedRemovalRecordsTheClosedTabSizeWhenOtherTabsRemain() {
+        configureApps(
+            TuiAppConfig(name = "first", command = "first"),
+            TuiAppConfig(name = "second", command = "second"),
+        )
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
+
+        service.toggle("TUILauncher.first", "first", "first")
+        service.toggle("TUILauncher.second", "second", "second")
+        host.size = ToolWindowSize(1180, 640)
+
+        host.removeTab(host.tabs[1])
+
+        val second = TuiLauncherSettings.getInstance().state.tuiApps.first { it.name == "second" }
+        assertEquals(1180, second.windowWidth)
+        assertEquals(640, second.windowHeight)
+    }
+
+    fun testPlatformInitiatedRemovalOfABackgroundTabDoesNotRecordTheWindowSizeForIt() {
+        configureApps(
+            TuiAppConfig(name = "first", command = "first"),
+            TuiAppConfig(name = "second", command = "second"),
+        )
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
+
+        service.toggle("TUILauncher.first", "first", "first")
+        service.toggle("TUILauncher.second", "second", "second")
+        host.size = ToolWindowSize(1180, 640)
+
+        host.removeTab(host.tabs[0])
+
+        val first = TuiLauncherSettings.getInstance().state.tuiApps.first { it.name == "first" }
+        assertNull(first.windowWidth)
+        assertNull(first.windowHeight)
+    }
+
+    fun testPlatformInitiatedRemovalKeepsTheSavedSizeWhenTheWindowSizeIsUnreadable() {
+        configureApps(TuiAppConfig(name = "htop", command = "htop", windowWidth = 800, windowHeight = 450))
+        val (service, host) = newService(FakeFactory(FakeSession()))
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        host.size = null
+
+        host.removeTab(host.tabs.single())
+
+        val app = TuiLauncherSettings.getInstance().state.tuiApps.single()
+        assertEquals(800, app.windowWidth)
+        assertEquals(450, app.windowHeight)
+    }
+
+    fun testPlatformInitiatedRemovalOfTheLastTabReturnsFocusToEditor() {
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        service.activeToolWindowIdProvider = { "Project" }
+        var editorFocusCount = 0
+        service.editorFocusRequest = { editorFocusCount++ }
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        host.removeTab(host.tabs.single())
+
+        assertEquals(1, editorFocusCount)
+    }
+
+    fun testPlatformInitiatedRemovalKeepsFocusInTheToolWindowWhenOtherTabsRemain() {
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
+        service.activeToolWindowIdProvider = { "Project" }
+        var editorFocusCount = 0
+        service.editorFocusRequest = { editorFocusCount++ }
+
+        service.toggle("TUILauncher.first", "first", "first")
+        service.toggle("TUILauncher.second", "second", "second")
+        host.removeTab(host.tabs[1])
+
+        assertEquals(0, editorFocusCount)
+        assertSame(host.tabs.single(), host.activeTab())
+    }
+
+    fun testPlatformInitiatedRemovalOfTheLastTabOpenedFromTuiKeepsFocusOutOfTheEditor() {
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        service.activeToolWindowIdProvider = { TUI_TOOL_WINDOW_ID }
+        var editorFocusCount = 0
+        service.editorFocusRequest = { editorFocusCount++ }
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        host.removeTab(host.tabs.single())
+
+        assertEquals(0, editorFocusCount)
+    }
+
+    fun testClosingEveryTabFromThePlatformReturnsFocusToTheEditorOnlyOnce() {
+        val (service, host) = newService(FakeFactory(List(3) { FakeSession() }))
+        service.activeToolWindowIdProvider = { "Project" }
+        var editorFocusCount = 0
+        service.editorFocusRequest = { editorFocusCount++ }
+
+        repeat(3) { service.launchNew("claude", "claude") }
+        host.tabs.toList().forEach { host.removeTab(it) }
+
+        assertTrue(host.tabs.isEmpty())
+        assertEquals(1, editorFocusCount)
+    }
+
+    fun testClosingThroughOurOwnActionRecordsSizeAndReturnsFocusExactlyOnce() {
+        configureApps(TuiAppConfig(name = "htop", command = "htop"))
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        service.activeToolWindowIdProvider = { "Project" }
+        var editorFocusCount = 0
+        service.editorFocusRequest = { editorFocusCount++ }
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        host.size = ToolWindowSize(960, 540)
+        service.closeActiveTui()
+        host.size = ToolWindowSize(111, 222)
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        val app = TuiLauncherSettings.getInstance().state.tuiApps.single()
+        assertEquals(960, app.windowWidth)
+        assertEquals(540, app.windowHeight)
+        assertEquals(1, editorFocusCount)
+        assertTrue(host.tabs.isEmpty())
+    }
+
+    fun testReplayingARemovalEventAfterOurOwnCloseDoesNotReturnFocusAgain() {
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        service.activeToolWindowIdProvider = { "Project" }
+        var editorFocusCount = 0
+        service.editorFocusRequest = { editorFocusCount++ }
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        val handle = host.tabs.single()
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        host.triggerTabRemoved(handle)
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(1, editorFocusCount)
     }
 }

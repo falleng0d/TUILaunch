@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Closing a session with the tab's X button or the tab context menu now remembers the tool window
+  size for that app, the same way the close shortcut already did.
+- Closing the last session with the mouse now returns focus to the editor when the session was
+  started from the editor. Closing a session while others remain leaves focus on the tab the tool
+  window selects next.
+
 ## [0.3.0] - 2026-08-15
 
 ### Added

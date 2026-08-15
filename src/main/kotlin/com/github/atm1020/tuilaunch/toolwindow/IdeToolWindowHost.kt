@@ -110,12 +110,16 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
         })
     }
 
-    open fun onTabRemoved(listener: (Any) -> Unit) {
+    open fun onTabRemoved(beforeRemoval: (Any) -> Unit, afterRemoval: (Any) -> Unit) {
         val toolWindow = requireToolWindow()
         val contentManager = toolWindow.contentManager
         val contentManagerListener = object : ContentManagerListener {
+            override fun contentRemoveQuery(event: ContentManagerEvent) {
+                beforeRemoval(ContentTabHandle(event.content))
+            }
+
             override fun contentRemoved(event: ContentManagerEvent) {
-                listener(ContentTabHandle(event.content))
+                afterRemoval(ContentTabHandle(event.content))
             }
         }
         contentManager.addContentManagerListener(contentManagerListener)

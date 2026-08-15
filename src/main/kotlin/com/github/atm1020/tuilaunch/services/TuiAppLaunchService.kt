@@ -64,6 +64,7 @@ class TuiAppLaunchService(private val project: Project) {
 
     private val closingSessions = mutableSetOf<String>()
     private var sessionSequence = 0
+    private var activeSessionIdBeingRemoved: String? = null
 
     private fun tabsNotClosing(): Map<String, OpenTab> =
         tabsBySessionId.filterKeys { it !in closingSessions }
@@ -85,7 +86,10 @@ class TuiAppLaunchService(private val project: Project) {
         hostListenersInstalled = true
         host.onSizeChanged { recordActiveTabSize(host) }
         host.onTabSelected { handle -> onTabSelected(host, handle) }
-        host.onTabRemoved { handle -> forgetRemovedTab(handle) }
+        host.onTabRemoved(
+            beforeRemoval = { handle -> onTabRemoving(host, handle) },
+            afterRemoval = { handle -> forgetRemovedTab(handle) },
+        )
     }
 
     private fun tabFor(handle: Any): OpenTab? = tabsBySessionId.values.firstOrNull { it.handle == handle }
@@ -331,10 +335,23 @@ class TuiAppLaunchService(private val project: Project) {
         Disposer.dispose(tab.disposable)
     }
 
+    private fun onTabRemoving(host: IdeToolWindowHost, handle: Any) {
+        activeSessionIdBeingRemoved = null
+        val tab = tabFor(handle) ?: return
+        if (host.activeTab() != tab.handle) return
+        activeSessionIdBeingRemoved = tab.sessionId
+        host.currentSize()?.let { storeWindowSize(tab.appName, it) }
+    }
+
     private fun forgetRemovedTab(handle: Any) {
         val tab = tabFor(handle) ?: return
+        val removedTabWasActive = activeSessionIdBeingRemoved == tab.sessionId
+        activeSessionIdBeingRemoved = null
         forgetTab(tab.sessionId)
         Disposer.dispose(tab.disposable)
+        val lastTuiClosedAfterComingFromEditor =
+            removedTabWasActive && !tab.openedFromTui && tabsNotClosing().isEmpty()
+        if (lastTuiClosedAfterComingFromEditor) focusEditor()
     }
 
     private fun forgetTab(sessionId: String) {
