@@ -24,6 +24,10 @@ class TuiAppLaunchService(private val project: Project) {
     var sessionFactory: TerminalSessionFactory = JediTermSessionFactory(
         project = project,
         prefixCommandActions = { prefixCommandActions() },
+        // The focus-keeping variants: the terminal we are switching away from is about to be hidden,
+        // so focus has to follow to the newly selected tab or it would be left nowhere.
+        onNextTab = { nextTuiTab() },
+        onPreviousTab = { previousTuiTab() },
     )
     var host: IdeToolWindowHost? = null
     var activeToolWindowIdProvider: () -> String? = {

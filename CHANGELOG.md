@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Escape now reaches the running TUI app instead of moving focus to the editor.
+- The IDE's "Select Next/Previous Tab" shortcuts now switch TUILaunch tabs while a TUI terminal is
+  focused, and are left to the IDE everywhere else.
+
 ## [0.1.0] - 2026-07-11
 
 ### Added
