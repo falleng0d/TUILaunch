@@ -39,6 +39,7 @@ class TuiLauncherConfiguration : Configurable {
     private val tmuxShortcutComponents = mutableListOf<JComponent>()
     private var shortcutsTable: JBTable? = null
     private var shortcutsModel: ShortcutTableModel? = null
+    private var clearShortcutButton: JButton? = null
 
     private var escapeKeyCode: Int? = settings.state.escapeKeyCode
     private var focusEditorKeyCode: Int? = settings.state.focusEditorKeyCode
@@ -148,6 +149,7 @@ class TuiLauncherConfiguration : Configurable {
             fillsViewportHeight = true
             tableHeader.reorderingAllowed = false
             selectionModel.selectionMode = ListSelectionModel.SINGLE_SELECTION
+            selectionModel.addListSelectionListener { updateClearShortcutButtonEnabled() }
             preferredScrollableViewportSize = Dimension(620, 170)
             emptyText.text = "Select an action and press a key to assign a shortcut"
             addKeyListener(object : KeyAdapter() {
@@ -174,6 +176,7 @@ class TuiLauncherConfiguration : Configurable {
         val clearButton = JButton("Remove Shortcut").apply {
             addActionListener { clearSelectedShortcut() }
         }
+        clearShortcutButton = clearButton
         combo.addActionListener { shortcutsModel?.fireTableDataChanged() }
 
         val shortcutPanel = JPanel(BorderLayout(8, 6)).apply {
@@ -195,7 +198,9 @@ class TuiLauncherConfiguration : Configurable {
 
     private fun selectedShortcutModelRow(): Int? {
         val table = shortcutsTable ?: return null
-        return table.convertRowIndexToModel(table.selectedRow)
+        val selectedViewRow = table.selectedRow
+        if (selectedViewRow < 0) return null
+        return table.convertRowIndexToModel(selectedViewRow)
     }
 
     private fun assignSelectedShortcut(keyCode: Int) {
@@ -220,6 +225,12 @@ class TuiLauncherConfiguration : Configurable {
     private fun updateTmuxShortcutComponentsEnabled() {
         val enabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true
         tmuxShortcutComponents.forEach { it.isEnabled = enabled }
+        updateClearShortcutButtonEnabled()
+    }
+
+    private fun updateClearShortcutButtonEnabled() {
+        val tmuxEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true
+        clearShortcutButton?.isEnabled = tmuxEnabled && selectedShortcutModelRow() != null
     }
 
     private fun shortcutRow(vararg components: JComponent): JPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 2)).apply {
@@ -325,7 +336,23 @@ class TuiLauncherConfiguration : Configurable {
         keyCode == KeyEvent.VK_SHIFT ||
         keyCode == KeyEvent.VK_META
 
-    override fun isModified(): Boolean = true
+    override fun isModified(): Boolean = tuiLauncherPanel != null && editedState() != settings.state
+
+    private fun editedState(): TuiLauncherSettings.State = settings.state.copy(
+        tuiApps = tableModel?.snapshot() ?: settings.state.tuiApps,
+        tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true,
+        escapeModifier = selectedEscapeModifier(),
+        escapeKeyCode = escapeKeyCode,
+        focusEditorKeyCode = focusEditorKeyCode,
+        closeTuiKeyCode = closeTuiKeyCode,
+        nextTuiKeyCode = nextTuiKeyCode,
+        previousTuiKeyCode = previousTuiKeyCode,
+        toggleToolWindowKeyCode = toggleToolWindowKeyCode,
+        nextTuiWithoutFocusKeyCode = nextTuiWithoutFocusKeyCode,
+        previousTuiWithoutFocusKeyCode = previousTuiWithoutFocusKeyCode,
+    )
+
+    private fun selectedEscapeModifier(): String = if (modifierCombo?.selectedItem == "Alt") "ALT" else "CTRL"
 
     override fun apply() {
         appsTable?.cellEditor?.stopCellEditing()
@@ -336,7 +363,7 @@ class TuiLauncherConfiguration : Configurable {
         unregisterRemovedActions(newApps)
         settings.state.tuiApps = newApps
         settings.state.tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true
-        settings.state.escapeModifier = if (modifierCombo?.selectedItem == "Alt") "ALT" else "CTRL"
+        settings.state.escapeModifier = selectedEscapeModifier()
         settings.state.escapeKeyCode = escapeKeyCode
         settings.state.focusEditorKeyCode = focusEditorKeyCode
         settings.state.closeTuiKeyCode = closeTuiKeyCode

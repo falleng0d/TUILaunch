@@ -167,6 +167,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `NextTab`/`PreviousTab` keystrokes differ across the default, macOS and system-shortcut keymaps, so resolve them from `ActionManager` at event time rather than hardcoding them.
 - A `KeyEventDispatcher` sees one keystroke at a time and cannot arbitrate a chord, so two-stroke shortcuts must be ignored rather than matched on their first stroke.
 - `ToolWindowTabRenameActionBase` hardcodes `Balloon.Position.above`, which is wrong for a bottom-anchored tool window.
+- `JTable.getSelectedRow` returns -1 when nothing is selected, and `convertRowIndexToModel` passes that -1 straight through when no row sorter is installed, so an empty selection has to be rejected before the index is used.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

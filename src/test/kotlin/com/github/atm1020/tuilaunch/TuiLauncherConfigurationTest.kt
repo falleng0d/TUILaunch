@@ -8,8 +8,11 @@ import com.intellij.openapi.options.ConfigurationException
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.awt.Component
 import java.awt.Container
+import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
+import javax.swing.JButton
 import javax.swing.JCheckBox
+import javax.swing.JComboBox
 import javax.swing.JPanel
 import javax.swing.JTable
 
@@ -19,6 +22,8 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         super.setUp()
         TuiLauncherSettings.getInstance().state.apply {
             tuiApps.clear()
+            tmuxKeybindingsEnabled = true
+            escapeModifier = "CTRL"
             escapeKeyCode = null
             focusEditorKeyCode = null
             closeTuiKeyCode = null
@@ -139,6 +144,178 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertApplyRejects(configurable, "command cannot be empty")
     }
 
+    fun testClearingShortcutWithoutSelectionLeavesShortcutsUntouched() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.escapeKeyCode = KeyEvent.VK_B
+
+        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val shortcutTable = findShortcutTable(component)!!
+
+        assertEquals(-1, shortcutTable.selectedRow)
+        pressKeyOn(shortcutTable, KeyEvent.VK_DELETE)
+
+        assertEquals("Ctrl+B", shortcutTable.model.getValueAt(0, 1))
+    }
+
+    fun testAssigningShortcutWithoutSelectionLeavesShortcutsUntouched() {
+        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val shortcutTable = findShortcutTable(component)!!
+
+        assertEquals(-1, shortcutTable.selectedRow)
+        pressKeyOn(shortcutTable, KeyEvent.VK_A)
+
+        repeat(shortcutTable.rowCount) { row ->
+            assertEquals("Not set", shortcutTable.model.getValueAt(row, 1))
+        }
+    }
+
+    fun testRemoveShortcutButtonIsDisabledWithoutSelection() {
+        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val shortcutTable = findShortcutTable(component)!!
+        val removeButton = findButton(component, "Remove Shortcut")!!
+
+        assertFalse(removeButton.isEnabled)
+
+        shortcutTable.selectionModel.setSelectionInterval(1, 1)
+        assertTrue(removeButton.isEnabled)
+
+        shortcutTable.selectionModel.clearSelection()
+        assertFalse(removeButton.isEnabled)
+    }
+
+    fun testConfigurableWithoutComponentIsNotModified() {
+        assertFalse(TuiLauncherConfiguration().isModified())
+    }
+
+    fun testUneditedPanelIsNotModified() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.escapeKeyCode = KeyEvent.VK_B
+        settings.state.closeTuiKeyCode = KeyEvent.VK_X
+        settings.state.escapeModifier = "ALT"
+        settings.state.tuiApps.add(
+            TuiAppConfig(
+                name = "lazygit",
+                command = "lazygit",
+                options = "--all",
+                windowWidth = 400,
+                windowHeight = 300,
+                shortcutKeyCode = KeyEvent.VK_G,
+            )
+        )
+
+        val configurable = TuiLauncherConfiguration()
+        configurable.createComponent()
+        configurable.reset()
+
+        assertFalse(configurable.isModified())
+    }
+
+    fun testRenamedAppIsModified() {
+        val (configurable, component) = configurableWithApp("lazygit")
+
+        appsModelOf(component).setValueAt("renamed", 0, 0)
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testChangedWindowSizeIsModified() {
+        val (configurable, component) = configurableWithApp("lazygit")
+
+        appsModelOf(component).appAt(0).windowWidth = 640
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testReorderedAppsAreModified() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.tuiApps.add(TuiAppConfig(name = "alpha", command = "alpha"))
+        settings.state.tuiApps.add(TuiAppConfig(name = "beta", command = "beta"))
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val appsModel = findAppsTable(component)!!.model as TuiAppTableModel
+
+        val movedApp = appsModel.appAt(0).copy()
+        appsModel.removeRow(0)
+        appsModel.addRow(movedApp)
+
+        assertEquals(listOf("beta", "alpha"), appsModel.snapshot().map { it.name })
+        assertTrue(configurable.isModified())
+    }
+
+    fun testAssignedShortcutIsModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val shortcutTable = findShortcutTable(component)!!
+
+        shortcutTable.selectionModel.setSelectionInterval(1, 1)
+        pressKeyOn(shortcutTable, KeyEvent.VK_F)
+
+        assertEquals("F", shortcutTable.model.getValueAt(1, 1))
+        assertTrue(configurable.isModified())
+    }
+
+    fun testAssignedAppShortcutIsModified() {
+        val (configurable, component) = configurableWithApp("lazygit")
+        val shortcutTable = findShortcutTable(component)!!
+
+        shortcutTable.selectionModel.setSelectionInterval(8, 8)
+        pressKeyOn(shortcutTable, KeyEvent.VK_G)
+
+        assertEquals("G", shortcutTable.model.getValueAt(8, 1))
+        assertTrue(configurable.isModified())
+    }
+
+    fun testToggledTmuxCheckBoxIsModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, "Enable tmux-like prefix keybindings")!!.isSelected = false
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testChangedPrefixModifierIsModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        findComponent<JComboBox<*>>(component) { it.itemCount == 2 }!!.selectedItem = "Alt"
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testAppliedChangesAreNoLongerModified() {
+        val (configurable, component) = configurableWithApp("lazygit")
+        val shortcutTable = findShortcutTable(component)!!
+
+        appsModelOf(component).setValueAt("lazydocker", 0, 0)
+        shortcutTable.selectionModel.setSelectionInterval(1, 1)
+        pressKeyOn(shortcutTable, KeyEvent.VK_F)
+        assertTrue(configurable.isModified())
+
+        configurable.apply()
+
+        assertFalse(configurable.isModified())
+        assertEquals("lazydocker", TuiLauncherSettings.getInstance().state.tuiApps.single().name)
+        assertEquals(KeyEvent.VK_F, TuiLauncherSettings.getInstance().state.focusEditorKeyCode)
+    }
+
+    private fun configurableWithApp(name: String): Pair<TuiLauncherConfiguration, JPanel> {
+        TuiLauncherSettings.getInstance().state.tuiApps.add(TuiAppConfig(name = name, command = name))
+        val configurable = TuiLauncherConfiguration()
+        return configurable to (configurable.createComponent() as JPanel)
+    }
+
+    private fun appsModelOf(component: JPanel): TuiAppTableModel =
+        findAppsTable(component)!!.model as TuiAppTableModel
+
+    private fun pressKeyOn(table: JTable, keyCode: Int) {
+        val event = KeyEvent(table, KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0, keyCode, KeyEvent.CHAR_UNDEFINED)
+        val shortcutKeyListeners = table.keyListeners.filterIsInstance<KeyAdapter>()
+        assertTrue(shortcutKeyListeners.isNotEmpty())
+        shortcutKeyListeners.forEach { it.keyPressed(event) }
+    }
+
     private fun assertApplyRejects(configurable: TuiLauncherConfiguration, expectedMessagePart: String) {
         try {
             configurable.apply()
@@ -163,6 +340,9 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     private fun findCheckBox(container: Container, text: String): JCheckBox? =
         findComponent<JCheckBox>(container) { it.text == text }
+
+    private fun findButton(container: Container, text: String): JButton? =
+        findComponent<JButton>(container) { it.text == text }
 
     private fun findAppsTable(container: Container): JTable? =
         findComponent<JTable>(container) { it.columnCount == 4 }
