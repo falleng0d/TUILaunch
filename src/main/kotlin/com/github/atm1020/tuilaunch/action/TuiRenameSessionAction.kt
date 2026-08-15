@@ -53,7 +53,7 @@ class TuiRenameSessionAction : ToolWindowContextMenuActionBase() {
     }
 
     private fun showRenameBalloon(anchor: Component, content: Content, project: Project) {
-        val textField = JBTextField(contentDisplayNameToEdit(content))
+        val textField = JBTextField(content.displayName.orEmpty())
         textField.selectAll()
 
         val label = JBLabel("New session name:")
@@ -111,9 +111,7 @@ class TuiRenameSessionAction : ToolWindowContextMenuActionBase() {
         balloon.show(point, Balloon.Position.below)
     }
 
-    private fun contentDisplayNameToEdit(content: Content): String = content.displayName.orEmpty()
-
-    fun applyContentDisplayName(content: Content, project: Project, newContentName: String) {
+    private fun applyContentDisplayName(content: Content, project: Project, newContentName: String) {
         val service = project.service<TuiAppLaunchService>()
         val host = service.host
             ?: IdeToolWindowHost(ToolWindowManager.getInstance(project).getToolWindow(TUI_TOOL_WINDOW_ID))

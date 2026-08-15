@@ -2,7 +2,6 @@ package com.github.atm1020.tuilaunch.services
 
 import com.github.atm1020.tuilaunch.action.DynamicUserAction
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
-import com.github.atm1020.tuilaunchmodel.TuiAppTableModel
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.Constraints
 import com.intellij.openapi.actionSystem.DefaultActionGroup
@@ -14,7 +13,7 @@ import com.intellij.openapi.components.*
     storages = [Storage("tuiLauncherSettings.xml")]
 )
 class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> {
-    private var settingsState = TuiLauncherSettings.State()
+    private var settingsState = State()
 
     data class State(
         var tuiApps: MutableList<TuiAppConfig> = mutableListOf(),
@@ -30,7 +29,7 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         var previousTuiWithoutFocusKeyCode: Int? = null,
     )
 
-    override fun loadState(state: TuiLauncherSettings.State) {
+    override fun loadState(state: State) {
         settingsState = state
     }
 
@@ -42,51 +41,42 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         fun getInstance(): TuiLauncherSettings = service()
     }
 
-    override fun getState(): TuiLauncherSettings.State {
-        return settingsState
-    }
+    override fun getState(): State = settingsState
 
     fun loadActions() {
-        val tableModel = TuiAppTableModel(settingsState.tuiApps)
-        tableModel.let { model ->
-            val actionManger = ActionManager.getInstance()
-            val tuiLaunchGroup = getOrCreateTuiLaunchGroup(actionManger)
-            for (i in 0..<model.rowCount) {
-                val name = model.getValueAt(i, 0)
-                val command = model.getValueAt(i, 1)
-                val actionId = model.getValueAt(i, 3).toString()
-                val existingAction = actionManger.getAction(actionId)
-                if (existingAction is DynamicUserAction) {
-                    existingAction.update(command.toString(), name.toString())
-                } else {
-                    if (existingAction != null) unregisterAction(actionId)
-                    val action = DynamicUserAction(actionId, command.toString(), name.toString())
-                    actionManger.registerAction(actionId, action)
-                    tuiLaunchGroup.add(action, Constraints.LAST)
-                }
+        val actionManager = ActionManager.getInstance()
+        val tuiLaunchGroup = getOrCreateTuiLaunchGroup(actionManager)
+        settingsState.tuiApps.forEach { app ->
+            val actionId = ACTION_ID_PREFIX + app.name
+            val existingAction = actionManager.getAction(actionId)
+            if (existingAction is DynamicUserAction) {
+                existingAction.update(app.command, app.name)
+            } else {
+                if (existingAction != null) unregisterAction(actionId)
+                val action = DynamicUserAction(actionId, app.command, app.name)
+                actionManager.registerAction(actionId, action)
+                tuiLaunchGroup.add(action, Constraints.LAST)
             }
         }
     }
 
     fun unregisterAction(actionId: String) {
-        val actionManger = ActionManager.getInstance()
-        val action = actionManger.getAction(actionId) ?: return
-        getTuiLaunchGroup(actionManger)?.remove(action)
-        (actionManger.getAction(TOOLS_MENU_ID) as? DefaultActionGroup)?.remove(action)
-        actionManger.unregisterAction(actionId)
+        val actionManager = ActionManager.getInstance()
+        val action = actionManager.getAction(actionId) ?: return
+        getTuiLaunchGroup(actionManager)?.remove(action)
+        (actionManager.getAction(TOOLS_MENU_ID) as? DefaultActionGroup)?.remove(action)
+        actionManager.unregisterAction(actionId)
     }
 
-    private fun getOrCreateTuiLaunchGroup(actionManger: ActionManager): DefaultActionGroup {
-        getTuiLaunchGroup(actionManger)?.let { return it }
+    private fun getOrCreateTuiLaunchGroup(actionManager: ActionManager): DefaultActionGroup {
+        getTuiLaunchGroup(actionManager)?.let { return it }
 
         val group = DefaultActionGroup("TUILaunch", true)
-        actionManger.registerAction(TUI_LAUNCH_GROUP_ID, group)
-        (actionManger.getAction(TOOLS_MENU_ID) as? DefaultActionGroup)?.add(group, Constraints.LAST)
+        actionManager.registerAction(TUI_LAUNCH_GROUP_ID, group)
+        (actionManager.getAction(TOOLS_MENU_ID) as? DefaultActionGroup)?.add(group, Constraints.LAST)
         return group
     }
 
-    private fun getTuiLaunchGroup(actionManger: ActionManager): DefaultActionGroup? {
-        return actionManger.getAction(TUI_LAUNCH_GROUP_ID) as? DefaultActionGroup
-    }
-
+    private fun getTuiLaunchGroup(actionManager: ActionManager): DefaultActionGroup? =
+        actionManager.getAction(TUI_LAUNCH_GROUP_ID) as? DefaultActionGroup
 }

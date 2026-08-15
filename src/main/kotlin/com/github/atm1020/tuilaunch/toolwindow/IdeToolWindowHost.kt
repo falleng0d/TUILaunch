@@ -51,9 +51,7 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
     }
 
     open fun selectTab(handle: Any) {
-        val toolWindow = requireToolWindow()
-        val content = (handle as ContentTabHandle).content
-        toolWindow.contentManager.setSelectedContent(content, true)
+        requireToolWindow().contentManager.setSelectedContent(contentOf(handle), true)
     }
 
     open fun activeTab(): Any? =
@@ -63,14 +61,11 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
         requireToolWindow().contentManager.contents.map { ContentTabHandle(it) }
 
     open fun removeTab(handle: Any) {
-        val toolWindow = requireToolWindow()
-        val content = (handle as ContentTabHandle).content
-        toolWindow.contentManager.removeContent(content, true)
+        requireToolWindow().contentManager.removeContent(contentOf(handle), true)
     }
 
     open fun currentSize(): ToolWindowSize? {
-        val toolWindow = requireToolWindow()
-        val component = toolWindow.component
+        val component = requireToolWindow().component
         val size = if (canResizeWindowDirectly()) {
             SwingUtilities.getWindowAncestor(component)?.size ?: component.size
         } else {
@@ -132,11 +127,15 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
     open fun handleFor(content: Content): Any = ContentTabHandle(content)
 
     open fun setTabTitle(handle: Any, title: String) {
-        (handle as ContentTabHandle).content.setDisplayName(title)
+        contentOf(handle).setDisplayName(title)
     }
 
-    private fun canResizeWindowDirectly(): Boolean =
-        requireToolWindow().type == ToolWindowType.FLOATING || requireToolWindow().type == ToolWindowType.WINDOWED
+    private fun contentOf(handle: Any): Content = (handle as ContentTabHandle).content
+
+    private fun canResizeWindowDirectly(): Boolean = when (requireToolWindow().type) {
+        ToolWindowType.FLOATING, ToolWindowType.WINDOWED -> true
+        else -> false
+    }
 
     private fun stretchDockedToolWindow(toolWindow: ToolWindowEx, size: ToolWindowSize) {
         val current = currentSize() ?: return

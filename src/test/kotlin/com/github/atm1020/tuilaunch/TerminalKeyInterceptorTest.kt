@@ -66,6 +66,10 @@ class TerminalKeyInterceptorTest {
         whenMs: Long = System.currentTimeMillis(),
     ): KeyEvent = KeyEvent(source, KeyEvent.KEY_TYPED, whenMs, 0, KeyEvent.VK_UNDEFINED, keyChar)
 
+    private fun armPrefix(dispatcher: TerminalKeyInterceptor) {
+        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+    }
+
     @Test
     fun comboWhileFocusedEntersPrefixModeAndIsSwallowed() {
         val dispatcher = newDispatcher()
@@ -128,7 +132,7 @@ class TerminalKeyInterceptorTest {
     @Test
     fun prefixThenEFocusesEditor() {
         val dispatcher = newDispatcher()
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+        armPrefix(dispatcher)
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_E)))
         assertEquals(1, switchCount)
     }
@@ -136,7 +140,7 @@ class TerminalKeyInterceptorTest {
     @Test
     fun prefixThenCCloseActiveTui() {
         val dispatcher = newDispatcher()
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+        armPrefix(dispatcher)
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_C)))
         assertEquals(1, closeCount)
     }
@@ -144,7 +148,7 @@ class TerminalKeyInterceptorTest {
     @Test
     fun prefixCommandTrailingTypedCharIsSwallowed() {
         val dispatcher = newDispatcher()
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+        armPrefix(dispatcher)
         assertTrue(dispatcher.dispatchKeyEvent(keyTyped(' ')))
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_C)))
         assertTrue(dispatcher.dispatchKeyEvent(keyTyped('c')))
@@ -154,7 +158,7 @@ class TerminalKeyInterceptorTest {
     @Test
     fun duplicatePrefixCommandPressIsSwallowedWithoutRunningTwice() {
         val dispatcher = newDispatcher()
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+        armPrefix(dispatcher)
         val event = keyPress(KeyEvent.VK_C)
         assertTrue(dispatcher.dispatchKeyEvent(event))
         assertTrue(dispatcher.dispatchKeyEvent(event))
@@ -164,7 +168,7 @@ class TerminalKeyInterceptorTest {
     @Test
     fun prefixThenNSwitchesToNextTui() {
         val dispatcher = newDispatcher()
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+        armPrefix(dispatcher)
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_N)))
         assertEquals(1, nextCount)
     }
@@ -172,7 +176,7 @@ class TerminalKeyInterceptorTest {
     @Test
     fun prefixThenPSwitchesToPreviousTui() {
         val dispatcher = newDispatcher()
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+        armPrefix(dispatcher)
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_P)))
         assertEquals(1, previousCount)
     }
@@ -186,7 +190,7 @@ class TerminalKeyInterceptorTest {
             prefixCommandActions = mapOf(KeyEvent.VK_F to { switchCount++ }),
         )
 
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+        armPrefix(dispatcher)
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_F)))
 
         assertEquals(1, switchCount)
@@ -240,7 +244,7 @@ class TerminalKeyInterceptorTest {
     @Test
     fun armedPrefixWinsOverEscape() {
         val dispatcher = newDispatcher()
-        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK)))
+        armPrefix(dispatcher)
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_ESCAPE)))
         assertTrue(sentKeys.isEmpty())
     }

@@ -15,8 +15,8 @@ import org.jetbrains.plugins.terminal.ShellStartupOptions
 import org.jetbrains.plugins.terminal.TerminalProjectOptionsProvider
 import org.jetbrains.plugins.terminal.runner.LocalTerminalStartCommandBuilder
 import java.awt.KeyboardFocusManager
-import java.io.File
 import java.awt.event.KeyEvent
+import java.io.File
 
 private const val SEND_AS_USER_INPUT = true
 
@@ -103,7 +103,7 @@ class JediTermSessionFactory(
             escapeKeyCode = if (prefixEnabled) state.escapeKeyCode else null,
             prefixCommandActions = actions,
             canSendKeys = session.canSendKeys,
-            sendKey = { keyCode, modifiers, keyChar -> session.sendKey(keyCode, modifiers, keyChar) },
+            sendKey = session::sendKey,
             nextTabShortcuts = { currentKeyboardShortcutsOf("NextTab") },
             previousTabShortcuts = { currentKeyboardShortcutsOf("PreviousTab") },
             onNextTab = onNextTab,

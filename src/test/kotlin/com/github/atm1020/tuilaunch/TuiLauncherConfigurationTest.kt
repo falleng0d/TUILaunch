@@ -6,7 +6,7 @@ import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
 import com.github.atm1020.tuilaunchmodel.TuiAppTableModel
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.Container
 import java.awt.event.KeyEvent
 import javax.swing.JCheckBox
@@ -32,7 +32,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     fun testKeySelectionPanelUsesKeymapLikeShortcutTable() {
         val component = TuiLauncherConfiguration().createComponent() as JPanel
-        val table = findTable(component)!!
+        val table = findShortcutTable(component)!!
 
         assertEquals("Action", table.columnModel.getColumn(0).headerValue)
         assertEquals("Shortcut", table.columnModel.getColumn(1).headerValue)
@@ -44,7 +44,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.tuiApps.add(TuiAppConfig(name = "htop", command = "htop"))
 
         val component = TuiLauncherConfiguration().createComponent() as JPanel
-        val shortcutTable = findTable(component)!!
+        val shortcutTable = findShortcutTable(component)!!
 
         assertEquals(9, shortcutTable.rowCount)
         assertEquals("Launch htop", shortcutTable.model.getValueAt(8, 0))
@@ -54,7 +54,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val configurable = TuiLauncherConfiguration()
         val component = configurable.createComponent() as JPanel
         val appsTable = findAppsTable(component)!!
-        val shortcutTable = findTable(component)!!
+        val shortcutTable = findShortcutTable(component)!!
 
         assertEquals(8, shortcutTable.rowCount)
         (appsTable.model as TuiAppTableModel).addRow(TuiAppConfig(name = "lazygit", command = "lazygit"))
@@ -86,14 +86,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val configurable = TuiLauncherConfiguration()
         configurable.createComponent()
 
-        val error = try {
-            configurable.apply()
-            fail("Expected ConfigurationException")
-            return
-        } catch (e: ConfigurationException) {
-            e
-        }
-        assertTrue(error.localizedMessage.contains("already assigned"))
+        assertApplyRejects(configurable, "already assigned")
     }
 
     fun testApplyRejectsDuplicateShortcuts() {
@@ -104,14 +97,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val configurable = TuiLauncherConfiguration()
         configurable.createComponent()
 
-        val error = try {
-            configurable.apply()
-            fail("Expected ConfigurationException")
-            return
-        } catch (e: ConfigurationException) {
-            e
-        }
-        assertTrue(error.localizedMessage.contains("already assigned"))
+        assertApplyRejects(configurable, "already assigned")
     }
 
     fun testApplyRejectsEmptyName() {
@@ -121,14 +107,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val configurable = TuiLauncherConfiguration()
         configurable.createComponent()
 
-        val error = try {
-            configurable.apply()
-            fail("Expected ConfigurationException")
-            return
-        } catch (e: ConfigurationException) {
-            e
-        }
-        assertTrue(error.localizedMessage.contains("name cannot be empty"))
+        assertApplyRejects(configurable, "name cannot be empty")
     }
 
     fun testRejectedInvalidNewAppDoesNotMutatePersistedSettings() {
@@ -157,37 +136,37 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val configurable = TuiLauncherConfiguration()
         configurable.createComponent()
 
-        val error = try {
+        assertApplyRejects(configurable, "command cannot be empty")
+    }
+
+    private fun assertApplyRejects(configurable: TuiLauncherConfiguration, expectedMessagePart: String) {
+        try {
             configurable.apply()
-            fail("Expected ConfigurationException")
-            return
         } catch (e: ConfigurationException) {
-            e
+            assertTrue(e.localizedMessage.contains(expectedMessagePart))
+            return
         }
-        assertTrue(error.localizedMessage.contains("command cannot be empty"))
+        fail("Expected ConfigurationException")
     }
 
-    private fun findCheckBox(container: Container, text: String): JCheckBox? {
+    private fun descendantsOf(container: Container): Sequence<Component> = sequence {
         for (component in container.components) {
-            if (component is JCheckBox && component.text == text) return component
-            if (component is Container) findCheckBox(component, text)?.let { return it }
+            yield(component)
+            if (component is Container) yieldAll(descendantsOf(component))
         }
-        return null
     }
 
-    private fun findAppsTable(container: Container): JTable? {
-        for (component in container.components) {
-            if (component is JTable && component.columnCount == 4) return component
-            if (component is Container) findAppsTable(component)?.let { return it }
-        }
-        return null
-    }
+    private inline fun <reified T : Component> findComponent(
+        container: Container,
+        crossinline matches: (T) -> Boolean,
+    ): T? = descendantsOf(container).filterIsInstance<T>().firstOrNull { matches(it) }
 
-    private fun findTable(container: Container): JTable? {
-        for (component in container.components) {
-            if (component is JTable && component.columnCount == 2 && component.getColumnName(0) == "Action") return component
-            if (component is Container) findTable(component)?.let { return it }
-        }
-        return null
-    }
+    private fun findCheckBox(container: Container, text: String): JCheckBox? =
+        findComponent<JCheckBox>(container) { it.text == text }
+
+    private fun findAppsTable(container: Container): JTable? =
+        findComponent<JTable>(container) { it.columnCount == 4 }
+
+    private fun findShortcutTable(container: Container): JTable? =
+        findComponent<JTable>(container) { it.columnCount == 2 && it.getColumnName(0) == "Action" }
 }

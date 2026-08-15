@@ -18,7 +18,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 
 const val TUI_TOOL_WINDOW_ID = "TUILaunch"
 
-private const val ACTION_ID_PREFIX = "TUILauncher."
+internal const val ACTION_ID_PREFIX = "TUILauncher."
 
 internal fun uniqueSessionTitle(base: String, taken: Set<String>): String {
     if (base !in taken) return base
@@ -44,7 +44,7 @@ class TuiAppLaunchService(private val project: Project) {
         val component = FileEditorManager.getInstance(project).selectedTextEditor?.contentComponent
         if (component != null) IdeFocusManager.getInstance(project).requestFocus(component, true)
     }
-    private var sizeListenerInstalled = false
+    private var hostListenersInstalled = false
     private var windowRevealedByLaunch = false
     private var applyingSize = false
 
@@ -79,16 +79,26 @@ class TuiAppLaunchService(private val project: Project) {
         return IdeToolWindowHost(tw).also { host = it }
     }
 
-    private fun ensureSizeListener(host: IdeToolWindowHost) {
-        if (sizeListenerInstalled) return
-        sizeListenerInstalled = true
+    private fun hostWithListeners(): IdeToolWindowHost? = resolveHost()?.also { ensureHostListeners(it) }
+
+    private fun ensureHostListeners(host: IdeToolWindowHost) {
+        if (hostListenersInstalled) return
+        hostListenersInstalled = true
         host.onSizeChanged { recordActiveTabSize(host) }
         host.onTabSelected { handle -> onTabSelected(host, handle) }
         host.onTabRemoved { handle -> forgetRemovedTab(handle) }
     }
 
+    private fun tabFor(handle: Any): OpenTab? = tabsBySessionId.values.firstOrNull { it.handle == handle }
+
+    private fun activeOrLastOpenTab(host: IdeToolWindowHost): OpenTab? {
+        val openTabs = tabsNotClosing().values
+        val activeHandle = host.activeTab()
+        return openTabs.firstOrNull { it.handle == activeHandle } ?: openTabs.lastOrNull()
+    }
+
     private fun onTabSelected(host: IdeToolWindowHost, handle: Any) {
-        val tab = tabsBySessionId.values.firstOrNull { it.handle == handle } ?: return
+        val tab = tabFor(handle) ?: return
         applySavedSize(host, tab.appName)
     }
 
@@ -103,8 +113,7 @@ class TuiAppLaunchService(private val project: Project) {
     }
 
     fun toggle(actionId: String, command: String, title: String) {
-        val host = resolveHost() ?: return
-        ensureSizeListener(host)
+        val host = hostWithListeners() ?: return
         val appName = actionId.removePrefix(ACTION_ID_PREFIX)
         val existing = tabsNotClosing().values.firstOrNull { it.appName == appName }
         if (existing != null) {
@@ -118,8 +127,7 @@ class TuiAppLaunchService(private val project: Project) {
     }
 
     fun launchNew(appName: String, command: String) {
-        val host = resolveHost() ?: return
-        ensureSizeListener(host)
+        val host = hostWithListeners() ?: return
         val title = uniqueSessionTitle(appName, tabsBySessionId.values.mapTo(mutableSetOf()) { it.title })
         windowRevealedByLaunch = !host.isVisible()
         openNewTab(host, sessionId = newSessionId(appName), appName = appName, command = command, title = title)
@@ -128,16 +136,13 @@ class TuiAppLaunchService(private val project: Project) {
     private fun newSessionId(appName: String): String = "$appName#${sessionSequence++}"
 
     fun renameTab(handle: Any, newTitle: String) {
-        tabsBySessionId.values.firstOrNull { it.handle == handle }?.title = newTitle
+        tabFor(handle)?.title = newTitle
     }
 
     fun focusTui() {
         if (tabsBySessionId.isEmpty()) return
-        val host = resolveHost() ?: return
-        ensureSizeListener(host)
-        val activeHandle = host.activeTab()
-        val live = tabsNotClosing().values.toList()
-        val tab = live.firstOrNull { it.handle == activeHandle } ?: live.lastOrNull() ?: return
+        val host = hostWithListeners() ?: return
+        val tab = activeOrLastOpenTab(host) ?: return
         selectTuiTab(host, tab)
     }
 
@@ -146,41 +151,25 @@ class TuiAppLaunchService(private val project: Project) {
     }
 
     fun toggleFocus() {
-        val onTui = isTuiFocused()
-        if (onTui) focusEditor() else focusTui()
+        if (isTuiFocused()) focusEditor() else focusTui()
     }
 
     fun toggleToolWindow() {
         if (tabsBySessionId.isEmpty()) return
-        val host = resolveHost() ?: return
-        ensureSizeListener(host)
-        if (host.isVisible()) {
-            host.hide()
-        } else {
-            host.show()
-        }
+        val host = hostWithListeners() ?: return
+        if (host.isVisible()) host.hide() else host.show()
     }
 
     fun toggleToolWindowAndFocus() {
         if (tabsBySessionId.isEmpty()) return
-        val host = resolveHost() ?: return
-        ensureSizeListener(host)
-        if (host.isVisible()) {
-            host.hide()
-        } else {
-            focusTui()
-        }
+        val host = hostWithListeners() ?: return
+        if (host.isVisible()) host.hide() else focusTui()
     }
 
     fun closeActiveTui() {
-        val host = resolveHost() ?: return
-        ensureSizeListener(host)
-        val activeHandle = host.activeTab()
-        val closableTabs = tabsNotClosing()
-        val sessionId = closableTabs.entries.firstOrNull { it.value.handle == activeHandle }?.key
-            ?: closableTabs.entries.lastOrNull()?.key
-            ?: return
-        closeTab(sessionId)
+        val host = hostWithListeners() ?: return
+        val tab = activeOrLastOpenTab(host) ?: return
+        closeTab(tab.sessionId)
     }
 
     fun nextTuiTab() {
@@ -201,17 +190,20 @@ class TuiAppLaunchService(private val project: Project) {
 
     fun prefixCommandActions(): Map<Int, () -> Unit> {
         val state = TuiLauncherSettings.getInstance().state
+        val builtInCommands = listOf(
+            state.focusEditorKeyCode to ::focusEditor,
+            state.closeTuiKeyCode to ::closeActiveTui,
+            state.nextTuiKeyCode to ::nextTuiTab,
+            state.previousTuiKeyCode to ::previousTuiTab,
+            state.toggleToolWindowKeyCode to ::toggleToolWindow,
+            state.nextTuiWithoutFocusKeyCode to ::nextTuiTabWithoutFocus,
+            state.previousTuiWithoutFocusKeyCode to ::previousTuiTabWithoutFocus,
+        )
         return buildMap {
-            state.focusEditorKeyCode?.let { putIfAbsent(it) { focusEditor() } }
-            state.closeTuiKeyCode?.let { putIfAbsent(it) { closeActiveTui() } }
-            state.nextTuiKeyCode?.let { putIfAbsent(it) { nextTuiTab() } }
-            state.previousTuiKeyCode?.let { putIfAbsent(it) { previousTuiTab() } }
-            state.toggleToolWindowKeyCode?.let { putIfAbsent(it) { toggleToolWindow() } }
-            state.nextTuiWithoutFocusKeyCode?.let { putIfAbsent(it) { nextTuiTabWithoutFocus() } }
-            state.previousTuiWithoutFocusKeyCode?.let { putIfAbsent(it) { previousTuiTabWithoutFocus() } }
+            builtInCommands.forEach { (keyCode, command) -> keyCode?.let { putIfAbsent(it, command) } }
             state.tuiApps.forEach { app ->
                 app.shortcutKeyCode?.let { keyCode ->
-                    putIfAbsent(keyCode) { toggle("TUILauncher.${app.name}", app.command, app.name) }
+                    putIfAbsent(keyCode) { toggle(ACTION_ID_PREFIX + app.name, app.command, app.name) }
                 }
             }
         }
@@ -219,8 +211,7 @@ class TuiAppLaunchService(private val project: Project) {
 
     private fun selectRelativeTuiTab(offset: Int, requestFocus: Boolean) {
         if (tabsBySessionId.size < 2) return
-        val host = resolveHost() ?: return
-        ensureSizeListener(host)
+        val host = hostWithListeners() ?: return
         invokeLater {
             val selectableTabs = tabsNotClosing().values
             val orderedTabs = host.orderedHandles().mapNotNull { handle ->
@@ -251,7 +242,7 @@ class TuiAppLaunchService(private val project: Project) {
                     return@createAsync
                 }
                 val handle = host.addTab(session.component, title, disposable)
-                tabsBySessionId[sessionId] = OpenTab(
+                val tab = OpenTab(
                     sessionId = sessionId,
                     appName = appName,
                     title = title,
@@ -260,8 +251,9 @@ class TuiAppLaunchService(private val project: Project) {
                     disposable = disposable,
                     openedFromTui = isTuiFocused(),
                 )
+                tabsBySessionId[sessionId] = tab
                 session.onTerminated { closeTab(sessionId) }
-                selectTuiTab(host, tabsBySessionId.getValue(sessionId), recordCurrent = true)
+                selectTuiTab(host, tab)
             },
             onFailed = { throwable ->
                 pendingLaunchesBySessionId.remove(sessionId)
@@ -274,11 +266,10 @@ class TuiAppLaunchService(private val project: Project) {
     private fun selectTuiTab(
         host: IdeToolWindowHost,
         tab: OpenTab,
-        recordCurrent: Boolean = true,
         requestFocus: Boolean = true,
     ) {
         val selectionWillChange = host.activeTab() != tab.handle
-        if (recordCurrent && selectionWillChange) recordActiveTabSize(host)
+        if (selectionWillChange) recordActiveTabSize(host)
         if (requestFocus) tab.openedFromTui = isTuiFocused()
         host.show()
         host.selectTab(tab.handle)
@@ -291,9 +282,13 @@ class TuiAppLaunchService(private val project: Project) {
     private fun recordActiveTabSize(host: IdeToolWindowHost) {
         if (applyingSize) return
         val activeHandle = host.activeTab() ?: return
-        val activeTab = tabsBySessionId.values.firstOrNull { it.handle == activeHandle } ?: return
+        val activeTab = tabFor(activeHandle) ?: return
         val size = host.currentSize() ?: return
-        configFor(activeTab.appName)?.let { config ->
+        storeWindowSize(activeTab.appName, size)
+    }
+
+    private fun storeWindowSize(appName: String, size: ToolWindowSize) {
+        configFor(appName)?.let { config ->
             config.windowWidth = size.width
             config.windowHeight = size.height
         }
@@ -313,41 +308,33 @@ class TuiAppLaunchService(private val project: Project) {
     private fun closeTab(sessionId: String) {
         val tab = tabsBySessionId[sessionId] ?: return
         if (!closingSessions.add(sessionId)) return
-        var shouldRestoreEditorFocus = false
 
-        resolveHost()?.let { h ->
-            val closingActiveTab = h.activeTab() == tab.handle
-            shouldRestoreEditorFocus = closingActiveTab && !tab.openedFromTui
-            if (closingActiveTab) {
-                h.currentSize()?.let { size ->
-                    configFor(tab.appName)?.let { config ->
-                        config.windowWidth = size.width
-                        config.windowHeight = size.height
-                    }
-                }
-            }
-        }
-
-        if (shouldRestoreEditorFocus) focusEditor()
         val host = resolveHost()
         if (host == null) {
             forgetTab(sessionId)
-        } else {
-            invokeLater {
-                forgetTab(sessionId)
-                host.removeTab(tab.handle)
-                if (windowRevealedByLaunch && host.isPinned()) {
-                    host.hide()
-                }
+            Disposer.dispose(tab.disposable)
+            return
+        }
+
+        val closingActiveTab = host.activeTab() == tab.handle
+        if (closingActiveTab) {
+            host.currentSize()?.let { storeWindowSize(tab.appName, it) }
+            if (!tab.openedFromTui) focusEditor()
+        }
+
+        invokeLater {
+            forgetTab(sessionId)
+            host.removeTab(tab.handle)
+            if (windowRevealedByLaunch && host.isPinned()) {
+                host.hide()
             }
         }
         Disposer.dispose(tab.disposable)
     }
 
     private fun forgetRemovedTab(handle: Any) {
-        val entry = tabsBySessionId.entries.firstOrNull { it.value.handle == handle } ?: return
-        val tab = entry.value
-        forgetTab(entry.key)
+        val tab = tabFor(handle) ?: return
+        forgetTab(tab.sessionId)
         Disposer.dispose(tab.disposable)
     }
 

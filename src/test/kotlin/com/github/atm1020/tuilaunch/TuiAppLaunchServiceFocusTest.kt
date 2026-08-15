@@ -158,11 +158,18 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         }
     }
 
-    private fun launchTabs(count: Int): Pair<TuiAppLaunchService, FakeHost> {
+    private fun newService(
+        sessionFactory: TerminalSessionFactory = FakeFactory(emptyList()),
+    ): Pair<TuiAppLaunchService, FakeHost> {
         val service = TuiAppLaunchService(project)
         val host = FakeHost()
         service.host = host
-        service.sessionFactory = FakeFactory(List(count + 2) { FakeSession() })
+        service.sessionFactory = sessionFactory
+        return service to host
+    }
+
+    private fun launchTabs(count: Int): Pair<TuiAppLaunchService, FakeHost> {
+        val (service, host) = newService(FakeFactory(List(count + 2) { FakeSession() }))
         repeat(count) { service.launchNew("claude", "claude") }
         return service to host
     }
@@ -172,9 +179,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testFocusTuiDoesNothingWhenNoAppOpen() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
+        val (service, host) = newService()
 
         service.focusTui()
 
@@ -184,10 +189,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
 
     fun testResizeEventStoresActiveTabSize() {
         configureApps(TuiAppConfig(name = "htop", command = "htop"))
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
+        val (service, host) = newService(FakeFactory(FakeSession()))
 
         service.toggle("TUILauncher.htop", "htop", "htop")
         host.size = ToolWindowSize(900, 500)
@@ -203,10 +205,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             TuiAppConfig(name = "first", command = "first", windowWidth = 700, windowHeight = 400),
             TuiAppConfig(name = "second", command = "second", windowWidth = 1100, windowHeight = 800),
         )
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession()))
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -223,12 +222,9 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             TuiAppConfig(name = "first", command = "first", windowWidth = 700, windowHeight = 400),
             TuiAppConfig(name = "second", command = "second", windowWidth = 1100, windowHeight = 800),
         )
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
         host.emitStaleResizeOnApply = true
         host.size = ToolWindowSize(700, 400)
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession()))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -246,10 +242,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             TuiAppConfig(name = "first", command = "first", windowWidth = 700, windowHeight = 400),
             TuiAppConfig(name = "second", command = "second", windowWidth = 1100, windowHeight = 800),
         )
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession()))
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -262,11 +255,8 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
 
     fun testFirstLaunchAppliesSavedSize() {
         configureApps(TuiAppConfig(name = "htop", command = "htop", windowWidth = 900, windowHeight = 600))
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
+        val (service, host) = newService(FakeFactory(FakeSession()))
         host.size = ToolWindowSize(500, 300)
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
 
         service.toggle("TUILauncher.htop", "htop", "htop")
 
@@ -275,10 +265,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
 
     fun testTogglingTabAppliesSavedSizeViaSelection() {
         configureApps(TuiAppConfig(name = "htop", command = "htop", windowWidth = 900, windowHeight = 600))
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
+        val (service, host) = newService(FakeFactory(FakeSession()))
 
         service.toggle("TUILauncher.htop", "htop", "htop")
 
@@ -287,10 +274,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
 
     fun testSelectingTabWithoutSavedSizeAppliesNothing() {
         configureApps(TuiAppConfig(name = "htop", command = "htop"))
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
+        val (service, host) = newService(FakeFactory(FakeSession()))
 
         service.toggle("TUILauncher.htop", "htop", "htop")
         host.appliedSizes.clear()
@@ -301,11 +285,8 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testFocusTuiRevealsAndFocusesActiveTab() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
         val session = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(session)
+        val (service, host) = newService(FakeFactory(session))
 
         service.toggle("TUILauncher.htop", "htop", "htop")
         host.showCount = 0
@@ -320,12 +301,9 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testToggleWaitsForAsynchronousSessionCreation() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
         val session = FakeSession()
         val factory = DeferredFactory(session)
-        service.host = host
-        service.sessionFactory = factory
+        val (service, host) = newService(factory)
 
         service.toggle("TUILauncher.htop", "htop", "htop")
         service.toggle("TUILauncher.htop", "htop", "htop")
@@ -341,11 +319,8 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testToggleToolWindowShowsHiddenWindowWithoutRequestingFocus() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
         val session = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(session)
+        val (service, host) = newService(FakeFactory(session))
 
         service.toggle("TUILauncher.htop", "htop", "htop")
         host.hide()
@@ -360,10 +335,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testToggleToolWindowHidesVisibleWindow() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
+        val (service, host) = newService(FakeFactory(FakeSession()))
 
         service.toggle("TUILauncher.htop", "htop", "htop")
 
@@ -373,12 +345,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testCloseActiveTuiRemovesSelectedTab() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        val firstSession = FakeSession()
-        val secondSession = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(firstSession, secondSession))
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
 
         service.toggle("TUILauncher.first", "first", "first")
         val firstTab = host.activeTab()
@@ -392,10 +359,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testCloseActiveTuiHidesWindowAfterLastTab() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
+        val (service, host) = newService(FakeFactory(FakeSession()))
 
         service.toggle("TUILauncher.htop", "htop", "htop")
         service.closeActiveTui()
@@ -406,11 +370,8 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testCloseLastTuiKeepsWindowVisibleWhenAlreadyVisibleBeforeLaunch() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
+        val (service, host) = newService(FakeFactory(FakeSession()))
         host.visible = true
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
 
         service.toggle("TUILauncher.htop", "htop", "htop")
         service.closeActiveTui()
@@ -421,11 +382,8 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testCloseLastTuiKeepsWindowVisibleWithMultipleTabsWhenVisibleBeforeLaunch() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
         host.visible = true
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession()))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -438,11 +396,8 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testCloseLastTuiKeepsWindowVisibleWhenUnpinned() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
+        val (service, host) = newService(FakeFactory(FakeSession()))
         host.pinned = false
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
 
         service.toggle("TUILauncher.htop", "htop", "htop")
         service.closeActiveTui()
@@ -453,10 +408,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testCloseActiveTuiOpenedFromEditorReturnsFocusToEditor() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
+        val (service, host) = newService(FakeFactory(FakeSession()))
         service.activeToolWindowIdProvider = { "Project" }
         var editorFocusCount = 0
         service.editorFocusRequest = { editorFocusCount++ }
@@ -468,10 +420,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testCloseActiveTuiOpenedFromTuiDoesNotReturnFocusToEditor() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(FakeSession())
+        val (service, host) = newService(FakeFactory(FakeSession()))
         service.activeToolWindowIdProvider = { TUI_TOOL_WINDOW_ID }
         var editorFocusCount = 0
         service.editorFocusRequest = { editorFocusCount++ }
@@ -483,12 +432,9 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testNextTuiTabSelectsAndFocusesNextTab() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
         val firstSession = FakeSession()
         val secondSession = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(firstSession, secondSession))
+        val (service, host) = newService(FakeFactory(listOf(firstSession, secondSession)))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -503,12 +449,9 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testNextTuiTabWithoutFocusSelectsWithoutRequestingFocus() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
         val firstSession = FakeSession()
         val secondSession = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(firstSession, secondSession))
+        val (service, host) = newService(FakeFactory(listOf(firstSession, secondSession)))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -523,12 +466,9 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testPreviousTuiTabWithoutFocusSelectsWithoutRequestingFocus() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
         val firstSession = FakeSession()
         val secondSession = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(firstSession, secondSession))
+        val (service, host) = newService(FakeFactory(listOf(firstSession, secondSession)))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -542,12 +482,9 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testPreviousTuiTabSelectsAndFocusesPreviousTab() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
         val firstSession = FakeSession()
         val secondSession = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(firstSession, secondSession))
+        val (service, host) = newService(FakeFactory(listOf(firstSession, secondSession)))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -563,11 +500,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     fun testPrefixCommandActionsLaunchConfiguredApps() {
         configureApps(TuiAppConfig(name = "lazygit", command = "lazygit", shortcutKeyCode = KeyEvent.VK_G))
 
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        val session = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(session))
+        val (service, host) = newService(FakeFactory(FakeSession()))
 
         service.prefixCommandActions().getValue(KeyEvent.VK_G).invoke()
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
@@ -582,12 +515,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         state.nextTuiKeyCode = KeyEvent.VK_Y
         state.previousTuiKeyCode = KeyEvent.VK_Z
 
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        val firstSession = FakeSession()
-        val secondSession = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(firstSession, secondSession))
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
 
         service.toggle("TUILauncher.first", "first", "first")
         service.toggle("TUILauncher.second", "second", "second")
@@ -603,10 +531,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testLaunchNewOpensASecondInstanceOfTheSameAppWithANumberedTitle() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession()))
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
 
         service.launchNew("claude", "claude")
         val firstHandle = host.activeTab()
@@ -619,10 +544,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testNextAndPreviousTuiTabCycleThroughMultipleInstancesOfTheSameApp() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession()))
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession())))
 
         service.launchNew("claude", "claude")
         service.launchNew("claude", "claude")
@@ -638,12 +560,9 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testClosingOneInstanceLeavesTheOtherOpenAndSelectable() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
         val firstSession = FakeSession()
         val secondSession = FakeSession()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(firstSession, secondSession))
+        val (service, host) = newService(FakeFactory(listOf(firstSession, secondSession)))
 
         service.launchNew("claude", "claude")
         val remaining = host.activeTab()
@@ -662,10 +581,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
     }
 
     fun testRenameTabUpdatesTitleAndLaunchNewNumbersAroundIt() {
-        val service = TuiAppLaunchService(project)
-        val host = FakeHost()
-        service.host = host
-        service.sessionFactory = FakeFactory(listOf(FakeSession(), FakeSession(), FakeSession()))
+        val (service, host) = newService(FakeFactory(listOf(FakeSession(), FakeSession(), FakeSession())))
 
         service.launchNew("claude", "claude")
         service.launchNew("helper", "helper")

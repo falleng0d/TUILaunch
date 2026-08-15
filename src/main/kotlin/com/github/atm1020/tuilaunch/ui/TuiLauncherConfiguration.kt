@@ -1,6 +1,7 @@
 package com.github.atm1020.tuilaunch.ui
 
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
+import com.github.atm1020.tuilaunch.services.ACTION_ID_PREFIX
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.github.atm1020.tuilaunchmodel.TuiAppTableModel
 import com.intellij.openapi.options.Configurable
@@ -28,10 +29,6 @@ import javax.swing.table.AbstractTableModel
 
 
 class TuiLauncherConfiguration : Configurable {
-    private companion object {
-        const val BUILT_IN_SHORTCUT_COUNT = 8
-    }
-
     private var tuiLauncherPanel: JPanel? = null
     private var tableModel: TuiAppTableModel? = null
     private var appsTable: JBTable? = null
@@ -51,6 +48,27 @@ class TuiLauncherConfiguration : Configurable {
     private var toggleToolWindowKeyCode: Int? = settings.state.toggleToolWindowKeyCode
     private var nextTuiWithoutFocusKeyCode: Int? = settings.state.nextTuiWithoutFocusKeyCode
     private var previousTuiWithoutFocusKeyCode: Int? = settings.state.previousTuiWithoutFocusKeyCode
+
+    private val builtInShortcutBindings = listOf(
+        ShortcutBinding("Prefix", true, { escapeKeyCode }, { escapeKeyCode = it }),
+        ShortcutBinding("Focus editor", false, { focusEditorKeyCode }, { focusEditorKeyCode = it }),
+        ShortcutBinding("Close active TUI", false, { closeTuiKeyCode }, { closeTuiKeyCode = it }),
+        ShortcutBinding("Next TUI tab", false, { nextTuiKeyCode }, { nextTuiKeyCode = it }),
+        ShortcutBinding("Previous TUI tab", false, { previousTuiKeyCode }, { previousTuiKeyCode = it }),
+        ShortcutBinding("Toggle tool window", false, { toggleToolWindowKeyCode }, { toggleToolWindowKeyCode = it }),
+        ShortcutBinding(
+            "Next TUI tab without focus",
+            false,
+            { nextTuiWithoutFocusKeyCode },
+            { nextTuiWithoutFocusKeyCode = it },
+        ),
+        ShortcutBinding(
+            "Previous TUI tab without focus",
+            false,
+            { previousTuiWithoutFocusKeyCode },
+            { previousTuiWithoutFocusKeyCode = it },
+        ),
+    )
 
     override fun getDisplayName(): String = "TUI Launcher"
 
@@ -175,9 +193,13 @@ class TuiLauncherConfiguration : Configurable {
         }
     }
 
+    private fun selectedShortcutModelRow(): Int? {
+        val table = shortcutsTable ?: return null
+        return table.convertRowIndexToModel(table.selectedRow)
+    }
+
     private fun assignSelectedShortcut(keyCode: Int) {
-        val row = shortcutsTable?.selectedRow ?: return
-        val modelRow = shortcutsTable?.convertRowIndexToModel(row) ?: return
+        val modelRow = selectedShortcutModelRow() ?: return
         val model = shortcutsModel ?: return
         val conflictRow = model.findConflict(modelRow, keyCode)
         if (conflictRow != null) {
@@ -191,8 +213,7 @@ class TuiLauncherConfiguration : Configurable {
     }
 
     private fun clearSelectedShortcut() {
-        val row = shortcutsTable?.selectedRow ?: return
-        val modelRow = shortcutsTable?.convertRowIndexToModel(row) ?: return
+        val modelRow = selectedShortcutModelRow() ?: return
         shortcutsModel?.setShortcut(modelRow, null)
     }
 
@@ -205,25 +226,18 @@ class TuiLauncherConfiguration : Configurable {
         components.forEach { add(it) }
     }
 
-    private fun createShortcutBindings(): List<ShortcutBinding> = buildList {
-        add(ShortcutBinding("Prefix", true, { escapeKeyCode }, { escapeKeyCode = it }))
-        add(ShortcutBinding("Focus editor", false, { focusEditorKeyCode }, { focusEditorKeyCode = it }))
-        add(ShortcutBinding("Close active TUI", false, { closeTuiKeyCode }, { closeTuiKeyCode = it }))
-        add(ShortcutBinding("Next TUI tab", false, { nextTuiKeyCode }, { nextTuiKeyCode = it }))
-        add(ShortcutBinding("Previous TUI tab", false, { previousTuiKeyCode }, { previousTuiKeyCode = it }))
-        add(ShortcutBinding("Toggle tool window", false, { toggleToolWindowKeyCode }, { toggleToolWindowKeyCode = it }))
-        add(ShortcutBinding("Next TUI tab without focus", false, { nextTuiWithoutFocusKeyCode }, { nextTuiWithoutFocusKeyCode = it }))
-        add(ShortcutBinding("Previous TUI tab without focus", false, { previousTuiWithoutFocusKeyCode }, { previousTuiWithoutFocusKeyCode = it }))
-        val model = tableModel ?: return@buildList
-        for (index in 0 until model.rowCount) {
+    private fun createShortcutBindings(): List<ShortcutBinding> {
+        val model = tableModel ?: return builtInShortcutBindings
+        return builtInShortcutBindings + (0 until model.rowCount).map { index ->
             val app = model.appAt(index)
-            val label = when {
-                app.name.isNotBlank() -> "Launch ${app.name}"
-                app.command.isNotBlank() -> "Launch ${app.command}"
-                else -> "Launch app row ${index + 1}"
-            }
-            add(ShortcutBinding(label, false, { app.shortcutKeyCode }, { app.shortcutKeyCode = it }))
+            ShortcutBinding(launchShortcutLabel(app, index), false, { app.shortcutKeyCode }, { app.shortcutKeyCode = it })
         }
+    }
+
+    private fun launchShortcutLabel(app: TuiAppConfig, index: Int): String = when {
+        app.name.isNotBlank() -> "Launch ${app.name}"
+        app.command.isNotBlank() -> "Launch ${app.command}"
+        else -> "Launch app row ${index + 1}"
     }
 
     private fun refreshShortcutBindings() {
@@ -240,7 +254,7 @@ class TuiLauncherConfiguration : Configurable {
         val appRow = appsTable?.selectedRow ?: return
         if (appRow < 0) return
         val modelRow = appsTable?.convertRowIndexToModel(appRow) ?: return
-        selectShortcutRow(BUILT_IN_SHORTCUT_COUNT + modelRow, requestFocus)
+        selectShortcutRow(builtInShortcutBindings.size + modelRow, requestFocus)
     }
 
     private fun selectShortcutRow(row: Int, requestFocus: Boolean) {
@@ -266,8 +280,7 @@ class TuiLauncherConfiguration : Configurable {
             val binding = bindings[rowIndex]
             if (columnIndex == 0) return binding.actionName
             val keyCode = binding.getKeyCode() ?: return "Not set"
-            val keyText = KeyEvent.getKeyText(keyCode)
-            return if (binding.includeModifier) "${modifierCombo?.selectedItem ?: "Ctrl"}+$keyText" else keyText
+            return shortcutText(rowIndex, keyCode)
         }
 
         fun setShortcut(rowIndex: Int, keyCode: Int?) {
@@ -316,10 +329,10 @@ class TuiLauncherConfiguration : Configurable {
 
     override fun apply() {
         appsTable?.cellEditor?.stopCellEditing()
-        validateTuiApps()
-        validateShortcuts()
 
         val newApps = tableModel?.snapshot() ?: mutableListOf()
+        validateTuiApps(newApps)
+        validateShortcuts()
         unregisterRemovedActions(newApps)
         settings.state.tuiApps = newApps
         settings.state.tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true
@@ -336,9 +349,9 @@ class TuiLauncherConfiguration : Configurable {
     }
 
     private fun unregisterRemovedActions(newApps: List<TuiAppConfig>) {
-        val newActionIds = newApps.map { "TUILauncher.${it.name}" }.toSet()
+        val newActionIds = newApps.mapTo(mutableSetOf()) { ACTION_ID_PREFIX + it.name }
         settings.state.tuiApps
-            .map { "TUILauncher.${it.name}" }
+            .map { ACTION_ID_PREFIX + it.name }
             .filterNot { it in newActionIds }
             .forEach { settings.unregisterAction(it) }
     }
@@ -347,8 +360,8 @@ class TuiLauncherConfiguration : Configurable {
         shortcutsModel?.duplicateShortcutMessage()?.let { throw ConfigurationException(it) }
     }
 
-    private fun validateTuiApps() {
-        tableModel?.snapshot()?.forEachIndexed { index, app ->
+    private fun validateTuiApps(apps: List<TuiAppConfig>) {
+        apps.forEachIndexed { index, app ->
             val rowNumber = index + 1
             if (app.name.isBlank()) {
                 throw ConfigurationException("TUI app name cannot be empty (row $rowNumber).")
