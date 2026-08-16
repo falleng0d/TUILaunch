@@ -26,6 +26,7 @@ import javax.swing.JPanel
 import javax.swing.ListSelectionModel
 import javax.swing.event.TableModelEvent
 import javax.swing.table.AbstractTableModel
+import kotlin.reflect.KMutableProperty1
 
 
 class TuiLauncherConfiguration : Configurable {
@@ -41,35 +42,35 @@ class TuiLauncherConfiguration : Configurable {
     private var shortcutsModel: ShortcutTableModel? = null
     private var clearShortcutButton: JButton? = null
 
-    private var escapeKeyCode: Int? = settings.state.escapeKeyCode
-    private var focusEditorKeyCode: Int? = settings.state.focusEditorKeyCode
-    private var closeTuiKeyCode: Int? = settings.state.closeTuiKeyCode
-    private var nextTuiKeyCode: Int? = settings.state.nextTuiKeyCode
-    private var previousTuiKeyCode: Int? = settings.state.previousTuiKeyCode
-    private var toggleToolWindowKeyCode: Int? = settings.state.toggleToolWindowKeyCode
-    private var nextTuiWithoutFocusKeyCode: Int? = settings.state.nextTuiWithoutFocusKeyCode
-    private var previousTuiWithoutFocusKeyCode: Int? = settings.state.previousTuiWithoutFocusKeyCode
-
-    private val builtInShortcutBindings = listOf(
-        ShortcutBinding("Prefix", true, { escapeKeyCode }, { escapeKeyCode = it }),
-        ShortcutBinding("Focus editor", false, { focusEditorKeyCode }, { focusEditorKeyCode = it }),
-        ShortcutBinding("Close active TUI", false, { closeTuiKeyCode }, { closeTuiKeyCode = it }),
-        ShortcutBinding("Next TUI tab", false, { nextTuiKeyCode }, { nextTuiKeyCode = it }),
-        ShortcutBinding("Previous TUI tab", false, { previousTuiKeyCode }, { previousTuiKeyCode = it }),
-        ShortcutBinding("Toggle tool window", false, { toggleToolWindowKeyCode }, { toggleToolWindowKeyCode = it }),
-        ShortcutBinding(
-            "Next TUI tab without focus",
-            false,
-            { nextTuiWithoutFocusKeyCode },
-            { nextTuiWithoutFocusKeyCode = it },
-        ),
-        ShortcutBinding(
+    internal val builtInShortcuts = listOf(
+        builtInShortcut("Prefix", true, TuiLauncherSettings.State::escapeKeyCode),
+        builtInShortcut("Focus editor", false, TuiLauncherSettings.State::focusEditorKeyCode),
+        builtInShortcut("Close active TUI", false, TuiLauncherSettings.State::closeTuiKeyCode),
+        builtInShortcut("Next TUI tab", false, TuiLauncherSettings.State::nextTuiKeyCode),
+        builtInShortcut("Previous TUI tab", false, TuiLauncherSettings.State::previousTuiKeyCode),
+        builtInShortcut("Toggle tool window", false, TuiLauncherSettings.State::toggleToolWindowKeyCode),
+        builtInShortcut("Next TUI tab without focus", false, TuiLauncherSettings.State::nextTuiWithoutFocusKeyCode),
+        builtInShortcut(
             "Previous TUI tab without focus",
             false,
-            { previousTuiWithoutFocusKeyCode },
-            { previousTuiWithoutFocusKeyCode = it },
+            TuiLauncherSettings.State::previousTuiWithoutFocusKeyCode,
         ),
     )
+
+    private val builtInShortcutBindings = builtInShortcuts.map { shortcut ->
+        ShortcutBinding(
+            shortcut.actionName,
+            shortcut.includeModifier,
+            { shortcut.keyCode },
+            { shortcut.keyCode = it },
+        )
+    }
+
+    private fun builtInShortcut(
+        actionName: String,
+        includeModifier: Boolean,
+        stateProperty: KMutableProperty1<TuiLauncherSettings.State, Int?>,
+    ): BuiltInShortcut = BuiltInShortcut(actionName, includeModifier, stateProperty, stateProperty.get(settings.state))
 
     override fun getDisplayName(): String = "TUI Launcher"
 
@@ -265,7 +266,7 @@ class TuiLauncherConfiguration : Configurable {
         val appRow = appsTable?.selectedRow ?: return
         if (appRow < 0) return
         val modelRow = appsTable?.convertRowIndexToModel(appRow) ?: return
-        selectShortcutRow(builtInShortcutBindings.size + modelRow, requestFocus)
+        selectShortcutRow(builtInShortcuts.size + modelRow, requestFocus)
     }
 
     private fun selectShortcutRow(row: Int, requestFocus: Boolean) {
@@ -275,6 +276,13 @@ class TuiLauncherConfiguration : Configurable {
         table.scrollRectToVisible(table.getCellRect(row, 0, true))
         if (requestFocus) table.requestFocusInWindow()
     }
+
+    internal class BuiltInShortcut(
+        val actionName: String,
+        val includeModifier: Boolean,
+        val stateProperty: KMutableProperty1<TuiLauncherSettings.State, Int?>,
+        var keyCode: Int?,
+    )
 
     private data class ShortcutBinding(
         val actionName: String,
@@ -348,21 +356,10 @@ class TuiLauncherConfiguration : Configurable {
         tableModel?.setRows(settings.state.tuiApps.map { it.copy() })
         tmuxKeybindingsEnabledCheckBox?.isSelected = settings.state.tmuxKeybindingsEnabled
         modifierCombo?.selectedItem = modifierComboItem()
-        resetShortcutKeyCodes()
+        builtInShortcuts.forEach { it.keyCode = it.stateProperty.get(settings.state) }
 
         refreshShortcutBindings()
         updateTmuxShortcutComponentsEnabled()
-    }
-
-    private fun resetShortcutKeyCodes() {
-        escapeKeyCode = settings.state.escapeKeyCode
-        focusEditorKeyCode = settings.state.focusEditorKeyCode
-        closeTuiKeyCode = settings.state.closeTuiKeyCode
-        nextTuiKeyCode = settings.state.nextTuiKeyCode
-        previousTuiKeyCode = settings.state.previousTuiKeyCode
-        toggleToolWindowKeyCode = settings.state.toggleToolWindowKeyCode
-        nextTuiWithoutFocusKeyCode = settings.state.nextTuiWithoutFocusKeyCode
-        previousTuiWithoutFocusKeyCode = settings.state.previousTuiWithoutFocusKeyCode
     }
 
     private fun modifierComboItem(): String = if (settings.state.escapeModifier == "ALT") "Alt" else "Ctrl"
@@ -371,15 +368,9 @@ class TuiLauncherConfiguration : Configurable {
         tuiApps = tableModel?.snapshot() ?: settings.state.tuiApps,
         tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true,
         escapeModifier = selectedEscapeModifier(),
-        escapeKeyCode = escapeKeyCode,
-        focusEditorKeyCode = focusEditorKeyCode,
-        closeTuiKeyCode = closeTuiKeyCode,
-        nextTuiKeyCode = nextTuiKeyCode,
-        previousTuiKeyCode = previousTuiKeyCode,
-        toggleToolWindowKeyCode = toggleToolWindowKeyCode,
-        nextTuiWithoutFocusKeyCode = nextTuiWithoutFocusKeyCode,
-        previousTuiWithoutFocusKeyCode = previousTuiWithoutFocusKeyCode,
-    )
+    ).also { edited ->
+        builtInShortcuts.forEach { it.stateProperty.set(edited, it.keyCode) }
+    }
 
     private fun selectedEscapeModifier(): String = if (modifierCombo?.selectedItem == "Alt") "ALT" else "CTRL"
 
@@ -393,14 +384,7 @@ class TuiLauncherConfiguration : Configurable {
         settings.state.tuiApps = newApps
         settings.state.tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true
         settings.state.escapeModifier = selectedEscapeModifier()
-        settings.state.escapeKeyCode = escapeKeyCode
-        settings.state.focusEditorKeyCode = focusEditorKeyCode
-        settings.state.closeTuiKeyCode = closeTuiKeyCode
-        settings.state.nextTuiKeyCode = nextTuiKeyCode
-        settings.state.previousTuiKeyCode = previousTuiKeyCode
-        settings.state.toggleToolWindowKeyCode = toggleToolWindowKeyCode
-        settings.state.nextTuiWithoutFocusKeyCode = nextTuiWithoutFocusKeyCode
-        settings.state.previousTuiWithoutFocusKeyCode = previousTuiWithoutFocusKeyCode
+        builtInShortcuts.forEach { it.stateProperty.set(settings.state, it.keyCode) }
         settings.loadActions()
     }
 
