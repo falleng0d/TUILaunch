@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-16
+
 ### Fixed
 
 - Closing a session with the tab's X button or the tab context menu now remembers the tool window
@@ -11,6 +13,12 @@
 - Closing the last session with the mouse now returns focus to the editor when the session was
   started from the editor. Closing a session while others remain leaves focus on the tab the tool
   window selects next.
+- The Reset button in Settings now restores every field to its saved value. It previously did
+  nothing at all.
+- The Settings panel no longer looks edited the moment it opens. Apply stayed enabled and OK
+  re-registered every action even when nothing had been changed.
+- Pressing a key in the shortcut table with no row selected no longer throws. "Remove Shortcut" is
+  now disabled unless tmux keybindings are on and a row is selected.
 
 ## [0.3.0] - 2026-08-15
 
@@ -51,7 +59,8 @@
      - Sessions are managed in their own TUILaunch tool window.
 - Added tmux-like prefix keybindings inside TUI terminals.
 
-[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/atm1020/TUILaunch/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/atm1020/TUILaunch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/atm1020/TUILaunch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/atm1020/TUILaunch/commits/v0.1.0
