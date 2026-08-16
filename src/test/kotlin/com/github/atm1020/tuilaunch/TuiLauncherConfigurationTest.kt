@@ -300,6 +300,163 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertEquals(KeyEvent.VK_F, TuiLauncherSettings.getInstance().state.focusEditorKeyCode)
     }
 
+    fun testResetRestoresEditedAppRows() {
+        val (configurable, component) = configurableWithApp("lazygit")
+        val appsModel = appsModelOf(component)
+
+        appsModel.setValueAt("renamed", 0, 0)
+        appsModel.addRow(TuiAppConfig(name = "extra", command = "extra"))
+        configurable.reset()
+
+        assertEquals(listOf("lazygit"), appsModel.snapshot().map { it.name })
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetRestoresRemovedAppRows() {
+        val (configurable, component) = configurableWithApp("lazygit")
+        val appsModel = appsModelOf(component)
+
+        appsModel.removeRow(0)
+        assertTrue(configurable.isModified())
+        configurable.reset()
+
+        assertEquals(listOf("lazygit"), appsModel.snapshot().map { it.name })
+        assertEquals(9, findShortcutTable(component)!!.rowCount)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetRestoresTmuxKeybindingsCheckBox() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, "Enable tmux-like prefix keybindings")!!
+
+        checkbox.doClick()
+        assertFalse(findButton(component, "Record Shortcut")!!.isEnabled)
+
+        configurable.reset()
+
+        assertTrue(checkbox.isSelected)
+        assertTrue(findButton(component, "Record Shortcut")!!.isEnabled)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetReenablesShortcutControlsDisabledByEdit() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.tmuxKeybindingsEnabled = false
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, "Enable tmux-like prefix keybindings")!!
+        val recordButton = findButton(component, "Record Shortcut")!!
+
+        assertFalse(recordButton.isEnabled)
+        checkbox.doClick()
+        assertTrue(recordButton.isEnabled)
+
+        configurable.reset()
+
+        assertFalse(checkbox.isSelected)
+        assertFalse(recordButton.isEnabled)
+        assertFalse(findButton(component, "Remove Shortcut")!!.isEnabled)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetRestoresPrefixModifier() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val combo = findComponent<JComboBox<*>>(component) { it.itemCount == 2 }!!
+
+        combo.selectedItem = "Alt"
+        configurable.reset()
+
+        assertEquals("Ctrl", combo.selectedItem)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetRestoresPrefixCommandKeyCodes() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.escapeKeyCode = KeyEvent.VK_B
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val shortcutTable = findShortcutTable(component)!!
+
+        for (row in 0 until shortcutTable.rowCount) {
+            shortcutTable.selectionModel.setSelectionInterval(row, row)
+            pressKeyOn(shortcutTable, KeyEvent.VK_1 + row)
+        }
+        assertTrue(configurable.isModified())
+
+        configurable.reset()
+
+        assertEquals("Ctrl+B", shortcutTable.model.getValueAt(0, 1))
+        for (row in 1 until shortcutTable.rowCount) {
+            assertEquals("Not set", shortcutTable.model.getValueAt(row, 1))
+        }
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetRestoresAppShortcutKeyCode() {
+        val (configurable, component) = configurableWithApp("lazygit")
+        val shortcutTable = findShortcutTable(component)!!
+
+        shortcutTable.selectionModel.setSelectionInterval(8, 8)
+        pressKeyOn(shortcutTable, KeyEvent.VK_G)
+        assertTrue(configurable.isModified())
+
+        configurable.reset()
+
+        assertEquals("Not set", shortcutTable.model.getValueAt(8, 1))
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetClearsStaleTableSelections() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.tuiApps.add(TuiAppConfig(name = "alpha", command = "alpha"))
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val appsTable = findAppsTable(component)!!
+        val shortcutTable = findShortcutTable(component)!!
+
+        (appsTable.model as TuiAppTableModel).addRow(TuiAppConfig(name = "beta", command = "beta"))
+        appsTable.selectionModel.setSelectionInterval(1, 1)
+        shortcutTable.selectionModel.setSelectionInterval(9, 9)
+
+        configurable.reset()
+
+        assertEquals(1, appsTable.rowCount)
+        assertEquals(9, shortcutTable.rowCount)
+        assertEquals(-1, appsTable.selectedRow)
+        assertEquals(-1, shortcutTable.selectedRow)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetBeforeAnyEditKeepsPersistedValues() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.escapeModifier = "ALT"
+        settings.state.focusEditorKeyCode = KeyEvent.VK_X
+        settings.state.tuiApps.add(TuiAppConfig(name = "lazygit", command = "lazygit", shortcutKeyCode = KeyEvent.VK_G))
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        configurable.reset()
+
+        val shortcutTable = findShortcutTable(component)!!
+        assertEquals("X", shortcutTable.model.getValueAt(1, 1))
+        assertEquals("G", shortcutTable.model.getValueAt(8, 1))
+        assertEquals("Alt", findComponent<JComboBox<*>>(component) { it.itemCount == 2 }!!.selectedItem)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetWithoutComponentIsSafe() {
+        val configurable = TuiLauncherConfiguration()
+
+        configurable.reset()
+
+        assertFalse(configurable.isModified())
+    }
+
     private fun configurableWithApp(name: String): Pair<TuiLauncherConfiguration, JPanel> {
         TuiLauncherSettings.getInstance().state.tuiApps.add(TuiAppConfig(name = name, command = name))
         val configurable = TuiLauncherConfiguration()

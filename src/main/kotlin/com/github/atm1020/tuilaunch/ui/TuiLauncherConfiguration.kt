@@ -133,7 +133,7 @@ class TuiLauncherConfiguration : Configurable {
 
     private fun createTmuxKeybindingsPanel(): JComponent {
         val combo = JComboBox(arrayOf("Ctrl", "Alt")).apply {
-            selectedItem = if (settings.state.escapeModifier == "ALT") "Alt" else "Ctrl"
+            selectedItem = modifierComboItem()
         }
         modifierCombo = combo
 
@@ -337,6 +337,35 @@ class TuiLauncherConfiguration : Configurable {
         keyCode == KeyEvent.VK_META
 
     override fun isModified(): Boolean = tuiLauncherPanel != null && editedState() != settings.state
+
+    override fun reset() {
+        if (tuiLauncherPanel == null) return
+
+        appsTable?.cellEditor?.cancelCellEditing()
+        appsTable?.clearSelection()
+        shortcutsTable?.clearSelection()
+
+        tableModel?.setRows(settings.state.tuiApps.map { it.copy() })
+        tmuxKeybindingsEnabledCheckBox?.isSelected = settings.state.tmuxKeybindingsEnabled
+        modifierCombo?.selectedItem = modifierComboItem()
+        resetShortcutKeyCodes()
+
+        refreshShortcutBindings()
+        updateTmuxShortcutComponentsEnabled()
+    }
+
+    private fun resetShortcutKeyCodes() {
+        escapeKeyCode = settings.state.escapeKeyCode
+        focusEditorKeyCode = settings.state.focusEditorKeyCode
+        closeTuiKeyCode = settings.state.closeTuiKeyCode
+        nextTuiKeyCode = settings.state.nextTuiKeyCode
+        previousTuiKeyCode = settings.state.previousTuiKeyCode
+        toggleToolWindowKeyCode = settings.state.toggleToolWindowKeyCode
+        nextTuiWithoutFocusKeyCode = settings.state.nextTuiWithoutFocusKeyCode
+        previousTuiWithoutFocusKeyCode = settings.state.previousTuiWithoutFocusKeyCode
+    }
+
+    private fun modifierComboItem(): String = if (settings.state.escapeModifier == "ALT") "Alt" else "Ctrl"
 
     private fun editedState(): TuiLauncherSettings.State = settings.state.copy(
         tuiApps = tableModel?.snapshot() ?: settings.state.tuiApps,

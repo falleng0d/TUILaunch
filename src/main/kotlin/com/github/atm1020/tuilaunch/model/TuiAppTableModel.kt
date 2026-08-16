@@ -46,6 +46,12 @@ class TuiAppTableModel(private val apps: MutableList<TuiAppConfig>) : AbstractTa
         }
     }
 
+    fun setRows(newApps: List<TuiAppConfig>) {
+        apps.clear()
+        apps.addAll(newApps)
+        fireTableDataChanged()
+    }
+
     fun appAt(rowIndex: Int): TuiAppConfig = apps[rowIndex]
 
     fun snapshot(): MutableList<TuiAppConfig> = apps.map { it.copy() }.toMutableList()
