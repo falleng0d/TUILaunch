@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- TUILaunch now requires IntelliJ IDEA 2026.2 or newer. Older IDEs, including the whole 2025.x
+  line, are no longer supported and will not offer the plugin as an update.
+
 ## [0.3.1] - 2026-08-16
 
 ### Fixed
