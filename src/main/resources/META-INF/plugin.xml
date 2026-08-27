@@ -20,6 +20,7 @@
         <toolWindow id="TUILaunch"
                     anchor="bottom"
                     canCloseContents="true"
+                    icon="org.jetbrains.plugins.terminal.TerminalIcons.OpenTerminal_13x13"
                     factoryClass="com.github.atm1020.tuilaunch.toolwindow.TuiLaunchToolWindowFactory"/>
     </extensions>
 
