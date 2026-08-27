@@ -169,6 +169,12 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - A `KeyEventDispatcher` sees one keystroke at a time and cannot arbitrate a chord, so two-stroke shortcuts must be ignored rather than matched on their first stroke.
 - `ToolWindowTabRenameActionBase` hardcodes `Balloon.Position.above`, which is wrong for a bottom-anchored tool window.
 - `JTable.getSelectedRow` returns -1 when nothing is selected, and `convertRowIndexToModel` passes that -1 straight through when no row sorter is installed, so an empty selection has to be rejected before the index is used.
+- `ContentLayout.shouldShowId` compares the `ToolWindowContentUi.HIDE_ID_LABEL` client property against the *string* `"true"`, so a `Boolean` value leaves the "TUILaunch:" prefix on the tab bar; the property is read from the first ancestor of the content component that has it set, which makes `toolWindow.component` the place to put it.
+- `TabContentLayout` derives the visible tab strip solely from `contentAdded`/`contentRemoved`, so a tab reorder the user can see has necessarily fired both events on the `ContentManager`; there is no separate reorder path to listen for.
+- A tab drag is a temporary removal and re-add of the same `Content` with `Content.TEMPORARY_REMOVED_KEY` set, so every removal hook has to check that key before treating it as a close; the key is still set when `contentRemoved` and the matching `contentAdded` fire, and is cleared only once the drag ends.
+- IDE 2026.2 skips `contentRemoveQuery` for a temporary removal while 2025.2 fires it, so only `contentRemoved` can be relied on to observe a drag.
+- Tool window tab drag needs `ToolWindowContentUi.ALLOW_DND_FOR_TABS` on 2025.2, which this plugin does not set, and on 2026.2 needs `Registry.is("ide.allow.tool.window.tabs.reorder")`, which ships enabled; dragging is therefore impossible in the sandbox `runIde` builds against the 2025.2 target.
+- Dropping a tool window tab into the editor on 2026.2 ends with the platform calling `Disposer.dispose` on the `Content`, which takes any disposable registered under it with it, so a session can disappear without any close event of ours running.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

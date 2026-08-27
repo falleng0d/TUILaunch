@@ -111,9 +111,7 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
     }
 
     open fun onTabRemoved(beforeRemoval: (Any) -> Unit, afterRemoval: (Any) -> Unit) {
-        val toolWindow = requireToolWindow()
-        val contentManager = toolWindow.contentManager
-        val contentManagerListener = object : ContentManagerListener {
+        installContentManagerListener(object : ContentManagerListener {
             override fun contentRemoveQuery(event: ContentManagerEvent) {
                 beforeRemoval(ContentTabHandle(event.content))
             }
@@ -121,10 +119,28 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
             override fun contentRemoved(event: ContentManagerEvent) {
                 afterRemoval(ContentTabHandle(event.content))
             }
-        }
-        contentManager.addContentManagerListener(contentManagerListener)
+        })
+    }
+
+    open fun onTabAdded(listener: (Any) -> Unit) {
+        installContentManagerListener(object : ContentManagerListener {
+            override fun contentAdded(event: ContentManagerEvent) {
+                listener(ContentTabHandle(event.content))
+            }
+        })
+    }
+
+    open fun isTabRemovedForDrag(handle: Any): Boolean =
+        contentOf(handle).getUserData(Content.TEMPORARY_REMOVED_KEY) == true
+
+    open fun isTabAttachedToToolWindow(handle: Any): Boolean = contentOf(handle).manager != null
+
+    private fun installContentManagerListener(listener: ContentManagerListener) {
+        val toolWindow = requireToolWindow()
+        val contentManager = toolWindow.contentManager
+        contentManager.addContentManagerListener(listener)
         Disposer.register(toolWindow.disposable) {
-            contentManager.removeContentManagerListener(contentManagerListener)
+            contentManager.removeContentManagerListener(listener)
         }
     }
 

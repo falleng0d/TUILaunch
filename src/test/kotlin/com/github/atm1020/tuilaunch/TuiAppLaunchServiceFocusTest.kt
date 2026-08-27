@@ -10,6 +10,7 @@ import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.CheckedDisposable
+import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.awt.event.KeyEvent
@@ -74,8 +75,11 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         var emitStaleResizeOnApply = false
         private var sizeChanged: (() -> Unit)? = null
         private var tabSelected: ((Any) -> Unit)? = null
+        private var tabAdded: ((Any) -> Unit)? = null
         private var tabRemoving: ((Any) -> Unit)? = null
         private var tabRemoved: ((Any) -> Unit)? = null
+        private val tabsRemovedForDrag = mutableSetOf<Any>()
+        private val disposableByTab = mutableMapOf<Any, CheckedDisposable>()
 
         override fun isVisible(): Boolean = visible
         override fun isPinned(): Boolean = pinned
@@ -92,7 +96,11 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             val handle = Any()
             tabs.add(handle)
             titles.add(title)
-            (disposable as? CheckedDisposable)?.let { disposables.add(it) }
+            (disposable as? CheckedDisposable)?.let {
+                disposables.add(it)
+                disposableByTab[handle] = it
+            }
+            tabAdded?.invoke(handle)
             if (selected == null) {
                 selected = handle
                 tabSelected?.invoke(handle)
@@ -123,9 +131,39 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             }
         }
 
-        fun moveTab(from: Int, to: Int) {
-            tabs.add(to, tabs.removeAt(from))
+        fun dragTab(from: Int, to: Int) {
+            val handle = detachTabForDrag(from)
+            tabs.add(to, handle)
+            tabAdded?.invoke(handle)
+            selectTab(handle)
+            tabsRemovedForDrag.remove(handle)
         }
+
+        fun dragTabOutOfTheStrip(from: Int) {
+            tabsRemovedForDrag.remove(detachTabForDrag(from))
+        }
+
+        fun dragTabIntoTheEditor(from: Int) {
+            val handle = detachTabForDrag(from)
+            disposableByTab[handle]?.let { Disposer.dispose(it) }
+            tabsRemovedForDrag.remove(handle)
+        }
+
+        private fun detachTabForDrag(from: Int): Any {
+            val handle = tabs[from]
+            tabsRemovedForDrag.add(handle)
+            if (selected === handle) selected = tabs.getOrNull(from + 1) ?: tabs.getOrNull(from - 1)
+            tabs.removeAt(from)
+            tabRemoved?.invoke(handle)
+            selected?.let { tabSelected?.invoke(it) }
+            return handle
+        }
+
+        fun visiblePositionOfActiveTab(): Int = tabs.indexOf(selected) + 1
+
+        override fun isTabRemovedForDrag(handle: Any): Boolean = handle in tabsRemovedForDrag
+
+        override fun isTabAttachedToToolWindow(handle: Any): Boolean = handle in tabs
 
         override fun currentSize(): ToolWindowSize? = size
 
@@ -143,6 +181,10 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
 
         override fun onTabSelected(listener: (Any) -> Unit) {
             tabSelected = listener
+        }
+
+        override fun onTabAdded(listener: (Any) -> Unit) {
+            tabAdded = listener
         }
 
         override fun onTabRemoved(beforeRemoval: (Any) -> Unit, afterRemoval: (Any) -> Unit) {
@@ -664,21 +706,71 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         assertSame(third, host.activeTab())
     }
 
-    fun testTraversalFollowsTheStripAfterATabIsDragged() {
-        val (service, host) = launchTabs(3)
-        val (first, second, third) = Triple(host.tabs[0], host.tabs[1], host.tabs[2])
+    fun testNextTabWalksVisiblePositionsAfterATabIsDraggedToTheFront() {
+        val (service, host) = launchTabs(4)
 
-        host.moveTab(0, 1)
-        host.selectTab(first)
+        host.dragTab(2, 0)
 
-        service.nextTuiTab()
+        assertEquals(1, host.visiblePositionOfActiveTab())
+
+        val visitedPositions = (1..3).map {
+            service.nextTuiTab()
+            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+            host.visiblePositionOfActiveTab()
+        }
+
+        assertEquals(listOf(2, 3, 4), visitedPositions)
+    }
+
+    fun testPreviousTabWalksVisiblePositionsBackwardsAfterATabIsDraggedToTheEnd() {
+        val (service, host) = launchTabs(4)
+
+        host.dragTab(0, 3)
+
+        assertEquals(4, host.visiblePositionOfActiveTab())
+
+        val visitedPositions = (1..4).map {
+            service.previousTuiTab()
+            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+            host.visiblePositionOfActiveTab()
+        }
+
+        assertEquals(listOf(3, 2, 1, 4), visitedPositions)
+    }
+
+    fun testDraggingATabKeepsEverySessionAlive() {
+        val (_, host) = launchTabs(3)
+
+        host.dragTab(0, 2)
+
+        assertTrue(host.disposables.none { it.isDisposed })
+    }
+
+    fun testATabDraggedOutOfTheStripAndNeverDroppedBackIsClosed() {
+        val (service, host) = launchTabs(2)
+        val remaining = host.tabs[1]
+
+        host.dragTabOutOfTheStrip(0)
+        assertFalse(host.disposables[0].isDisposed)
+
+        service.focusTui()
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
-        assertSame(third, host.activeTab())
 
-        host.selectTab(first)
-        service.previousTuiTab()
+        assertTrue(host.disposables[0].isDisposed)
+        assertFalse(host.disposables[1].isDisposed)
+        assertEquals(listOf(remaining), host.tabs)
+    }
+
+    fun testASessionDestroyedByTheEditorDropIsForgotten() {
+        val (service, host) = launchTabs(2)
+
+        host.dragTabIntoTheEditor(0)
+
+        service.launchNew("claude", "claude")
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
-        assertSame(second, host.activeTab())
+
+        assertEquals(listOf("claude", "claude 1", "claude"), host.titles)
+        assertFalse(host.disposables[1].isDisposed)
     }
 
     fun testTraversalImmediatelyAfterACloseUsesTheRemainingStrip() {

@@ -63,6 +63,7 @@ class TuiAppLaunchService(private val project: Project) {
     private val pendingLaunchesBySessionId = mutableMapOf<String, PendingLaunch>()
 
     private val closingSessions = mutableSetOf<String>()
+    private val sessionIdsRemovedForDrag = mutableSetOf<String>()
     private var sessionSequence = 0
     private var activeSessionIdBeingRemoved: String? = null
 
@@ -79,16 +80,20 @@ class TuiAppLaunchService(private val project: Project) {
         return IdeToolWindowHost(tw).also { host = it }
     }
 
-    private fun hostWithListeners(): IdeToolWindowHost? = resolveHost()?.also { ensureHostListeners(it) }
+    private fun hostWithListeners(): IdeToolWindowHost? = resolveHost()?.also {
+        ensureHostListeners(it)
+        closeTabsLostToADrag(it)
+    }
 
     private fun ensureHostListeners(host: IdeToolWindowHost) {
         if (hostListenersInstalled) return
         hostListenersInstalled = true
         host.onSizeChanged { recordActiveTabSize(host) }
         host.onTabSelected { handle -> onTabSelected(host, handle) }
+        host.onTabAdded { handle -> onTabAdded(handle) }
         host.onTabRemoved(
             beforeRemoval = { handle -> onTabRemoving(host, handle) },
-            afterRemoval = { handle -> forgetRemovedTab(handle) },
+            afterRemoval = { handle -> onTabRemoved(host, handle) },
         )
     }
 
@@ -213,17 +218,19 @@ class TuiAppLaunchService(private val project: Project) {
     }
 
     private fun selectRelativeTuiTab(offset: Int, requestFocus: Boolean) {
-        if (tabsBySessionId.size < 2) return
         val host = hostWithListeners() ?: return
         invokeLater {
-            val selectableTabs = tabsNotClosing().values
-            val orderedTabs = host.orderedHandles().mapNotNull { handle ->
-                selectableTabs.firstOrNull { it.handle == handle }
-            }
-            if (orderedTabs.size < 2) return@invokeLater
+            val stripHandles = host.orderedHandles()
+            if (stripHandles.size < 2) return@invokeLater
             val activeHandle = host.activeTab()
-            val originIndex = orderedTabs.indexOfFirst { it.handle == activeHandle }.coerceAtLeast(0)
-            val tab = orderedTabs[Math.floorMod(originIndex + offset, orderedTabs.size)]
+            val originIndex = stripHandles.indexOfFirst { it == activeHandle }
+            if (originIndex < 0) return@invokeLater
+            val selectableTabs = tabsNotClosing().values
+            val tab = (1 until stripHandles.size)
+                .asSequence()
+                .map { stripHandles[Math.floorMod(originIndex + offset * it, stripHandles.size)] }
+                .mapNotNull { handle -> selectableTabs.firstOrNull { it.handle == handle } }
+                .firstOrNull() ?: return@invokeLater
             selectTuiTab(host, tab, requestFocus = requestFocus)
         }
     }
@@ -337,10 +344,35 @@ class TuiAppLaunchService(private val project: Project) {
 
     private fun onTabRemoving(host: IdeToolWindowHost, handle: Any) {
         activeSessionIdBeingRemoved = null
+        if (host.isTabRemovedForDrag(handle)) return
         val tab = tabFor(handle) ?: return
         if (host.activeTab() != tab.handle) return
         activeSessionIdBeingRemoved = tab.sessionId
         host.currentSize()?.let { storeWindowSize(tab.appName, it) }
+    }
+
+    private fun onTabRemoved(host: IdeToolWindowHost, handle: Any) {
+        if (!host.isTabRemovedForDrag(handle)) {
+            forgetRemovedTab(handle)
+            return
+        }
+        tabFor(handle)?.let { sessionIdsRemovedForDrag.add(it.sessionId) }
+    }
+
+    private fun onTabAdded(handle: Any) {
+        tabFor(handle)?.let { sessionIdsRemovedForDrag.remove(it.sessionId) }
+    }
+
+    private fun closeTabsLostToADrag(host: IdeToolWindowHost) {
+        if (sessionIdsRemovedForDrag.isEmpty()) return
+        sessionIdsRemovedForDrag.toList().forEach { sessionId ->
+            val tab = tabsBySessionId[sessionId]
+            if (tab != null && host.isTabRemovedForDrag(tab.handle)) return@forEach
+            sessionIdsRemovedForDrag.remove(sessionId)
+            if (tab == null || host.isTabAttachedToToolWindow(tab.handle)) return@forEach
+            forgetTab(sessionId)
+            Disposer.dispose(tab.disposable)
+        }
     }
 
     private fun forgetRemovedTab(handle: Any) {
@@ -357,5 +389,6 @@ class TuiAppLaunchService(private val project: Project) {
     private fun forgetTab(sessionId: String) {
         tabsBySessionId.remove(sessionId)
         closingSessions.remove(sessionId)
+        sessionIdsRemovedForDrag.remove(sessionId)
     }
 }
