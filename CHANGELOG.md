@@ -4,10 +4,24 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-27
+
+### Added
+
+- The TUILaunch tool window now has an icon on the tool window stripe.
+
 ### Changed
 
 - TUILaunch now requires IntelliJ IDEA 2026.2 or newer. Older IDEs, including the whole 2025.x
   line, are no longer supported and will not offer the plugin as an update.
+- The "TUILaunch:" label no longer takes space ahead of the session tabs, leaving the full width of
+  the tab bar for the tabs themselves.
+
+### Fixed
+
+- Dragging a tab to a new position no longer breaks "Select Next/Previous Tab". The dragged tab used
+  to become unreachable, and the shortcuts walked the remaining tabs in the wrong order. Dragging a
+  tab also no longer unhooks that session's prefix key.
 
 ## [0.3.1] - 2026-08-16
 
@@ -64,7 +78,8 @@
      - Sessions are managed in their own TUILaunch tool window.
 - Added tmux-like prefix keybindings inside TUI terminals.
 
-[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/atm1020/TUILaunch/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/atm1020/TUILaunch/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/atm1020/TUILaunch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/atm1020/TUILaunch/compare/v0.1.0...v0.2.0
