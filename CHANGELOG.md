@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- TUI sessions stay visible and usable while the IDE rebuilds its indexes, instead of being
+  replaced by the "indexes are being rebuilt" panel. The TUILaunch actions and shortcuts also
+  keep working during indexing.
+
 ## [0.4.0] - 2026-08-27
 
 ### Added

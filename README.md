@@ -175,6 +175,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - The platform skips `contentRemoveQuery` for a temporary removal, so only `contentRemoved` can be relied on to observe a drag.
 - `ToolWindowInnerDragHelper.canStartDragging` allows a tab reorder when `Registry.is("ide.allow.tool.window.tabs.reorder")` is on, which is the shipped default, so tab dragging reproduces in the sandbox `runIde` instance; the older `ToolWindowContentUi.ALLOW_DND_FOR_TABS` client property is no longer part of that gate.
 - Dropping a tool window tab into the editor ends with the platform calling `Disposer.dispose` on the `Content`, which takes any disposable registered under it with it, so a session can disappear without any close event of ours running.
+- Whether a tool window keeps its content visible during indexing is decided only by the factory instance: `ToolWindowSetInitializer.beanToTask` sets `RegisterToolWindowTaskData.canWorkInDumbMode` from `DumbService.isDumbAware(factory)`, which reaches `PossiblyDumbAware.isDumbAware`'s `this is DumbAware` default, and `ToolWindowImpl` uses that flag to decide whether to wrap the content in `DumbService.wrapGently`'s "indexes are being rebuilt" `DumbUnawareHider`. There is no `<toolWindow>` attribute for it, so the `DumbAware` marker on the factory is the only lever.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

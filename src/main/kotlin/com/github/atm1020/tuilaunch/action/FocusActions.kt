@@ -1,65 +1,65 @@
 package com.github.atm1020.tuilaunch.action
 
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
-import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
+import com.intellij.openapi.project.DumbAwareAction
 
-class FocusTuiAction : AnAction() {
+class FocusTuiAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.focusTui()
     }
 }
 
-class FocusEditorAction : AnAction() {
+class FocusEditorAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.focusEditor()
     }
 }
 
-class ToggleFocusAction : AnAction() {
+class ToggleFocusAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.toggleFocus()
     }
 }
 
-class ToggleToolWindowAction : AnAction() {
+class ToggleToolWindowAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.toggleToolWindow()
     }
 }
 
-class ToggleToolWindowAndFocusAction : AnAction() {
+class ToggleToolWindowAndFocusAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.toggleToolWindowAndFocus()
     }
 }
 
-class CloseActiveTuiAction : AnAction() {
+class CloseActiveTuiAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.closeActiveTui()
     }
 }
 
-class NextTuiTabAction : AnAction() {
+class NextTuiTabAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.nextTuiTab()
     }
 }
 
-class NextTuiTabWithoutFocusAction : AnAction() {
+class NextTuiTabWithoutFocusAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.nextTuiTabWithoutFocus()
     }
 }
 
-class PreviousTuiTabAction : AnAction() {
+class PreviousTuiTabAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.previousTuiTab()
     }
 }
 
-class PreviousTuiTabWithoutFocusAction : AnAction() {
+class PreviousTuiTabWithoutFocusAction : DumbAwareAction() {
     override fun actionPerformed(e: AnActionEvent) {
         e.project?.service<TuiAppLaunchService>()?.previousTuiTabWithoutFocus()
     }
