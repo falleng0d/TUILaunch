@@ -5,7 +5,6 @@ import com.intellij.codeInsight.hint.HintManager
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorKind
@@ -49,6 +48,9 @@ class PromptGutterInstaller : EditorFactoryListener {
 
     private val guttersByEditor = mutableMapOf<Editor, PromptBlockGutter>()
 
+    @TestOnly
+    fun hasNoPendingRefresh(): Boolean = guttersByEditor.values.all { it.hasNoPendingRefresh() }
+
     override fun editorCreated(event: EditorFactoryEvent) {
         val editor = event.editor
         if (editor.editorKind in IGNORED_EDITOR_KINDS) return
@@ -65,16 +67,17 @@ class PromptGutterInstaller : EditorFactoryListener {
 private class PromptBlockGutter(private val editor: Editor) {
 
     private val installedHighlighters = mutableListOf<RangeHighlighter>()
-    private var installedMarkerLines = emptyList<Int>()
     private val listenerLifetime = Disposer.newDisposable("TUILaunch prompt gutter")
 
     private val refreshQueue = MergingUpdateQueue(
         "TUILaunch prompt gutter",
-        refreshMergeMillis(),
+        REFRESH_MERGE_MILLIS,
         true,
         MergingUpdateQueue.ANY_COMPONENT,
         listenerLifetime,
     )
+
+    fun hasNoPendingRefresh(): Boolean = refreshQueue.isEmpty
 
     private val documentListener = object : DocumentListener {
         override fun documentChanged(event: DocumentEvent) {
@@ -111,30 +114,44 @@ private class PromptBlockGutter(private val editor: Editor) {
             removeInstalledHighlighters()
             return
         }
-        val markerLines = promptMarkerLines(editor.document.charsSequence)
-        if (markerLines == installedMarkerLines && installedHighlighters.all { it.isValid }) return
-        removeInstalledHighlighters()
-        markerLines.forEach { markerLine ->
-            val highlighter = editor.markupModel.addLineHighlighter(
-                null,
-                markerLine,
-                HighlighterLayer.ADDITIONAL_SYNTAX,
-            )
-            highlighter.gutterIconRenderer = PromptBlockGutterIconRenderer(editor, markerLine)
-            installedHighlighters.add(highlighter)
+        reconcile(promptMarkerLines(editor.document.charsSequence))
+    }
+
+    private fun reconcile(desiredMarkerLines: List<Int>) {
+        val wantedLines = desiredMarkerLines.toHashSet()
+        val reusableByLine = HashMap<Int, RangeHighlighter>(desiredMarkerLines.size)
+        installedHighlighters.forEach { highlighter ->
+            val line = lineOf(highlighter)
+            if (line == null || line !in wantedLines || line in reusableByLine) {
+                editor.markupModel.removeHighlighter(highlighter)
+            } else {
+                reusableByLine[line] = highlighter
+            }
         }
-        installedMarkerLines = markerLines
+        installedHighlighters.clear()
+        desiredMarkerLines.forEach { line ->
+            installedHighlighters.add(reusableByLine[line] ?: addGutterHighlighter(line))
+        }
+    }
+
+    private fun lineOf(highlighter: RangeHighlighter): Int? =
+        if (highlighter.isValid) editor.document.getLineNumber(highlighter.startOffset) else null
+
+    private fun addGutterHighlighter(line: Int): RangeHighlighter {
+        val highlighter = editor.markupModel.addLineHighlighter(
+            null,
+            line,
+            HighlighterLayer.ADDITIONAL_SYNTAX,
+        )
+        highlighter.gutterIconRenderer = PromptBlockGutterIconRenderer(editor, highlighter)
+        return highlighter
     }
 
     private fun removeInstalledHighlighters() {
         installedHighlighters.forEach { editor.markupModel.removeHighlighter(it) }
         installedHighlighters.clear()
-        installedMarkerLines = emptyList()
     }
 }
-
-private fun refreshMergeMillis(): Int =
-    if (ApplicationManager.getApplication().isUnitTestMode) 0 else REFRESH_MERGE_MILLIS
 
 private fun fileNameOf(editor: Editor): String? =
     FileDocumentManager.getInstance().getFile(editor.document)?.name ?: editor.virtualFile?.name
@@ -166,7 +183,7 @@ private fun lineAsItWasBeforeTheEdit(
 
 private data class PromptBlockGutterIconRenderer(
     private val editor: Editor,
-    private val markerLine: Int,
+    private val highlighter: RangeHighlighter,
 ) : GutterIconRenderer(), DumbAware {
 
     override fun getIcon(): Icon = AllIcons.RunConfigurations.TestState.Run
@@ -177,19 +194,25 @@ private data class PromptBlockGutterIconRenderer(
 
     override fun getAlignment(): Alignment = Alignment.LEFT
 
-    override fun getClickAction(): AnAction = SendPromptBlockAction(editor, markerLine)
+    override fun getClickAction(): AnAction = SendPromptBlockAction(editor, highlighter)
 }
 
 private class SendPromptBlockAction(
     private val editor: Editor,
-    private val markerLine: Int,
+    private val highlighter: RangeHighlighter,
 ) : DumbAwareAction(SEND_TOOLTIP) {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = editor.project ?: e.project ?: return
-        val blockText = promptBlockTextAt(editor.document.charsSequence, markerLine) ?: return
+        val blockText = promptBlockTextUnder(editor, highlighter) ?: return
         if (!project.service<TuiAppLaunchService>().sendTextToActiveSession(blockText)) {
             HintManager.getInstance().showErrorHint(editor, NO_SESSION_MESSAGE)
         }
     }
+}
+
+internal fun promptBlockTextUnder(editor: Editor, highlighter: RangeHighlighter): String? {
+    if (!highlighter.isValid) return null
+    val document = editor.document
+    return promptBlockTextAt(document.charsSequence, document.getLineNumber(highlighter.startOffset))
 }

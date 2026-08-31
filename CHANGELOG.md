@@ -17,8 +17,9 @@
 ### Changed
 
 - Prompt gutter icons are much cheaper to keep up to date, so editing a long `PROMPT.md` stays
-  responsive. Typing that cannot move a prompt boundary no longer re-reads the file at all, and a
-  file whose code fences are left open no longer takes seconds to scan.
+  responsive. Typing that cannot move a prompt boundary no longer re-reads the file at all, a file
+  whose code fences are left open no longer takes seconds to scan, and adding a line above the
+  prompts now moves the existing icons instead of rebuilding every one of them.
 
 ### Fixed
 
