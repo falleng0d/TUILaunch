@@ -9,7 +9,8 @@
 - TUI tabs can be brought back when a project is reopened. Turn on "Restore open tabs" in Settings
   and the tabs that were open are relaunched in the same order, keeping their renamed titles and the
   tab that was selected. Tabs are remembered per project, and an app that has since been removed from
-  the settings is skipped. The setting is off by default.
+  the settings is skipped. This is on by default; turn off "Restore open tabs" in Settings to go back
+  to starting with an empty tool window.
 
 ### Changed
 
