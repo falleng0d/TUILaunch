@@ -4,13 +4,14 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-31
+
 ### Added
 
-- TUI tabs can be brought back when a project is reopened. Turn on "Restore open tabs" in Settings
-  and the tabs that were open are relaunched in the same order, keeping their renamed titles and the
-  tab that was selected. Tabs are remembered per project, and an app that has since been removed from
-  the settings is skipped. This is on by default; turn off "Restore open tabs" in Settings to go back
-  to starting with an empty tool window.
+- TUI tabs now come back when a project is reopened. The tabs that were open are relaunched in the
+  same order, keeping their renamed titles and the tab that was selected. Tabs are remembered per
+  project, and an app that has since been removed from the settings is skipped. Turn off "Restore
+  open tabs" in Settings to go back to starting with an empty tool window.
 
 ### Changed
 
@@ -117,7 +118,8 @@
      - Sessions are managed in their own TUILaunch tool window.
 - Added tmux-like prefix keybindings inside TUI terminals.
 
-[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/atm1020/TUILaunch/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/atm1020/TUILaunch/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/atm1020/TUILaunch/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/atm1020/TUILaunch/compare/v0.3.0...v0.3.1
