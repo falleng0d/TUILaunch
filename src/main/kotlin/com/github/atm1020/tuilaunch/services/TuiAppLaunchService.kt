@@ -2,6 +2,7 @@ package com.github.atm1020.tuilaunch.services
 
 import com.github.atm1020.tuilaunch.model.ACTION_ID_PREFIX
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
+import com.github.atm1020.tuilaunch.model.TuiSessionRecord
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
@@ -47,6 +48,8 @@ class TuiAppLaunchService(private val project: Project) {
     private var hostListenersInstalled = false
     private var windowRevealedByLaunch = false
     private var applyingSize = false
+    private var restoringTabs = false
+    private var restoreAttempted = false
 
     private data class OpenTab(
         val sessionId: String,
@@ -109,6 +112,20 @@ class TuiAppLaunchService(private val project: Project) {
     private fun onTabSelected(host: IdeToolWindowHost, handle: Any) {
         val tab = tabFor(handle) ?: return
         applySavedSize(host, tab.appName)
+        recordOpenTabs()
+    }
+
+    private fun recordOpenTabs() {
+        if (restoringTabs) return
+        if (!TuiLauncherSettings.getInstance().state.restoreOpenTabs) return
+        val host = host ?: return
+        val activeHandle = host.activeTab()
+        val records = host.orderedHandles().mapNotNull { handle ->
+            val tab = tabFor(handle) ?: return@mapNotNull null
+            if (tab.sessionId in closingSessions) return@mapNotNull null
+            TuiSessionRecord(tab.appName, tab.title, handle == activeHandle)
+        }
+        TuiOpenTabsService.getInstance(project).replaceTabs(records)
     }
 
     private fun applySavedSize(host: IdeToolWindowHost, appName: String) {
@@ -144,8 +161,61 @@ class TuiAppLaunchService(private val project: Project) {
 
     private fun newSessionId(appName: String): String = "$appName#${sessionSequence++}"
 
+    fun restoreSavedTabs() {
+        if (!TuiLauncherSettings.getInstance().state.restoreOpenTabs) return
+        if (restoreAttempted) return
+        restoreAttempted = true
+        val saved = TuiOpenTabsService.getInstance(project).state.tabs.toList()
+        if (saved.isEmpty()) return
+        val host = hostWithListeners() ?: return
+        restoringTabs = true
+        restoreTabAt(host, saved, 0, null, null)
+    }
+
+    private fun restoreTabAt(
+        host: IdeToolWindowHost,
+        saved: List<TuiSessionRecord>,
+        index: Int,
+        tabToSelect: OpenTab?,
+        lastRestoredTab: OpenTab?,
+    ) {
+        if (index >= saved.size) {
+            finishRestore(host, tabToSelect ?: lastRestoredTab)
+            return
+        }
+        val record = saved[index]
+        val config = configFor(record.appName)
+        if (config == null) {
+            thisLogger().info("Skipping restore of TUI tab '${record.title}': app '${record.appName}' is no longer configured")
+            restoreTabAt(host, saved, index + 1, tabToSelect, lastRestoredTab)
+            return
+        }
+        val title = uniqueSessionTitle(
+            record.title.ifBlank { record.appName },
+            tabsBySessionId.values.mapTo(mutableSetOf()) { it.title },
+        )
+        openNewTab(
+            host = host,
+            sessionId = newSessionId(record.appName),
+            appName = record.appName,
+            command = config.command,
+            title = title,
+            onOpened = { tab ->
+                restoreTabAt(host, saved, index + 1, if (record.selected) tab else tabToSelect, tab)
+            },
+            onFailed = { restoreTabAt(host, saved, index + 1, tabToSelect, lastRestoredTab) },
+        )
+    }
+
+    private fun finishRestore(host: IdeToolWindowHost, tabToSelect: OpenTab?) {
+        restoringTabs = false
+        if (tabToSelect != null) host.selectTab(tabToSelect.handle)
+        recordOpenTabs()
+    }
+
     fun renameTab(handle: Any, newTitle: String) {
         tabFor(handle)?.title = newTitle
+        recordOpenTabs()
     }
 
     fun focusTui() {
@@ -249,6 +319,8 @@ class TuiAppLaunchService(private val project: Project) {
         appName: String,
         command: String,
         title: String,
+        onOpened: ((OpenTab) -> Unit)? = null,
+        onFailed: (() -> Unit)? = null,
     ) {
         val disposable = Disposer.newCheckedDisposable("TUILaunch-$sessionId")
         pendingLaunchesBySessionId[sessionId] = PendingLaunch(appName, disposable)
@@ -271,12 +343,14 @@ class TuiAppLaunchService(private val project: Project) {
                 )
                 tabsBySessionId[sessionId] = tab
                 session.onTerminated { closeTab(sessionId) }
-                selectTuiTab(host, tab)
+                recordOpenTabs()
+                if (onOpened != null) onOpened(tab) else selectTuiTab(host, tab)
             },
             onFailed = { throwable ->
                 pendingLaunchesBySessionId.remove(sessionId)
                 Disposer.dispose(disposable)
                 thisLogger().warn("Failed to launch TUI app: $command", throwable)
+                onFailed?.invoke()
             },
         )
     }
@@ -367,6 +441,7 @@ class TuiAppLaunchService(private val project: Project) {
 
     private fun onTabRemoved(host: IdeToolWindowHost, handle: Any) {
         if (!host.isTabRemovedForDrag(handle)) {
+            recordOpenTabs()
             forgetRemovedTab(handle)
             return
         }
@@ -375,10 +450,12 @@ class TuiAppLaunchService(private val project: Project) {
 
     private fun onTabAdded(handle: Any) {
         tabFor(handle)?.let { sessionIdsRemovedForDrag.remove(it.sessionId) }
+        recordOpenTabs()
     }
 
     private fun closeTabsLostToADrag(host: IdeToolWindowHost) {
         if (sessionIdsRemovedForDrag.isEmpty()) return
+        var forgotATab = false
         sessionIdsRemovedForDrag.toList().forEach { sessionId ->
             val tab = tabsBySessionId[sessionId]
             if (tab != null && host.isTabRemovedForDrag(tab.handle)) return@forEach
@@ -386,7 +463,9 @@ class TuiAppLaunchService(private val project: Project) {
             if (tab == null || host.isTabAttachedToToolWindow(tab.handle)) return@forEach
             forgetTab(sessionId)
             Disposer.dispose(tab.disposable)
+            forgotATab = true
         }
+        if (forgotATab) recordOpenTabs()
     }
 
     private fun forgetRemovedTab(handle: Any) {

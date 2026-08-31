@@ -48,6 +48,20 @@ Multiple TUI apps can stay open at the same time as separate tabs, and each tab 
 
 TUILaunch remembers the last tool window size used by each app and restores it when that app tab is selected again.
 
+### Reopen TUI tabs when the project is opened
+
+Turn on **Reopen TUI tabs when the project is opened** in the TUILaunch settings and the plugin remembers, per project,
+which TUI tabs were open: the apps, their left-to-right order, their custom names, and which tab was selected.
+The next time you open that project, the tabs come back the first time the tool window is shown.
+
+Reopening means relaunching. Each tab starts a brand new session, so processes and scrollback are gone; only the shape
+of the tab strip comes back. An app that has since been deleted from the settings table is skipped, and an app whose
+command was edited starts the new command. The setting is off by default and applies to every project.
+
+The tab list lives in the project's `.idea/workspace.xml`, so it is per developer rather than shared through VCS.
+While the setting is off nothing is recorded and nothing is reopened; the list from before you turned it off stays on
+disk and is used again if you turn the setting back on before opening any TUI tab.
+
 ### Focus and tab actions
 
 TUILaunch registers global actions that can be bound in the IDE keymap or called from IdeaVim:
@@ -186,6 +200,11 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - JediTerm wraps a paste in `ESC[200~`/`ESC[201~` inside the private `TerminalPanel.pasteFromClipboard`, not in `TerminalStarter.sendString`, and bracketed-paste mode lives in a private field with no getter, so callers that send multi-line text have to build the wrapper themselves; JediTerm also does not strip an `ESC[201~` already present in the text, which would end the paste early.
 - `ToolWindowImpl.setTitleActions` calls `ensureContentManagerInitialized` and then dereferences its `decorator` without a null check, so a title bar button has to be installed from `createToolWindowContent`; `init` is too early and is only usable for `setTabActions`.
 - `MarkupModel.addLineHighlighter` produces a zero-length range marker anchored at the line's *first non-space* character, not at its start offset, and a deletion that strictly contains that offset invalidates the marker and silently drops the gutter icon; any edit-skipping optimisation has to re-check `RangeHighlighter.isValid` after a deletion.
+- `ToolWindowImpl.getContentManager` runs `createContentIfNeeded`, which invokes `ToolWindowFactory.createToolWindowContent` synchronously, so the first `contentManager` touch from plugin code re-enters the factory and anything the factory starts has to be pushed onto the event queue first.
+- `ContentManagerImpl.removeContent` takes the content out of `contents` before firing `contentRemoved` and moves the selection only afterwards, so the strip order read in `contentRemoved` is already correct while the selection is not.
+- `ContentManagerImpl` is a `Disposable.Parent` whose `dispose` clears `contents` and its listener list without firing anything, and `ContentImpl.dispose` never calls back into its manager, so tearing a tool window down at project close fires no `contentRemoved` at all; the only bulk path that does is `removeAllContents`, a plain loop over `removeContent` whose sole caller is `ToolWindowImpl.createContentIfNeeded`.
+- `ContentManagerImpl.setSelectedContent` fires nothing when the content is already selected, which is why the very first tab added to an empty strip produces a `contentAdded` and an auto-selection but no further selection event for plugin code to react to.
+- `$WORKSPACE_FILE$` resolves to `.idea/workspace.xml`, and only that name is covered by the standard JetBrains `.gitignore`; `$PRODUCT_WORKSPACE_FILE$` resolves to `.idea/product-workspace.xml` only under `isUnitTestMode` and otherwise to `<IDE config dir>/workspace/<projectWorkspaceId>.xml`, which the platform uses for open editors and the tool window layout.
 - `MergingUpdateQueue.flushAllQueues()` only does anything when the `intellij.MergingUpdateQueue.enable.global.flusher` system property is set before the class loads, and even a zero merge span still hands the update to the alarm thread before it reaches the event queue, so a single `dispatchAllInvocationEventsInIdeEventQueue` races it; a test has to poll the queue's own `isEmpty` while pumping the event queue.
 
 ---

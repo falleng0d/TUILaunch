@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- TUI tabs can be brought back when a project is reopened. Turn on "Restore open tabs" in Settings
+  and the tabs that were open are relaunched in the same order, keeping their renamed titles and the
+  tab that was selected. Tabs are remembered per project, and an app that has since been removed from
+  the settings is skipped. The setting is off by default.
+
+### Changed
+
+- The TUILaunch tool window now opens on the right edge of the IDE by default. Projects that have
+  already used the plugin keep the position they are in; drag the window to the right edge once to
+  move it.
+
 ## [0.5.0] - 2026-08-31
 
 ### Added

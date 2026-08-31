@@ -3,6 +3,7 @@ package com.github.atm1020.tuilaunch
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiAppTableModel
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
+import com.github.atm1020.tuilaunch.ui.RESTORE_OPEN_TABS_LABEL
 import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -23,6 +24,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         TuiLauncherSettings.getInstance().state.apply {
             tuiApps.clear()
             tmuxKeybindingsEnabled = true
+            restoreOpenTabs = false
             escapeModifier = "CTRL"
             escapeKeyCode = null
             focusEditorKeyCode = null
@@ -453,6 +455,73 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val configurable = TuiLauncherConfiguration()
 
         configurable.reset()
+
+        assertFalse(configurable.isModified())
+    }
+
+    fun testRestoreOpenTabsCheckBoxIsPresentAndOffByDefault() {
+        val component = TuiLauncherConfiguration().createComponent() as JPanel
+
+        val checkbox = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)
+
+        assertNotNull(checkbox)
+        assertFalse(checkbox!!.isSelected)
+    }
+
+    fun testRestoreOpenTabsCheckBoxPersistsTheEnabledFlag() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
+
+        checkbox.isSelected = true
+        configurable.apply()
+
+        assertTrue(settings.state.restoreOpenTabs)
+    }
+
+    fun testRestoreOpenTabsCheckBoxPersistsBeingTurnedOff() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.restoreOpenTabs = true
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
+        assertTrue(checkbox.isSelected)
+
+        checkbox.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.restoreOpenTabs)
+    }
+
+    fun testTogglingRestoreOpenTabsMarksThePanelModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresTheRestoreOpenTabsCheckBox() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
+
+        checkbox.doClick()
+        configurable.reset()
+
+        assertFalse(checkbox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testAnUntouchedPanelIsUnmodifiedWithRestoreOpenTabsOn() {
+        TuiLauncherSettings.getInstance().state.restoreOpenTabs = true
+
+        val configurable = TuiLauncherConfiguration()
+        configurable.createComponent()
 
         assertFalse(configurable.isModified())
     }

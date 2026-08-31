@@ -28,6 +28,7 @@ import javax.swing.event.TableModelEvent
 import javax.swing.table.AbstractTableModel
 import kotlin.reflect.KMutableProperty1
 
+internal const val RESTORE_OPEN_TABS_LABEL = "Reopen TUI tabs when the project is opened"
 
 class TuiLauncherConfiguration : Configurable {
     private var tuiLauncherPanel: JPanel? = null
@@ -36,6 +37,7 @@ class TuiLauncherConfiguration : Configurable {
     private val settings = TuiLauncherSettings.getInstance()
 
     private var tmuxKeybindingsEnabledCheckBox: JBCheckBox? = null
+    private var restoreOpenTabsCheckBox: JBCheckBox? = null
     private var modifierCombo: JComboBox<String>? = null
     private val tmuxShortcutComponents = mutableListOf<JComponent>()
     private var shortcutsTable: JBTable? = null
@@ -104,7 +106,7 @@ class TuiLauncherConfiguration : Configurable {
             }
 
         panel.add(tablePanel, BorderLayout.CENTER)
-        panel.add(createTmuxKeybindingsPanel(), BorderLayout.SOUTH)
+        panel.add(createSessionAndKeybindingsPanel(), BorderLayout.SOUTH)
 
         tuiLauncherPanel = panel
         return panel
@@ -129,6 +131,15 @@ class TuiLauncherConfiguration : Configurable {
             if (event.type != TableModelEvent.UPDATE || event.column == 0 || event.column == 1) {
                 refreshShortcutBindings()
             }
+        }
+    }
+
+    private fun createSessionAndKeybindingsPanel(): JComponent {
+        val restoreCheckBox = JBCheckBox(RESTORE_OPEN_TABS_LABEL, settings.state.restoreOpenTabs)
+        restoreOpenTabsCheckBox = restoreCheckBox
+        return JPanel(BorderLayout(0, 6)).apply {
+            add(restoreCheckBox, BorderLayout.NORTH)
+            add(createTmuxKeybindingsPanel(), BorderLayout.CENTER)
         }
     }
 
@@ -355,6 +366,7 @@ class TuiLauncherConfiguration : Configurable {
 
         tableModel?.setRows(settings.state.tuiApps.map { it.copy() })
         tmuxKeybindingsEnabledCheckBox?.isSelected = settings.state.tmuxKeybindingsEnabled
+        restoreOpenTabsCheckBox?.isSelected = settings.state.restoreOpenTabs
         modifierCombo?.selectedItem = modifierComboItem()
         builtInShortcuts.forEach { it.keyCode = it.stateProperty.get(settings.state) }
 
@@ -367,6 +379,7 @@ class TuiLauncherConfiguration : Configurable {
     private fun editedState(): TuiLauncherSettings.State = settings.state.copy(
         tuiApps = tableModel?.snapshot() ?: settings.state.tuiApps,
         tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true,
+        restoreOpenTabs = restoreOpenTabsCheckBox?.isSelected == true,
         escapeModifier = selectedEscapeModifier(),
     ).also { edited ->
         builtInShortcuts.forEach { it.stateProperty.set(edited, it.keyCode) }
@@ -383,6 +396,7 @@ class TuiLauncherConfiguration : Configurable {
         unregisterRemovedActions(newApps)
         settings.state.tuiApps = newApps
         settings.state.tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true
+        settings.state.restoreOpenTabs = restoreOpenTabsCheckBox?.isSelected == true
         settings.state.escapeModifier = selectedEscapeModifier()
         builtInShortcuts.forEach { it.stateProperty.set(settings.state, it.keyCode) }
         settings.loadActions()

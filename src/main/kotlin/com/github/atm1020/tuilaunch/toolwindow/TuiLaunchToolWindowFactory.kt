@@ -1,6 +1,9 @@
 package com.github.atm1020.tuilaunch.toolwindow
 
+import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.application.invokeLater
+import com.intellij.openapi.components.service
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
@@ -20,5 +23,8 @@ class TuiLaunchToolWindowFactory : ToolWindowFactory, DumbAware {
         toolWindow.setTitleActions(
             listOfNotNull(ActionManager.getInstance().getAction("TUILaunch.OpenPromptFile"))
         )
+        invokeLater {
+            if (!project.isDisposed) project.service<TuiAppLaunchService>().restoreSavedTabs()
+        }
     }
 }

@@ -19,6 +19,7 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
     data class State(
         var tuiApps: MutableList<TuiAppConfig> = mutableListOf(),
         var tmuxKeybindingsEnabled: Boolean = true,
+        var restoreOpenTabs: Boolean = false,
         var escapeModifier: String = "CTRL",
         var escapeKeyCode: Int? = null,
         var focusEditorKeyCode: Int? = null,
