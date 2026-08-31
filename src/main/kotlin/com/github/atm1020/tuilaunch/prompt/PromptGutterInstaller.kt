@@ -5,7 +5,7 @@ import com.intellij.codeInsight.hint.HintManager
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.application.invokeLater
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorKind
@@ -21,12 +21,29 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.util.Disposer
+import com.intellij.util.ui.update.MergingUpdateQueue
+import com.intellij.util.ui.update.Update
+import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.Icon
+import org.jetbrains.annotations.TestOnly
 
 private const val PROMPT_FILE_NAME = "PROMPT.md"
 private val IGNORED_EDITOR_KINDS = setOf(EditorKind.DIFF, EditorKind.PREVIEW, EditorKind.CONSOLE)
 private const val SEND_TOOLTIP = "Type this prompt into the active TUI session"
 private const val NO_SESSION_MESSAGE = "No TUI session is open"
+private const val REFRESH_MERGE_MILLIS = 100
+
+internal object PromptGutterRefreshes {
+
+    private val refreshes = AtomicInteger()
+
+    fun record() {
+        refreshes.incrementAndGet()
+    }
+
+    @TestOnly
+    fun count(): Int = refreshes.get()
+}
 
 class PromptGutterInstaller : EditorFactoryListener {
 
@@ -51,8 +68,18 @@ private class PromptBlockGutter(private val editor: Editor) {
     private var installedMarkerLines = emptyList<Int>()
     private val listenerLifetime = Disposer.newDisposable("TUILaunch prompt gutter")
 
+    private val refreshQueue = MergingUpdateQueue(
+        "TUILaunch prompt gutter",
+        refreshMergeMillis(),
+        true,
+        MergingUpdateQueue.ANY_COMPONENT,
+        listenerLifetime,
+    )
+
     private val documentListener = object : DocumentListener {
-        override fun documentChanged(event: DocumentEvent) = scheduleRefresh()
+        override fun documentChanged(event: DocumentEvent) {
+            if (refreshIsNeededFor(event)) scheduleRefresh()
+        }
     }
 
     fun install() {
@@ -66,16 +93,25 @@ private class PromptBlockGutter(private val editor: Editor) {
         removeInstalledHighlighters()
     }
 
+    private fun refreshIsNeededFor(event: DocumentEvent): Boolean =
+        fileNameOf(editor) != PROMPT_FILE_NAME ||
+            editCanChangeBlockStructure(event) ||
+            anInstalledHighlighterWasInvalidated(event)
+
+    private fun anInstalledHighlighterWasInvalidated(event: DocumentEvent): Boolean =
+        event.oldLength > 0 && installedHighlighters.any { !it.isValid }
+
     private fun scheduleRefresh() {
-        invokeLater { if (!editor.isDisposed) refresh() }
+        refreshQueue.queue(Update.create(this) { if (!editor.isDisposed) refresh() })
     }
 
     private fun refresh() {
+        PromptGutterRefreshes.record()
         if (fileNameOf(editor) != PROMPT_FILE_NAME) {
             removeInstalledHighlighters()
             return
         }
-        val markerLines = promptBlocksOf(editor).map { it.markerLine }
+        val markerLines = promptMarkerLines(editor.document.charsSequence)
         if (markerLines == installedMarkerLines && installedHighlighters.all { it.isValid }) return
         removeInstalledHighlighters()
         markerLines.forEach { markerLine ->
@@ -97,11 +133,36 @@ private class PromptBlockGutter(private val editor: Editor) {
     }
 }
 
+private fun refreshMergeMillis(): Int =
+    if (ApplicationManager.getApplication().isUnitTestMode) 0 else REFRESH_MERGE_MILLIS
+
 private fun fileNameOf(editor: Editor): String? =
     FileDocumentManager.getInstance().getFile(editor.document)?.name ?: editor.virtualFile?.name
 
-private fun promptBlocksOf(editor: Editor): List<PromptBlock> =
-    parsePromptBlocks(editor.document.charsSequence.toString())
+internal fun editCanChangeBlockStructure(event: DocumentEvent): Boolean {
+    if (spansLines(event.oldFragment) || spansLines(event.newFragment)) return true
+    val document = event.document
+    val editedLine = document.getLineNumber(event.offset)
+    val lineStart = document.getLineStartOffset(editedLine)
+    val lineEnd = document.getLineEndOffset(editedLine)
+    if (event.offset < lineStart || event.offset + event.newLength > lineEnd) return true
+    val text = document.charsSequence
+    return canChangeBlockStructure(text.subSequence(lineStart, lineEnd)) ||
+        canChangeBlockStructure(lineAsItWasBeforeTheEdit(text, lineStart, lineEnd, event))
+}
+
+private fun spansLines(fragment: CharSequence): Boolean = fragment.any { it == '\n' || it == '\r' }
+
+private fun lineAsItWasBeforeTheEdit(
+    text: CharSequence,
+    lineStart: Int,
+    lineEnd: Int,
+    event: DocumentEvent,
+): CharSequence =
+    StringBuilder(lineEnd - lineStart + event.oldLength)
+        .append(text, lineStart, event.offset)
+        .append(event.oldFragment)
+        .append(text, event.offset + event.newLength, lineEnd)
 
 private data class PromptBlockGutterIconRenderer(
     private val editor: Editor,
@@ -126,7 +187,7 @@ private class SendPromptBlockAction(
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = editor.project ?: e.project ?: return
-        val blockText = promptBlocksOf(editor).firstOrNull { it.markerLine == markerLine }?.text ?: return
+        val blockText = promptBlockTextAt(editor.document.charsSequence, markerLine) ?: return
         if (!project.service<TuiAppLaunchService>().sendTextToActiveSession(blockText)) {
             HintManager.getInstance().showErrorHint(editor, NO_SESSION_MESSAGE)
         }

@@ -95,6 +95,13 @@
                 class="com.github.atm1020.tuilaunch.action.TuiNewSessionAction"
                 text="New Session"
                 description="Start a new TUI session"/>
+        <!-- Not added to any menu group: looked up by id from
+             TuiLaunchToolWindowFactory.createToolWindowContent and installed as a tool window title bar
+             button, left of the gear (TSK-9059). -->
+        <action id="TUILaunch.OpenPromptFile"
+                class="com.github.atm1020.tuilaunch.action.OpenPromptFileAction"
+                text="Open Prompt File"
+                description="Open this project's PROMPT.md, creating it if it does not exist yet"/>
         <action id="TUILaunch.RenameSession"
                 class="com.github.atm1020.tuilaunch.action.TuiRenameSessionAction"
                 text="Rename Session"

@@ -16,5 +16,9 @@ class TuiLaunchToolWindowFactory : ToolWindowFactory, DumbAware {
         )
     }
 
-    override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) = Unit
+    override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
+        toolWindow.setTitleActions(
+            listOfNotNull(ActionManager.getInstance().getAction("TUILaunch.OpenPromptFile"))
+        )
+    }
 }

@@ -10,6 +10,15 @@
   types that prompt into the active TUI session without submitting it, so it can be reviewed and sent
   with Enter. Prompts are separated by lines containing only `---`; the prompt currently being written
   gets its play button straight away, and a file with no `---` at all counts as a single prompt.
+- A button in the TUILaunch tool window title bar, next to the gear, opens the project's `PROMPT.md`
+  and puts the cursor in it, creating the file at the project root when it is not there yet and
+  pinning its editor tab.
+
+### Changed
+
+- Prompt gutter icons are much cheaper to keep up to date, so editing a long `PROMPT.md` stays
+  responsive. Typing that cannot move a prompt boundary no longer re-reads the file at all, and a
+  file whose code fences are left open no longer takes seconds to scan.
 
 ### Fixed
 

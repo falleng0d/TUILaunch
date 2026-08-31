@@ -1,8 +1,12 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.prompt.canChangeBlockStructure
 import com.github.atm1020.tuilaunch.prompt.parsePromptBlocks
+import com.github.atm1020.tuilaunch.prompt.promptBlockTextAt
+import com.github.atm1020.tuilaunch.prompt.promptMarkerLines
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -179,5 +183,97 @@ class PromptBlocksTest {
     fun anEmptyFileYieldsNoBlocks() {
         assertTrue(parsePromptBlocks("").isEmpty())
         assertTrue(parsePromptBlocks("\n   \n\t\n").isEmpty())
+    }
+
+    private val corpus = listOf(
+        exampleFile,
+        "",
+        "\n   \n\t\n",
+        "---\n---\n",
+        "---\n\n   \n\t\n---\n",
+        "---\nfinished prompt\n---\nstill being typed\n",
+        "preamble\n---\nfinished prompt\n---\n",
+        "---\nonly prompt\n---\n",
+        "---\nfirst\n\n    indented second\n---\n",
+        "---\nbefore\n```\n---\n```\nafter\n---\n",
+        "---\nbefore\n~~~\n---\n~~~\nafter\n---\n",
+        "---\nfirst\n```\n---\nsecond\n---\n",
+        "---\nbefore\n````md\n```bash\n---\n```\n````\nafter\n---\n",
+        "---\n`openalex_asset_graph` in overview\n---\nsecond\n---\n",
+        "  ---  \nfinished prompt\n\t---\t\n",
+        "---\na\n----\nb\n***\nc\n- - -\nd\n---\n",
+        "---\r\nfirst\r\nsecond\r\n---\r\n",
+        "Implement abc\n\nthe way it works is this",
+        "---\r first\r---\rsecond\r",
+        "```kotlin\n---\n```kotlin\n---\n```kotlin\n---\n",
+        "no trailing newline",
+    )
+
+    @Test
+    fun markerLineOnlyParsingAgreesWithTheFullParseOnEveryCase() {
+        corpus.forEach { text ->
+            assertEquals(text, parsePromptBlocks(text).map { it.markerLine }, promptMarkerLines(text))
+        }
+    }
+
+    @Test
+    fun singleBlockTextLookupAgreesWithTheFullParseOnEveryCase() {
+        corpus.forEach { text ->
+            parsePromptBlocks(text).forEach { block ->
+                assertEquals(text, block.text, promptBlockTextAt(text, block.markerLine))
+            }
+        }
+    }
+
+    @Test
+    fun aBlockTextLookupOnALineWithNoBlockYieldsNothing() {
+        assertNull(promptBlockTextAt("---\nonly prompt\n---\n", 0))
+        assertNull(promptBlockTextAt("---\nonly prompt\n---\n", 99))
+    }
+
+    @Test
+    fun manyOpenersThatNeverCloseLeaveEveryDelimiterInPlace() {
+        val text = (0 until 2_000).joinToString("") { "```kotlin\n---\n" }
+
+        val blocks = parsePromptBlocks(text)
+
+        assertEquals(2_000, blocks.size)
+        assertTrue(blocks.all { it.text == "```kotlin" })
+        assertEquals(listOf(0, 2, 4), blocks.take(3).map { it.markerLine })
+    }
+
+    @Test
+    fun delimitersAfterManyClosedFencesAreStillFound() {
+        val text = (0 until 2_000).joinToString("") { "```\ncode\n```\n---\n" }
+
+        val blocks = parsePromptBlocks(text)
+
+        assertEquals(2_000, blocks.size)
+        assertTrue(blocks.all { it.text == "```\ncode\n```" })
+    }
+
+    @Test
+    fun aLoneCarriageReturnAlsoEndsALine() {
+        val blocks = parsePromptBlocks("---\rfirst\rsecond\r---\r")
+
+        assertEquals(1, blocks.size)
+        assertEquals(1, blocks.single().markerLine)
+        assertEquals("first\nsecond", blocks.single().text)
+    }
+
+    @Test
+    fun onlyBlankDelimiterAndFenceLinesCanChangeBlockStructure() {
+        assertTrue(canChangeBlockStructure(""))
+        assertTrue(canChangeBlockStructure("   \t "))
+        assertTrue(canChangeBlockStructure("  ---  "))
+        assertTrue(canChangeBlockStructure("```"))
+        assertTrue(canChangeBlockStructure("```kotlin"))
+        assertTrue(canChangeBlockStructure("~~~~"))
+
+        assertFalse(canChangeBlockStructure("plain prose"))
+        assertFalse(canChangeBlockStructure("a well-known -- dash heavy line"))
+        assertFalse(canChangeBlockStructure("`inline` code and ``double`` spans"))
+        assertFalse(canChangeBlockStructure("----"))
+        assertFalse(canChangeBlockStructure("- - -"))
     }
 }

@@ -5,65 +5,186 @@ internal data class PromptBlock(val markerLine: Int, val text: String)
 private const val BLOCK_DELIMITER = "---"
 private const val FENCE_MARKERS = "`~"
 private const val MINIMUM_FENCE_RUN = 3
+private const val ESTIMATED_CHARACTERS_PER_LINE = 32
 
 private data class FenceRun(val marker: Char, val length: Int)
 
+private data class BlockLines(val firstContentLine: Int, val lastContentLine: Int)
+
 internal fun parsePromptBlocks(text: String): List<PromptBlock> {
-    val lines = withoutCarriageReturns(text).split("\n")
-    val lineBeforeTheFile = -1
-    val lineAfterTheFile = lines.size
-    val segmentBounds = listOf(lineBeforeTheFile) + delimiterLinesOutsideCodeFences(lines) + lineAfterTheFile
-    return segmentBounds
-        .zipWithNext()
-        .mapNotNull { (boundBefore, boundAfter) -> blockBetween(lines, boundBefore, boundAfter) }
-}
-
-private fun withoutCarriageReturns(text: String): String = text.replace("\r\n", "\n").replace('\r', '\n')
-
-private fun delimiterLinesOutsideCodeFences(lines: List<String>): List<Int> {
-    val fencedRanges = matchedFenceRanges(lines)
-    return lines.indices.filter { index ->
-        lines[index].trim() == BLOCK_DELIMITER && fencedRanges.none { index in it }
+    val lines = LineOffsets(text)
+    return blockLinesIn(lines).map {
+        PromptBlock(it.firstContentLine, lines.joinedContent(it.firstContentLine, it.lastContentLine))
     }
 }
 
-private fun matchedFenceRanges(lines: List<String>): List<IntRange> {
-    val fencedRanges = mutableListOf<IntRange>()
-    var index = 0
-    while (index < lines.size) {
-        val closingLine = fenceOpenerAt(lines[index])?.let { closingLineFor(lines, it, index) }
-        if (closingLine == null) {
+internal fun promptMarkerLines(text: CharSequence): List<Int> =
+    blockLinesIn(LineOffsets(text)).map { it.firstContentLine }
+
+internal fun promptBlockTextAt(text: CharSequence, markerLine: Int): String? {
+    val lines = LineOffsets(text)
+    val block = blockLinesIn(lines).firstOrNull { it.firstContentLine == markerLine } ?: return null
+    return lines.joinedContent(block.firstContentLine, block.lastContentLine)
+}
+
+internal fun canChangeBlockStructure(line: CharSequence): Boolean =
+    isBlank(line, 0, line.length) ||
+        isDelimiter(line, 0, line.length) ||
+        fenceOpenerAt(line, 0, line.length) != null
+
+private fun blockLinesIn(lines: LineOffsets): List<BlockLines> {
+    val blocks = mutableListOf<BlockLines>()
+    var segmentStart = 0
+    lines.forEachDelimiterLine { delimiterLine ->
+        blockOf(lines, segmentStart, delimiterLine - 1)?.let(blocks::add)
+        segmentStart = delimiterLine + 1
+    }
+    blockOf(lines, segmentStart, lines.lineCount - 1)?.let(blocks::add)
+    return blocks
+}
+
+private fun blockOf(lines: LineOffsets, fromLine: Int, toLine: Int): BlockLines? {
+    var firstContentLine = fromLine
+    while (firstContentLine <= toLine && lines.isBlankLine(firstContentLine)) firstContentLine++
+    if (firstContentLine > toLine) return null
+    var lastContentLine = toLine
+    while (lines.isBlankLine(lastContentLine)) lastContentLine--
+    return BlockLines(firstContentLine, lastContentLine)
+}
+
+private class ShortestUnclosedFenceRuns {
+
+    private val shortestByMarker = HashMap<Char, Int>(2)
+
+    fun alreadyKnownUnclosed(opener: FenceRun): Boolean {
+        val shortest = shortestByMarker[opener.marker] ?: return false
+        return opener.length >= shortest
+    }
+
+    fun remember(opener: FenceRun) {
+        val shortest = shortestByMarker[opener.marker]
+        if (shortest == null || opener.length < shortest) shortestByMarker[opener.marker] = opener.length
+    }
+}
+
+private class LineOffsets(private val text: CharSequence) {
+
+    private var starts = IntArray(maxOf(16, text.length / ESTIMATED_CHARACTERS_PER_LINE + 1))
+
+    var lineCount = 1
+        private set
+
+    init {
+        indexLineStarts()
+    }
+
+    private fun indexLineStarts() {
+        var index = 0
+        while (index < text.length) {
+            val character = text[index]
             index++
-        } else {
-            fencedRanges.add(index..closingLine)
-            index = closingLine + 1
+            if (character != '\n' && character != '\r') continue
+            if (character == '\r' && index < text.length && text[index] == '\n') index++
+            if (lineCount == starts.size) starts = starts.copyOf(starts.size * 2)
+            starts[lineCount++] = index
         }
     }
-    return fencedRanges
+
+    private fun startOf(line: Int): Int = starts[line]
+
+    private fun contentEndOf(line: Int): Int {
+        if (line == lineCount - 1) return text.length
+        val lineStart = starts[line]
+        var end = starts[line + 1]
+        if (end > lineStart && text[end - 1] == '\n') end--
+        if (end > lineStart && text[end - 1] == '\r') end--
+        return end
+    }
+
+    fun isBlankLine(line: Int): Boolean = isBlank(text, startOf(line), contentEndOf(line))
+
+    fun forEachDelimiterLine(action: (Int) -> Unit) {
+        val unclosedRuns = ShortestUnclosedFenceRuns()
+        var line = 0
+        while (line < lineCount) {
+            val closingLine = openerAt(line)?.let { closingLineFor(it, line, unclosedRuns) }
+            if (closingLine != null) {
+                line = closingLine + 1
+                continue
+            }
+            if (isDelimiterLine(line)) action(line)
+            line++
+        }
+    }
+
+    private fun isDelimiterLine(line: Int): Boolean = isDelimiter(text, startOf(line), contentEndOf(line))
+
+    private fun openerAt(line: Int): FenceRun? = fenceOpenerAt(text, startOf(line), contentEndOf(line))
+
+    private fun closingLineFor(
+        opener: FenceRun,
+        openingLine: Int,
+        unclosedRuns: ShortestUnclosedFenceRuns,
+    ): Int? {
+        if (unclosedRuns.alreadyKnownUnclosed(opener)) return null
+        var line = openingLine + 1
+        while (line < lineCount) {
+            if (closesFence(text, startOf(line), contentEndOf(line), opener)) return line
+            line++
+        }
+        unclosedRuns.remember(opener)
+        return null
+    }
+
+    fun joinedContent(firstLine: Int, lastLine: Int): String {
+        if (firstLine == lastLine) {
+            return text.subSequence(startOf(firstLine), contentEndOf(firstLine)).toString()
+        }
+        val joined = StringBuilder(contentEndOf(lastLine) - startOf(firstLine))
+        for (line in firstLine..lastLine) {
+            if (line > firstLine) joined.append('\n')
+            joined.append(text, startOf(line), contentEndOf(line))
+        }
+        return joined.toString()
+    }
 }
 
-private fun fenceOpenerAt(line: String): FenceRun? {
-    val trimmed = line.trim()
-    val marker = trimmed.firstOrNull() ?: return null
+private fun firstContentIndex(text: CharSequence, from: Int, to: Int): Int {
+    var index = from
+    while (index < to && text[index].isWhitespace()) index++
+    return index
+}
+
+private fun contentEndIndex(text: CharSequence, from: Int, to: Int): Int {
+    var index = to
+    while (index > from && text[index - 1].isWhitespace()) index--
+    return index
+}
+
+private fun isBlank(text: CharSequence, from: Int, to: Int): Boolean =
+    firstContentIndex(text, from, to) == to
+
+private fun isDelimiter(text: CharSequence, from: Int, to: Int): Boolean {
+    val contentStart = firstContentIndex(text, from, to)
+    val contentEnd = contentEndIndex(text, contentStart, to)
+    if (contentEnd - contentStart != BLOCK_DELIMITER.length) return false
+    return BLOCK_DELIMITER.indices.all { text[contentStart + it] == BLOCK_DELIMITER[it] }
+}
+
+private fun fenceOpenerAt(text: CharSequence, from: Int, to: Int): FenceRun? {
+    val contentStart = firstContentIndex(text, from, to)
+    val contentEnd = contentEndIndex(text, contentStart, to)
+    if (contentStart == contentEnd) return null
+    val marker = text[contentStart]
     if (marker !in FENCE_MARKERS) return null
-    val runLength = trimmed.takeWhile { it == marker }.length
+    var runLength = 0
+    while (contentStart + runLength < contentEnd && text[contentStart + runLength] == marker) runLength++
     return if (runLength >= MINIMUM_FENCE_RUN) FenceRun(marker, runLength) else null
 }
 
-private fun closingLineFor(lines: List<String>, opener: FenceRun, openingLine: Int): Int? =
-    (openingLine + 1 until lines.size).firstOrNull { closesFence(lines[it], opener) }
-
-private fun closesFence(line: String, opener: FenceRun): Boolean {
-    val trimmed = line.trim()
-    return trimmed.length >= opener.length && trimmed.all { it == opener.marker }
-}
-
-private fun blockBetween(lines: List<String>, boundBefore: Int, boundAfter: Int): PromptBlock? {
-    val segmentLines = (boundBefore + 1) until boundAfter
-    val firstContentLine = segmentLines.firstOrNull { lines[it].isNotBlank() } ?: return null
-    val lastContentLine = segmentLines.last { lines[it].isNotBlank() }
-    return PromptBlock(
-        markerLine = firstContentLine,
-        text = lines.subList(firstContentLine, lastContentLine + 1).joinToString("\n"),
-    )
+private fun closesFence(text: CharSequence, from: Int, to: Int, opener: FenceRun): Boolean {
+    val contentStart = firstContentIndex(text, from, to)
+    val contentEnd = contentEndIndex(text, contentStart, to)
+    if (contentEnd - contentStart < opener.length) return false
+    return (contentStart until contentEnd).all { text[it] == opener.marker }
 }

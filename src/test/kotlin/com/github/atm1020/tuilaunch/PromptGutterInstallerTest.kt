@@ -1,6 +1,7 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.prompt.PromptGutterInstaller
+import com.github.atm1020.tuilaunch.prompt.PromptGutterRefreshes
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
@@ -106,6 +107,50 @@ class PromptGutterInstallerTest : BasePlatformTestCase() {
         assertEquals("---\nthe bug\n---\n", myFixture.editor.document.text)
         assertEquals(listOf(1), gutterLines())
         assertTrue(gutterHighlighters().all { it.isValid })
+    }
+
+    fun testAnEditThatCannotChangeBlockStructureSkipsTheRefreshEntirely() {
+        myFixture.configureByText("PROMPT.md", "---\nfirst prompt\n---\nsecond prompt\n---\n")
+        assertEquals(listOf(1, 3), gutterLines())
+        val refreshesBefore = PromptGutterRefreshes.count()
+
+        editDocument { it.insertString(it.getLineEndOffset(1), " with more words") }
+
+        assertEquals(refreshesBefore, PromptGutterRefreshes.count())
+        assertEquals(listOf(1, 3), gutterLines())
+    }
+
+    fun testTypingIntoADelimiterLineRefreshesAndMergesTheTwoBlocks() {
+        myFixture.configureByText("PROMPT.md", "---\nfirst prompt\n---\nsecond prompt\n---\n")
+        assertEquals(listOf(1, 3), gutterLines())
+        val refreshesBefore = PromptGutterRefreshes.count()
+
+        editDocument { it.insertString(it.getLineStartOffset(2) + 1, "x") }
+
+        assertTrue(PromptGutterRefreshes.count() > refreshesBefore)
+        assertEquals(listOf(1), gutterLines())
+    }
+
+    fun testTypingOnABlankLineRefreshesAndMovesTheGutterIconUp() {
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n---\n")
+        assertEquals(listOf(2), gutterLines())
+        val refreshesBefore = PromptGutterRefreshes.count()
+
+        editDocument { it.insertString(it.getLineStartOffset(1), "note") }
+
+        assertTrue(PromptGutterRefreshes.count() > refreshesBefore)
+        assertEquals(listOf(1), gutterLines())
+    }
+
+    fun testClosingAFenceRefreshesAndSwallowsTheDelimiterInsideIt() {
+        myFixture.configureByText("PROMPT.md", "---\nfirst prompt\n```\n---\nsecond prompt\n``\n---\n")
+        assertEquals(listOf(1, 4), gutterLines())
+        val refreshesBefore = PromptGutterRefreshes.count()
+
+        editDocument { it.insertString(it.getLineStartOffset(5), "`") }
+
+        assertTrue(PromptGutterRefreshes.count() > refreshesBefore)
+        assertEquals(listOf(1), gutterLines())
     }
 
     fun testRenamingThePromptFileClearsItsGutterIcons() {
