@@ -28,10 +28,8 @@ class OpenPromptFileAction : DumbAwareAction(
 
 internal fun openProjectPromptFile(project: Project): VirtualFile? {
     val promptFile = findOrCreatePromptFile(project) ?: return null
-    val editorManager = FileEditorManager.getInstance(project)
-    val wasAlreadyOpen = editorManager.isFileOpen(promptFile)
-    editorManager.openTextEditor(OpenFileDescriptor(project, promptFile), true)
-    if (!wasAlreadyOpen) pinTab(project, promptFile)
+    FileEditorManager.getInstance(project).openTextEditor(OpenFileDescriptor(project, promptFile), true)
+    pinTab(project, promptFile)
     return promptFile
 }
 
