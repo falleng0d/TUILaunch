@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31
+
 ### Added
 
 - A `PROMPT.md` file now shows a play button in the editor gutter next to each prompt, and clicking it
@@ -101,7 +103,8 @@
      - Sessions are managed in their own TUILaunch tool window.
 - Added tmux-like prefix keybindings inside TUI terminals.
 
-[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/atm1020/TUILaunch/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/atm1020/TUILaunch/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/atm1020/TUILaunch/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/atm1020/TUILaunch/compare/v0.2.0...v0.3.0
