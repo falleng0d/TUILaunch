@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- A `PROMPT.md` file now shows a play button in the editor gutter next to each prompt, and clicking it
+  types that prompt into the active TUI session without submitting it, so it can be reviewed and sent
+  with Enter. Prompts are separated by lines containing only `---`; the prompt currently being written
+  gets its play button straight away, and a file with no `---` at all counts as a single prompt.
+
 ### Fixed
 
 - TUI sessions stay visible and usable while the IDE rebuilds its indexes, instead of being

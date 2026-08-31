@@ -14,6 +14,10 @@
                                  id="com.example.tuilauncher.TuiLauncherConfigurable"
                                  displayName="TUI Launcher"/>
         <postStartupActivity implementation="com.github.atm1020.tuilaunch.LoadDynamicActions"/>
+        <!-- editorFactoryListener rather than lineMarkerProvider: MarkdownLanguage and PlainTextLanguage are
+             siblings, so a lineMarkerProvider registered on "TEXT" never fires for a .md file, and registering
+             on Language.ANY would hand us a PsiElement we cannot type without the Markdown plugin (TSK-9057). -->
+        <editorFactoryListener implementation="com.github.atm1020.tuilaunch.prompt.PromptGutterInstaller"/>
         <!-- canCloseContents: without it the shared tab context menu's Close Tab / Close Other Tabs /
              Close All Tabs stay disabled and no X appears on a tab, no matter what
              Content.isCloseable says (TSK-9016). -->

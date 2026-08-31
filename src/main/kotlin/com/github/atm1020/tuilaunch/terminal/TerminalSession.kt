@@ -9,10 +9,13 @@ class TerminalSession(
     private val registerTerminationCallback: ((() -> Unit) -> Unit),
     val canSendKeys: Boolean = false,
     private val sendKey: (keyCode: Int, modifiers: Int, keyChar: Char) -> Unit = { _, _, _ -> },
+    private val sendText: (String) -> Boolean = { false },
 ) {
     fun requestFocus() = requestFocus.invoke()
 
     fun sendKey(keyCode: Int, modifiers: Int, keyChar: Char) = sendKey.invoke(keyCode, modifiers, keyChar)
+
+    fun sendText(text: String): Boolean = sendText.invoke(text)
 
     fun onTerminated(callback: () -> Unit) = registerTerminationCallback(callback)
 }

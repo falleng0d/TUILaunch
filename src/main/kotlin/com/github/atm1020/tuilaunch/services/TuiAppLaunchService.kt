@@ -158,6 +158,13 @@ class TuiAppLaunchService(private val project: Project) {
         editorFocusRequest()
     }
 
+    fun sendTextToActiveSession(text: String): Boolean {
+        val host = hostWithListeners() ?: return false
+        val tab = activeOrLastOpenTab(host) ?: return false
+        selectTuiTab(host, tab)
+        return tab.session.sendText(text)
+    }
+
     fun toggleFocus() {
         if (isTuiFocused()) focusEditor() else focusTui()
     }

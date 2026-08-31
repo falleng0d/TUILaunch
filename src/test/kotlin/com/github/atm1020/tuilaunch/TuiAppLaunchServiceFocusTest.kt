@@ -19,9 +19,10 @@ import javax.swing.JPanel
 
 class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
 
-    private class FakeSession {
+    private class FakeSession(private val terminalAcceptsText: Boolean = true) {
         val component: JComponent = JPanel()
         var focusCount = 0
+        val sentText = mutableListOf<String>()
         fun requestFocus() {
             focusCount++
         }
@@ -30,6 +31,10 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             component = component,
             requestFocus = { requestFocus() },
             registerTerminationCallback = {},
+            sendText = { text ->
+                sentText.add(text)
+                terminalAcceptsText
+            },
         )
     }
 
@@ -223,6 +228,35 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
 
     private fun configureApps(vararg apps: TuiAppConfig) {
         TuiLauncherSettings.getInstance().state.tuiApps = apps.toMutableList()
+    }
+
+    fun testSendTextReportsFailureWhenNoSessionIsOpen() {
+        val (service, host) = newService()
+
+        assertFalse(service.sendTextToActiveSession("a prompt"))
+        assertFalse(host.visible)
+    }
+
+    fun testSendTextReportsFailureWhenTheTerminalCannotAcceptIt() {
+        val session = FakeSession(terminalAcceptsText = false)
+        val (service, _) = newService(FakeFactory(session))
+        service.launchNew("claude", "claude")
+
+        assertFalse(service.sendTextToActiveSession("a prompt"))
+        assertEquals(listOf("a prompt"), session.sentText)
+    }
+
+    fun testSendTextGoesToTheActiveSessionAndFocusesTheToolWindow() {
+        val session = FakeSession()
+        val (service, host) = newService(FakeFactory(session))
+        service.launchNew("claude", "claude")
+        val focusCountBeforeSend = session.focusCount
+
+        assertTrue(service.sendTextToActiveSession("a prompt"))
+
+        assertEquals(listOf("a prompt"), session.sentText)
+        assertTrue(host.visible)
+        assertTrue(session.focusCount > focusCountBeforeSend)
     }
 
     fun testFocusTuiDoesNothingWhenNoAppOpen() {

@@ -19,6 +19,8 @@ import java.awt.event.KeyEvent
 import java.io.File
 
 private const val SEND_AS_USER_INPUT = true
+private const val BRACKETED_PASTE_START = "\u001B[200~"
+private const val BRACKETED_PASTE_END = "\u001B[201~"
 
 class JediTermSessionFactory(
     private val project: Project,
@@ -80,6 +82,11 @@ class JediTermSessionFactory(
                     )
                 }
             },
+            sendText = { text ->
+                val starter = jediTermWidget?.terminalStarter
+                starter?.sendString(bracketedPastePayload(text), SEND_AS_USER_INPUT)
+                starter != null
+            },
         )
         installKeyInterceptor(session, parent)
         return session
@@ -122,6 +129,24 @@ class JediTermSessionFactory(
     private fun modifierMaskOf(modifier: String): Int = when (modifier) {
         "ALT" -> KeyEvent.ALT_DOWN_MASK
         else -> KeyEvent.CTRL_DOWN_MASK
+    }
+}
+
+internal fun bracketedPastePayload(text: String): String {
+    val payload = withoutPasteMarkers(text)
+        .replace("\r\n", "\r")
+        .replace('\n', '\r')
+        .trimEnd('\r')
+    if (!payload.contains('\r')) return payload
+    return BRACKETED_PASTE_START + payload + BRACKETED_PASTE_END
+}
+
+private fun withoutPasteMarkers(text: String): String {
+    var stripped = text
+    while (true) {
+        val shorter = stripped.replace(BRACKETED_PASTE_START, "").replace(BRACKETED_PASTE_END, "")
+        if (shorter == stripped) return stripped
+        stripped = shorter
     }
 }
 
