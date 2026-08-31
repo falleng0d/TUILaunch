@@ -9,6 +9,7 @@ data class TuiAppConfig(
     var description: String = "",
     var windowWidth: Int? = null,
     var windowHeight: Int? = null,
+    var windowSizeAxis: String? = null,
     var shortcutKeyCode: Int? = null,
 )
 

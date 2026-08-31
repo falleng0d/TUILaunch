@@ -8,10 +8,15 @@ import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
+import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.wm.ToolWindowAnchor
+import com.intellij.openapi.wm.ToolWindowType
 import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.toolWindow.ToolWindowHeadlessManagerImpl
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.awt.event.KeyEvent
 import javax.swing.JComponent
@@ -76,6 +81,7 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         val titles = mutableListOf<String>()
         val disposables = mutableListOf<CheckedDisposable>()
         var size: ToolWindowSize? = null
+        var axis = ToolWindowSizeAxis.HEIGHT
         val appliedSizes = mutableListOf<ToolWindowSize>()
         var emitStaleResizeOnApply = false
         private var sizeChanged: (() -> Unit)? = null
@@ -172,6 +178,8 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
 
         override fun currentSize(): ToolWindowSize? = size
 
+        override fun sizeAxis(): ToolWindowSizeAxis = axis
+
         override fun applySize(size: ToolWindowSize) {
             appliedSizes.add(size)
             if (emitStaleResizeOnApply) {
@@ -209,6 +217,20 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
             tabRemoved?.invoke(handle)
         }
     }
+
+    private class AnchoredToolWindow(
+        project: Project,
+        private val toolWindowAnchor: ToolWindowAnchor,
+        private val toolWindowType: ToolWindowType,
+    ) : ToolWindowHeadlessManagerImpl.MockToolWindow(project) {
+        override fun getAnchor(): ToolWindowAnchor = toolWindowAnchor
+        override fun getType(): ToolWindowType = toolWindowType
+    }
+
+    private fun sizeAxisOf(
+        anchor: ToolWindowAnchor,
+        type: ToolWindowType = ToolWindowType.DOCKED,
+    ): ToolWindowSizeAxis = IdeToolWindowHost(AnchoredToolWindow(project, anchor, type)).sizeAxis()
 
     private fun newService(
         sessionFactory: TerminalSessionFactory = FakeFactory(emptyList()),
@@ -363,6 +385,143 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         host.triggerTabSelected(host.tabs[0])
 
         assertTrue(host.appliedSizes.isEmpty())
+    }
+
+    fun testARightAnchoredToolWindowIsResizedAlongItsWidth() {
+        assertEquals(ToolWindowSizeAxis.WIDTH, sizeAxisOf(ToolWindowAnchor.RIGHT))
+    }
+
+    fun testALeftAnchoredToolWindowIsResizedAlongItsWidth() {
+        assertEquals(ToolWindowSizeAxis.WIDTH, sizeAxisOf(ToolWindowAnchor.LEFT))
+    }
+
+    fun testABottomAnchoredToolWindowIsResizedAlongItsHeight() {
+        assertEquals(ToolWindowSizeAxis.HEIGHT, sizeAxisOf(ToolWindowAnchor.BOTTOM))
+    }
+
+    fun testATopAnchoredToolWindowIsResizedAlongItsHeight() {
+        assertEquals(ToolWindowSizeAxis.HEIGHT, sizeAxisOf(ToolWindowAnchor.TOP))
+    }
+
+    fun testAFloatingToolWindowIsResizedAlongBothAxes() {
+        assertEquals(ToolWindowSizeAxis.BOTH, sizeAxisOf(ToolWindowAnchor.RIGHT, ToolWindowType.FLOATING))
+    }
+
+    fun testAWindowedToolWindowIsResizedAlongBothAxes() {
+        assertEquals(ToolWindowSizeAxis.BOTH, sizeAxisOf(ToolWindowAnchor.BOTTOM, ToolWindowType.WINDOWED))
+    }
+
+    fun testResizeRecordsTheAxisTheWindowWasResizedAlong() {
+        configureApps(TuiAppConfig(name = "htop", command = "htop"))
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        host.axis = ToolWindowSizeAxis.WIDTH
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        host.size = ToolWindowSize(620, 900)
+        host.triggerSizeChanged()
+
+        val app = TuiLauncherSettings.getInstance().state.tuiApps.single()
+        assertEquals(620, app.windowWidth)
+        assertEquals(900, app.windowHeight)
+        assertEquals("WIDTH", app.windowSizeAxis)
+    }
+
+    fun testResizeAtTheBottomRecordsTheHeightAxis() {
+        configureApps(TuiAppConfig(name = "htop", command = "htop"))
+        val (service, host) = newService(FakeFactory(FakeSession()))
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        host.size = ToolWindowSize(1800, 500)
+        host.triggerSizeChanged()
+
+        assertEquals("HEIGHT", TuiLauncherSettings.getInstance().state.tuiApps.single().windowSizeAxis)
+    }
+
+    fun testASideDockedWindowIgnoresASizeRecordedAtTheBottom() {
+        configureApps(
+            TuiAppConfig(
+                name = "htop",
+                command = "htop",
+                windowWidth = 1800,
+                windowHeight = 500,
+                windowSizeAxis = "HEIGHT",
+            )
+        )
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        host.axis = ToolWindowSizeAxis.WIDTH
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+
+        assertTrue(host.appliedSizes.isEmpty())
+    }
+
+    fun testASideDockedWindowIgnoresASizeRecordedBeforeTheAxisWasTracked() {
+        configureApps(TuiAppConfig(name = "htop", command = "htop", windowWidth = 1800, windowHeight = 500))
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        host.axis = ToolWindowSizeAxis.WIDTH
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+
+        assertTrue(host.appliedSizes.isEmpty())
+    }
+
+    fun testABottomDockedWindowStillRestoresASizeRecordedBeforeTheAxisWasTracked() {
+        configureApps(TuiAppConfig(name = "htop", command = "htop", windowWidth = 1800, windowHeight = 500))
+        val (service, host) = newService(FakeFactory(FakeSession()))
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+
+        assertEquals(listOf(ToolWindowSize(1800, 500)), host.appliedSizes.distinct())
+    }
+
+    fun testASideDockedWindowRestoresASizeRecordedWhileSideDocked() {
+        configureApps(
+            TuiAppConfig(
+                name = "htop",
+                command = "htop",
+                windowWidth = 620,
+                windowHeight = 900,
+                windowSizeAxis = "WIDTH",
+            )
+        )
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        host.axis = ToolWindowSizeAxis.WIDTH
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+
+        assertEquals(listOf(ToolWindowSize(620, 900)), host.appliedSizes.distinct())
+    }
+
+    fun testABottomDockedWindowIgnoresASizeRecordedWhileSideDocked() {
+        configureApps(
+            TuiAppConfig(
+                name = "htop",
+                command = "htop",
+                windowWidth = 620,
+                windowHeight = 900,
+                windowSizeAxis = "WIDTH",
+            )
+        )
+        val (service, host) = newService(FakeFactory(FakeSession()))
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+
+        assertTrue(host.appliedSizes.isEmpty())
+    }
+
+    fun testASizeRecordedOnASideDockIsRestoredOnTheNextLaunchThere() {
+        configureApps(TuiAppConfig(name = "htop", command = "htop", windowWidth = 1800, windowHeight = 500))
+        val (service, host) = newService(FakeFactory(FakeSession()))
+        host.axis = ToolWindowSizeAxis.WIDTH
+
+        service.toggle("TUILauncher.htop", "htop", "htop")
+        host.size = ToolWindowSize(620, 900)
+        host.triggerSizeChanged()
+        host.appliedSizes.clear()
+
+        host.triggerTabSelected(host.tabs.single())
+
+        assertEquals(listOf(ToolWindowSize(620, 900)), host.appliedSizes)
     }
 
     fun testFocusTuiRevealsAndFocusesActiveTab() {

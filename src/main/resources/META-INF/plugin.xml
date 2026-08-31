@@ -21,8 +21,11 @@
         <!-- canCloseContents: without it the shared tab context menu's Close Tab / Close Other Tabs /
              Close All Tabs stay disabled and no X appears on a tab, no matter what
              Content.isCloseable says (TSK-9016). -->
+        <!-- anchor only applies to a project whose workspace.xml has no window_info entry for TUILaunch yet.
+             An existing project keeps its recorded anchor, and Restore Default Layout does not reset it
+             either, so changing this only shows up in new projects (TSK-9063). -->
         <toolWindow id="TUILaunch"
-                    anchor="bottom"
+                    anchor="right"
                     canCloseContents="true"
                     icon="org.jetbrains.plugins.terminal.TerminalIcons.OpenTerminal_13x13"
                     factoryClass="com.github.atm1020.tuilaunch.toolwindow.TuiLaunchToolWindowFactory"/>

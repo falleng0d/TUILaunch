@@ -7,6 +7,7 @@ import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
+import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.Service
@@ -111,7 +112,7 @@ class TuiAppLaunchService(private val project: Project) {
     }
 
     private fun applySavedSize(host: IdeToolWindowHost, appName: String) {
-        val size = savedSize(appName) ?: return
+        val size = savedSize(host, appName) ?: return
         applyingSize = true
         try {
             host.applySize(size)
@@ -301,23 +302,29 @@ class TuiAppLaunchService(private val project: Project) {
         val activeHandle = host.activeTab() ?: return
         val activeTab = tabFor(activeHandle) ?: return
         val size = host.currentSize() ?: return
-        storeWindowSize(activeTab.appName, size)
+        storeWindowSize(host, activeTab.appName, size)
     }
 
-    private fun storeWindowSize(appName: String, size: ToolWindowSize) {
+    private fun storeWindowSize(host: IdeToolWindowHost, appName: String, size: ToolWindowSize) {
         configFor(appName)?.let { config ->
             config.windowWidth = size.width
             config.windowHeight = size.height
+            config.windowSizeAxis = host.sizeAxis().name
         }
     }
 
-    private fun savedSize(appName: String): ToolWindowSize? {
+    private fun savedSize(host: IdeToolWindowHost, appName: String): ToolWindowSize? {
         val config = configFor(appName) ?: return null
+        if (recordedSizeAxis(config) != host.sizeAxis()) return null
         val width = config.windowWidth ?: return null
         val height = config.windowHeight ?: return null
         if (width <= 0 || height <= 0) return null
         return ToolWindowSize(width, height)
     }
+
+    private fun recordedSizeAxis(config: TuiAppConfig): ToolWindowSizeAxis =
+        ToolWindowSizeAxis.entries.firstOrNull { it.name == config.windowSizeAxis }
+            ?: ToolWindowSizeAxis.HEIGHT
 
     private fun configFor(appName: String): TuiAppConfig? =
         TuiLauncherSettings.getInstance().state.tuiApps.firstOrNull { it.name == appName }
@@ -335,7 +342,7 @@ class TuiAppLaunchService(private val project: Project) {
 
         val closingActiveTab = host.activeTab() == tab.handle
         if (closingActiveTab) {
-            host.currentSize()?.let { storeWindowSize(tab.appName, it) }
+            host.currentSize()?.let { storeWindowSize(host, tab.appName, it) }
             if (!tab.openedFromTui) focusEditor()
         }
 
@@ -355,7 +362,7 @@ class TuiAppLaunchService(private val project: Project) {
         val tab = tabFor(handle) ?: return
         if (host.activeTab() != tab.handle) return
         activeSessionIdBeingRemoved = tab.sessionId
-        host.currentSize()?.let { storeWindowSize(tab.appName, it) }
+        host.currentSize()?.let { storeWindowSize(host, tab.appName, it) }
     }
 
     private fun onTabRemoved(host: IdeToolWindowHost, handle: Any) {

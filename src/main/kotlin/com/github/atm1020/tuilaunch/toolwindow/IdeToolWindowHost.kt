@@ -22,6 +22,8 @@ import kotlin.math.min
 
 data class ToolWindowSize(val width: Int, val height: Int)
 
+enum class ToolWindowSizeAxis { WIDTH, HEIGHT, BOTH }
+
 private class ContentTabHandle(val content: Content) {
     override fun equals(other: Any?): Boolean = this === other || (other is ContentTabHandle && other.content === content)
     override fun hashCode(): Int = System.identityHashCode(content)
@@ -73,6 +75,11 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
         }
         if (size.width <= 0 || size.height <= 0) return null
         return ToolWindowSize(size.width, size.height)
+    }
+
+    open fun sizeAxis(): ToolWindowSizeAxis {
+        if (canResizeWindowDirectly()) return ToolWindowSizeAxis.BOTH
+        return if (requireToolWindow().anchor.isHorizontal) ToolWindowSizeAxis.HEIGHT else ToolWindowSizeAxis.WIDTH
     }
 
     open fun applySize(size: ToolWindowSize) {
