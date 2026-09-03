@@ -4,6 +4,33 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-03
+
+### Added
+
+- After the last prompt in `PROMPT.md` is sent, the file gets a fresh `---` separator at the end and
+  the cursor moves into the empty space below it, so the next prompt can be typed right away. Sending
+  again when the file already ends in an empty slot does not add a second separator, and sending an
+  earlier prompt leaves the file and the cursor where they are. Turn off "Add a new prompt separator
+  to PROMPT.md after sending" in Settings to leave the file untouched.
+- Sending a prompt now leaves the cursor in `PROMPT.md` instead of moving it into the TUI session, so
+  the next prompt can be typed straight away. The tool window still opens and shows the session that
+  received the prompt. Turn off "Focus PROMPT.md again after sending" in Settings to have the session
+  take the keyboard again after each send.
+- A prompt can now be sent from the keyboard: put the cursor anywhere inside a prompt in `PROMPT.md`
+  and run "TUILaunch Send Prompt Block", which does exactly what clicking that prompt's play button
+  does. It ships with no shortcut of its own, so bind one in Settings | Keymap by searching for
+  "TUILaunch Send Prompt Block". The action stays greyed out when the cursor is not inside a prompt,
+  such as on a `---` line or in the empty space at the end of the file, so a stray press cannot
+  resend the prompt that was just sent.
+
+### Changed
+
+- Clicking a prompt's play button in `PROMPT.md` now submits the prompt instead of only typing it into
+  the session, so the TUI starts working on it straight away. This changes what 0.5.0 did, where the
+  prompt was typed "without submitting it" and waited for you to press Enter. Turn off "Send the
+  prompt immediately instead of only typing it" in Settings to get the old behaviour back.
+
 ## [0.6.0] - 2026-08-31
 
 ### Added
@@ -118,7 +145,8 @@
      - Sessions are managed in their own TUILaunch tool window.
 - Added tmux-like prefix keybindings inside TUI terminals.
 
-[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/atm1020/TUILaunch/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/atm1020/TUILaunch/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/atm1020/TUILaunch/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/atm1020/TUILaunch/compare/v0.3.1...v0.4.0
