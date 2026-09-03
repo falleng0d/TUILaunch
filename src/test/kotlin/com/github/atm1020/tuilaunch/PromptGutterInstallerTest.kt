@@ -3,26 +3,79 @@ package com.github.atm1020.tuilaunch
 import com.github.atm1020.tuilaunch.prompt.PromptGutterInstaller
 import com.github.atm1020.tuilaunch.prompt.PromptGutterRefreshes
 import com.github.atm1020.tuilaunch.prompt.promptBlockTextUnder
+import com.github.atm1020.tuilaunch.prompt.promptEditorFocusRequest
+import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
+import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.EditorKind
 import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.testFramework.TestActionEvent
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import java.awt.event.KeyEvent
 
 private const val REFRESH_TIMEOUT_MILLIS = 30_000L
 
 class PromptGutterInstallerTest : BasePlatformTestCase() {
 
     private lateinit var installer: PromptGutterInstaller
+    private lateinit var settingsState: TuiLauncherSettings.State
+    private var submitPromptOnSendBeforeTest = true
+    private var appendPromptSeparatorBeforeTest = true
+    private var focusPromptFileBeforeTest = true
+    private val focusRequestOutsideThisTest = promptEditorFocusRequest
+    private val caretOffsetsAtFocusRequest = mutableListOf<Int>()
 
     override fun setUp() {
         super.setUp()
         installer = PromptGutterInstaller()
         EditorFactory.getInstance().addEditorFactoryListener(installer, testRootDisposable)
+        settingsState = TuiLauncherSettings.getInstance().state
+        submitPromptOnSendBeforeTest = settingsState.submitPromptOnSend
+        appendPromptSeparatorBeforeTest = settingsState.appendPromptSeparatorOnSend
+        focusPromptFileBeforeTest = settingsState.focusPromptFileAfterSend
+        settingsState.submitPromptOnSend = false
+        settingsState.appendPromptSeparatorOnSend = false
+        settingsState.focusPromptFileAfterSend = false
+        promptEditorFocusRequest = { _, editor -> caretOffsetsAtFocusRequest.add(editor.caretModel.offset) }
+    }
+
+    override fun tearDown() {
+        try {
+            closeSessionsLeftOpenByEarlierTests(project.service<TuiAppLaunchService>())
+            promptEditorFocusRequest = focusRequestOutsideThisTest
+            settingsState.submitPromptOnSend = submitPromptOnSendBeforeTest
+            settingsState.appendPromptSeparatorOnSend = appendPromptSeparatorBeforeTest
+            settingsState.focusPromptFileAfterSend = focusPromptFileBeforeTest
+        } finally {
+            super.tearDown()
+        }
+    }
+
+    private fun launchService(): TuiAppLaunchService {
+        val service = project.service<TuiAppLaunchService>()
+        closeSessionsLeftOpenByEarlierTests(service)
+        service.host = FakeHost()
+        return service
+    }
+
+    private fun launchFakeSession(): FakeSession {
+        val session = FakeSession()
+        launchService().apply {
+            sessionFactory = FakeFactory(session)
+            launchNew("claude", "claude")
+        }
+        return session
+    }
+
+    private fun clickGutterIcon(highlighter: RangeHighlighter) {
+        val action = highlighter.gutterIconRenderer!!.clickAction!!
+        action.actionPerformed(TestActionEvent.createTestEvent(action))
     }
 
     private fun gutterHighlightersOf(editor: Editor): List<RangeHighlighter> =
@@ -242,5 +295,163 @@ class PromptGutterInstallerTest : BasePlatformTestCase() {
         editDocument { it.insertString(it.textLength, "tail\n") }
 
         assertEmpty(gutterHighlighters())
+    }
+
+    fun testClickingTheGutterIconTypesThePromptWithoutSubmittingItWhenSubmitIsOff() {
+        myFixture.configureByText("PROMPT.md", "---\nfirst prompt\n---\n")
+        val session = launchFakeSession()
+
+        clickGutterIcon(gutterHighlighters().single())
+
+        assertEquals(listOf("first prompt"), session.sentText)
+        assertEmpty(session.sentKeys)
+    }
+
+    fun testClickingTheGutterIconSubmitsThePromptWhenSubmitIsOn() {
+        settingsState.submitPromptOnSend = true
+        myFixture.configureByText("PROMPT.md", "---\nfirst prompt\n---\n")
+        val session = launchFakeSession()
+
+        clickGutterIcon(gutterHighlighters().single())
+
+        assertEquals(listOf("first prompt"), session.sentText)
+        assertEquals(listOf(SentKey(KeyEvent.VK_ENTER, 0, '\r')), session.sentKeys)
+    }
+
+    fun testAFailedSendAppendsNoPromptSeparator() {
+        settingsState.submitPromptOnSend = true
+        settingsState.appendPromptSeparatorOnSend = true
+        myFixture.configureByText("PROMPT.md", "---\nfirst prompt\n---\n")
+        launchService()
+
+        clickGutterIcon(gutterHighlighters().single())
+
+        assertEquals("---\nfirst prompt\n---\n", myFixture.editor.document.text)
+    }
+
+    fun testASuccessfulSendAppendsAFreshSlotAndPutsTheCaretInIt() {
+        settingsState.appendPromptSeparatorOnSend = true
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
+        val session = launchFakeSession()
+
+        clickGutterIcon(gutterHighlighters().single())
+        waitForTheGutterToSettle()
+
+        assertEquals(listOf("first prompt"), session.sentText)
+        assertEquals("---\n\nfirst prompt\n\n---\n\n", myFixture.editor.document.text)
+        assertEquals(myFixture.editor.document.textLength, myFixture.editor.caretModel.offset)
+    }
+
+    fun testTheFreshSlotGetsNoGutterIconOfItsOwn() {
+        settingsState.appendPromptSeparatorOnSend = true
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
+        launchFakeSession()
+        assertEquals(listOf(2), gutterLines())
+
+        clickGutterIcon(gutterHighlighters().single())
+        waitForTheGutterToSettle()
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\n", myFixture.editor.document.text)
+        assertEquals(listOf(2), gutterLines())
+    }
+
+    fun testClickingTheLastPromptOfSeveralAppendsAFreshSlotAndMovesTheCaretIntoIt() {
+        settingsState.appendPromptSeparatorOnSend = true
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n\n---\n\nsecond prompt\n")
+        val session = launchFakeSession()
+
+        clickGutterIcon(gutterHighlighters().last())
+        waitForTheGutterToSettle()
+
+        assertEquals(listOf("second prompt"), session.sentText)
+        assertEquals(
+            "---\n\nfirst prompt\n\n---\n\nsecond prompt\n\n---\n\n",
+            myFixture.editor.document.text,
+        )
+        assertEquals(myFixture.editor.document.textLength, myFixture.editor.caretModel.offset)
+    }
+
+    fun testClickingAnEarlierPromptSendsItAndLeavesTheFileAndTheCaretAlone() {
+        settingsState.appendPromptSeparatorOnSend = true
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n\n---\n\nsecond prompt\n")
+        val session = launchFakeSession()
+        val caretOffsetBeforeTheClick = myFixture.editor.caretModel.offset
+
+        clickGutterIcon(gutterHighlighters().first())
+        waitForTheGutterToSettle()
+
+        assertEquals(listOf("first prompt"), session.sentText)
+        assertEquals("---\n\nfirst prompt\n\n---\n\nsecond prompt\n", myFixture.editor.document.text)
+        assertEquals(caretOffsetBeforeTheClick, myFixture.editor.caretModel.offset)
+    }
+
+    fun testClickingTwiceDoesNotStackASecondPromptSeparator() {
+        settingsState.appendPromptSeparatorOnSend = true
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
+        val session = launchFakeSession()
+
+        clickGutterIcon(gutterHighlighters().single())
+        waitForTheGutterToSettle()
+        clickGutterIcon(gutterHighlighters().single())
+        waitForTheGutterToSettle()
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\n", myFixture.editor.document.text)
+        assertEquals(listOf("first prompt", "first prompt"), session.sentText)
+    }
+
+    fun testTheFileIsLeftAloneWhenAppendingSeparatorsIsOff() {
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
+        launchFakeSession()
+
+        clickGutterIcon(gutterHighlighters().single())
+        waitForTheGutterToSettle()
+
+        assertEquals("---\n\nfirst prompt\n", myFixture.editor.document.text)
+    }
+
+    fun testASendKeepsFocusInThePromptFileAndOutOfTheSessionWhenTheSettingIsOn() {
+        settingsState.focusPromptFileAfterSend = true
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
+        val session = launchFakeSession()
+        val sessionFocusCountBeforeTheClick = session.focusCount
+
+        clickGutterIcon(gutterHighlighters().single())
+
+        assertEquals(1, caretOffsetsAtFocusRequest.size)
+        assertEquals(sessionFocusCountBeforeTheClick, session.focusCount)
+    }
+
+    fun testASendFocusesTheSessionAndNotThePromptFileWhenTheSettingIsOff() {
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
+        val session = launchFakeSession()
+        val sessionFocusCountBeforeTheClick = session.focusCount
+
+        clickGutterIcon(gutterHighlighters().single())
+
+        assertEmpty(caretOffsetsAtFocusRequest)
+        assertEquals(sessionFocusCountBeforeTheClick + 1, session.focusCount)
+    }
+
+    fun testAFailedSendRequestsNoFocusAtAll() {
+        settingsState.focusPromptFileAfterSend = true
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
+        launchService()
+
+        clickGutterIcon(gutterHighlighters().single())
+
+        assertEmpty(caretOffsetsAtFocusRequest)
+    }
+
+    fun testFocusIsRequestedOnlyAfterTheCaretHasMovedIntoTheFreshSlot() {
+        settingsState.focusPromptFileAfterSend = true
+        settingsState.appendPromptSeparatorOnSend = true
+        myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
+        launchFakeSession()
+
+        clickGutterIcon(gutterHighlighters().single())
+        waitForTheGutterToSettle()
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\n", myFixture.editor.document.text)
+        assertEquals(listOf(myFixture.editor.document.textLength), caretOffsetsAtFocusRequest)
     }
 }

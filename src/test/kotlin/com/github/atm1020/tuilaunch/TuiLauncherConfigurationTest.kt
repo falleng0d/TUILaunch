@@ -3,7 +3,10 @@ package com.github.atm1020.tuilaunch
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiAppTableModel
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
+import com.github.atm1020.tuilaunch.ui.APPEND_PROMPT_SEPARATOR_LABEL
+import com.github.atm1020.tuilaunch.ui.FOCUS_PROMPT_FILE_LABEL
 import com.github.atm1020.tuilaunch.ui.RESTORE_OPEN_TABS_LABEL
+import com.github.atm1020.tuilaunch.ui.SUBMIT_PROMPT_ON_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -25,6 +28,9 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             tuiApps.clear()
             tmuxKeybindingsEnabled = true
             restoreOpenTabs = false
+            submitPromptOnSend = true
+            appendPromptSeparatorOnSend = true
+            focusPromptFileAfterSend = true
             escapeModifier = "CTRL"
             escapeKeyCode = null
             focusEditorKeyCode = null
@@ -514,6 +520,160 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         configurable.reset()
 
         assertFalse(checkbox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testThePromptSendingCheckBoxesArePresentAndOnByDefault() {
+        val component = TuiLauncherConfiguration().createComponent() as JPanel
+
+        assertTrue(findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!.isSelected)
+        assertTrue(findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!.isSelected)
+        assertTrue(findCheckBox(component, FOCUS_PROMPT_FILE_LABEL)!!.isSelected)
+    }
+
+    fun testTurningTheFocusPromptFileFlagOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, FOCUS_PROMPT_FILE_LABEL)!!.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.focusPromptFileAfterSend)
+        assertTrue(settings.state.submitPromptOnSend)
+        assertTrue(settings.state.appendPromptSeparatorOnSend)
+    }
+
+    fun testTurningTheFocusPromptFileFlagBackOnIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.focusPromptFileAfterSend = false
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, FOCUS_PROMPT_FILE_LABEL)!!
+        assertFalse(checkbox.isSelected)
+
+        checkbox.isSelected = true
+        configurable.apply()
+
+        assertTrue(settings.state.focusPromptFileAfterSend)
+    }
+
+    fun testTogglingTheFocusPromptFileFlagMarksThePanelModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, FOCUS_PROMPT_FILE_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresTheFocusPromptFileCheckBox() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, FOCUS_PROMPT_FILE_LABEL)!!
+
+        checkbox.doClick()
+        configurable.reset()
+
+        assertTrue(checkbox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testAnUntouchedPanelIsUnmodifiedWithTheFocusPromptFileFlagOff() {
+        TuiLauncherSettings.getInstance().state.focusPromptFileAfterSend = false
+
+        val configurable = TuiLauncherConfiguration()
+        configurable.createComponent()
+
+        assertFalse(configurable.isModified())
+    }
+
+    fun testTurningSubmitPromptOnSendOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.submitPromptOnSend)
+        assertTrue(settings.state.appendPromptSeparatorOnSend)
+    }
+
+    fun testTurningTheAppendPromptSeparatorOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.appendPromptSeparatorOnSend)
+        assertTrue(settings.state.submitPromptOnSend)
+    }
+
+    fun testTurningThePromptSendingFlagsBackOnIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.submitPromptOnSend = false
+        settings.state.appendPromptSeparatorOnSend = false
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        assertFalse(findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!.isSelected)
+        assertFalse(findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!.isSelected)
+
+        findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!.isSelected = true
+        findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!.isSelected = true
+        configurable.apply()
+
+        assertTrue(settings.state.submitPromptOnSend)
+        assertTrue(settings.state.appendPromptSeparatorOnSend)
+    }
+
+    fun testTogglingSubmitPromptOnSendMarksThePanelModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testTogglingTheAppendPromptSeparatorMarksThePanelModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresBothPromptSendingCheckBoxes() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val submitCheckBox = findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!
+        val separatorCheckBox = findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!
+
+        submitCheckBox.doClick()
+        separatorCheckBox.doClick()
+        configurable.reset()
+
+        assertTrue(submitCheckBox.isSelected)
+        assertTrue(separatorCheckBox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testAnUntouchedPanelIsUnmodifiedWithThePromptSendingFlagsOff() {
+        TuiLauncherSettings.getInstance().state.submitPromptOnSend = false
+        TuiLauncherSettings.getInstance().state.appendPromptSeparatorOnSend = false
+
+        val configurable = TuiLauncherConfiguration()
+        configurable.createComponent()
+
         assertFalse(configurable.isModified())
     }
 

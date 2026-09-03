@@ -2,14 +2,22 @@ package com.github.atm1020.tuilaunch.prompt
 
 internal data class PromptBlock(val markerLine: Int, val text: String)
 
+internal data class PromptSeparatorEdit(val from: Int, val to: Int, val text: String) {
+    val caretOffset: Int get() = from + text.length
+}
+
 private const val BLOCK_DELIMITER = "---"
+private const val OPEN_SLOT_TAIL = "\n\n"
+private const val NEW_SLOT_TAIL = "\n\n$BLOCK_DELIMITER\n\n"
 private const val FENCE_MARKERS = "`~"
 private const val MINIMUM_FENCE_RUN = 3
 private const val ESTIMATED_CHARACTERS_PER_LINE = 32
 
 private data class FenceRun(val marker: Char, val length: Int)
 
-private data class BlockLines(val firstContentLine: Int, val lastContentLine: Int)
+private data class BlockLines(val firstContentLine: Int, val lastContentLine: Int) {
+    fun contains(line: Int): Boolean = line in firstContentLine..lastContentLine
+}
 
 internal fun parsePromptBlocks(text: String): List<PromptBlock> {
     val lines = LineOffsets(text)
@@ -26,6 +34,31 @@ internal fun promptBlockTextAt(text: CharSequence, markerLine: Int): String? {
     val block = blockLinesIn(lines).firstOrNull { it.firstContentLine == markerLine } ?: return null
     return lines.joinedContent(block.firstContentLine, block.lastContentLine)
 }
+
+internal fun promptBlockTextContainingLine(text: CharSequence, line: Int): String? {
+    val lines = LineOffsets(text)
+    val block = blockLinesIn(lines).firstOrNull { it.contains(line) } ?: return null
+    return lines.joinedContent(block.firstContentLine, block.lastContentLine)
+}
+
+internal fun promptBlockContainsLine(text: CharSequence, line: Int): Boolean =
+    blockLinesIn(LineOffsets(text)).any { it.contains(line) }
+
+internal fun isLastPromptBlock(text: CharSequence, line: Int): Boolean =
+    blockLinesIn(LineOffsets(text)).lastOrNull()?.contains(line) == true
+
+internal fun promptSeparatorEdit(text: CharSequence): PromptSeparatorEdit? {
+    val lines = LineOffsets(text)
+    val lastContentLine = lines.lastNonBlankLine() ?: return null
+    val fileAlreadyEndsInAnOpenSlot = lines.isBlockSeparatorLine(lastContentLine)
+    val tail = if (fileAlreadyEndsInAnOpenSlot) OPEN_SLOT_TAIL else NEW_SLOT_TAIL
+    val from = lines.contentEndOf(lastContentLine)
+    if (endsAt(text, from, tail)) return null
+    return PromptSeparatorEdit(from, text.length, tail)
+}
+
+private fun endsAt(text: CharSequence, from: Int, expected: String): Boolean =
+    text.length - from == expected.length && expected.indices.all { text[from + it] == expected[it] }
 
 internal fun canChangeBlockStructure(line: CharSequence): Boolean =
     isBlank(line, 0, line.length) ||
@@ -92,7 +125,7 @@ private class LineOffsets(private val text: CharSequence) {
 
     private fun startOf(line: Int): Int = starts[line]
 
-    private fun contentEndOf(line: Int): Int {
+    fun contentEndOf(line: Int): Int {
         if (line == lineCount - 1) return text.length
         val lineStart = starts[line]
         var end = starts[line + 1]
@@ -102,6 +135,18 @@ private class LineOffsets(private val text: CharSequence) {
     }
 
     fun isBlankLine(line: Int): Boolean = isBlank(text, startOf(line), contentEndOf(line))
+
+    fun lastNonBlankLine(): Int? {
+        var line = lineCount - 1
+        while (line >= 0 && isBlankLine(line)) line--
+        return line.takeIf { it >= 0 }
+    }
+
+    fun isBlockSeparatorLine(line: Int): Boolean {
+        var separatesBlocks = false
+        forEachDelimiterLine { delimiterLine -> if (delimiterLine == line) separatesBlocks = true }
+        return separatesBlocks
+    }
 
     fun forEachDelimiterLine(action: (Int) -> Unit) {
         val unclosedRuns = ShortestUnclosedFenceRuns()

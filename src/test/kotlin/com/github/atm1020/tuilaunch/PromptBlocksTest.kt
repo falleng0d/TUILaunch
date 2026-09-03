@@ -1,9 +1,13 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.prompt.canChangeBlockStructure
+import com.github.atm1020.tuilaunch.prompt.isLastPromptBlock
 import com.github.atm1020.tuilaunch.prompt.parsePromptBlocks
+import com.github.atm1020.tuilaunch.prompt.promptBlockContainsLine
 import com.github.atm1020.tuilaunch.prompt.promptBlockTextAt
+import com.github.atm1020.tuilaunch.prompt.promptBlockTextContainingLine
 import com.github.atm1020.tuilaunch.prompt.promptMarkerLines
+import com.github.atm1020.tuilaunch.prompt.promptSeparatorEdit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -276,4 +280,222 @@ class PromptBlocksTest {
         assertFalse(canChangeBlockStructure("----"))
         assertFalse(canChangeBlockStructure("- - -"))
     }
+
+    private fun withAppendedSeparator(text: String): String {
+        val edit = promptSeparatorEdit(text) ?: return text
+        return text.substring(0, edit.from) + edit.text + text.substring(edit.to)
+    }
+
+    @Test
+    fun aPromptWithNoTrailingNewlineGetsABlankLineADividerAndAnEmptySlot() {
+        assertEquals("Fix the bug\n\n---\n\n", withAppendedSeparator("Fix the bug"))
+    }
+
+    @Test
+    fun aSingleTrailingNewlineIsNotCountedTowardsTheBlankLine() {
+        assertEquals("Fix the bug\n\n---\n\n", withAppendedSeparator("Fix the bug\n"))
+    }
+
+    @Test
+    fun trailingBlankLinesAreCollapsedIntoTheOneBlankLineBeforeTheDivider() {
+        assertEquals("Fix the bug\n\n---\n\n", withAppendedSeparator("Fix the bug\n\n\n   \n"))
+        assertEquals("Fix the bug\n\n---\n\n", withAppendedSeparator("Fix the bug\n \n\t\n"))
+    }
+
+    @Test
+    fun aFileAlreadyEndingInADividerOnlyGetsTheBlankLineAfterIt() {
+        assertEquals("first prompt\n---\n\n", withAppendedSeparator("first prompt\n---\n"))
+    }
+
+    @Test
+    fun appendingTwiceLeavesASingleDivider() {
+        val once = withAppendedSeparator("---\n\nfirst prompt\n")
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\n", once)
+        assertEquals(once, withAppendedSeparator(once))
+    }
+
+    @Test
+    fun aFileAlreadyEndingInAnEmptySlotNeedsNoEdit() {
+        assertNull(promptSeparatorEdit("first prompt\n\n---\n\n"))
+        assertNull(promptSeparatorEdit("---\n\nfirst prompt\n\n---\n\n"))
+    }
+
+    @Test
+    fun aFileWithNoPromptAtAllNeedsNoEdit() {
+        assertNull(promptSeparatorEdit(""))
+        assertNull(promptSeparatorEdit("\n\n"))
+        assertNull(promptSeparatorEdit("   \n\t\n   "))
+    }
+
+    @Test
+    fun aDividerAfterAnUnclosedFenceIsStillADivider() {
+        val fenceLeftOpen = "first prompt\n```\n---\n"
+
+        assertEquals(listOf(0), promptMarkerLines(fenceLeftOpen))
+        assertEquals("first prompt\n```\n---\n\n", withAppendedSeparator(fenceLeftOpen))
+    }
+
+    @Test
+    fun aClosedFenceAtTheEndOfTheFileGetsAWholeNewSlot() {
+        val closedFence = "first prompt\n```\n---\n```\n"
+
+        assertEquals("first prompt\n```\n---\n```\n\n---\n\n", withAppendedSeparator(closedFence))
+    }
+
+    @Test
+    fun theCaretOffsetLandsAtTheEndOfTheAppendedFile() {
+        listOf("Fix the bug", "Fix the bug\n", "Fix the bug\n\n\n", "first prompt\n---\n").forEach { text ->
+            val edit = promptSeparatorEdit(text)!!
+
+            assertEquals(withAppendedSeparator(text).length, edit.caretOffset)
+        }
+    }
+
+    @Test
+    fun appendingASeparatorMarksNoNewPrompt() {
+        listOf("---\n\nfirst prompt\n", exampleFile, "Fix the bug").forEach { text ->
+            assertEquals(promptMarkerLines(text), promptMarkerLines(withAppendedSeparator(text)))
+        }
+    }
+
+    @Test
+    fun everyLineOfABlockResolvesToThatWholeBlock() {
+        val twoBlocks = "---\n\nfirst prompt\nmore of it\nlast line\n\n---\n\nsecond prompt\n"
+        val firstBlock = "first prompt\nmore of it\nlast line"
+
+        assertEquals(firstBlock, promptBlockTextContainingLine(twoBlocks, 2))
+        assertEquals(firstBlock, promptBlockTextContainingLine(twoBlocks, 3))
+        assertEquals(firstBlock, promptBlockTextContainingLine(twoBlocks, 4))
+        assertEquals("second prompt", promptBlockTextContainingLine(twoBlocks, 8))
+    }
+
+    @Test
+    fun aDividerLineBelongsToNoBlock() {
+        val twoBlocks = "---\n\nfirst prompt\n\n---\n\nsecond prompt\n"
+
+        assertNull(promptBlockTextContainingLine(twoBlocks, 0))
+        assertNull(promptBlockTextContainingLine(twoBlocks, 4))
+    }
+
+    @Test
+    fun aBlankLineBetweenTwoBlocksBelongsToNoBlock() {
+        val twoBlocks = "first prompt\n\n---\n\nsecond prompt\n"
+
+        assertEquals("first prompt", promptBlockTextContainingLine(twoBlocks, 0))
+        assertNull(promptBlockTextContainingLine(twoBlocks, 1))
+        assertNull(promptBlockTextContainingLine(twoBlocks, 3))
+        assertEquals("second prompt", promptBlockTextContainingLine(twoBlocks, 4))
+    }
+
+    @Test
+    fun theEmptySlotAtTheEndOfTheFileBelongsToNoBlock() {
+        val appended = withAppendedSeparator("---\n\nfirst prompt\n")
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\n", appended)
+        assertNull(promptBlockTextContainingLine(appended, 5))
+        assertNull(promptBlockTextContainingLine(appended, 6))
+    }
+
+    @Test
+    fun aFileWithNoDividerAtAllIsOneBlockOnEveryLine() {
+        val singleBlock = "Fix the bug\nand add a test\n"
+
+        assertEquals("Fix the bug\nand add a test", promptBlockTextContainingLine(singleBlock, 0))
+        assertEquals("Fix the bug\nand add a test", promptBlockTextContainingLine(singleBlock, 1))
+    }
+
+    @Test
+    fun aDividerInsideAFenceResolvesToTheWholeEnclosingBlock() {
+        val fencedDivider = "---\n\nfix this:\n```\n---\n```\n\n---\n\nsecond\n"
+        val fencedBlock = "fix this:\n```\n---\n```"
+
+        assertEquals(fencedBlock, promptBlockTextContainingLine(fencedDivider, 2))
+        assertEquals(fencedBlock, promptBlockTextContainingLine(fencedDivider, 4))
+        assertEquals(fencedBlock, promptBlockTextContainingLine(fencedDivider, 5))
+        assertEquals("second", promptBlockTextContainingLine(fencedDivider, 9))
+    }
+
+    @Test
+    fun anEmptyFileHasNoBlockOnAnyLine() {
+        assertNull(promptBlockTextContainingLine("", 0))
+        assertNull(promptBlockTextContainingLine("\n\n", 1))
+    }
+
+    @Test
+    fun everyBlockAGutterIconMarksIsAlsoFoundFromItsFirstLine() {
+        promptMarkerLines(exampleFile).forEach { markerLine ->
+            assertEquals(
+                promptBlockTextAt(exampleFile, markerLine),
+                promptBlockTextContainingLine(exampleFile, markerLine),
+            )
+        }
+    }
+
+    @Test
+    fun theCheapBlockCheckAgreesWithTheBlockTextLookupOnEveryLine() {
+        listOf(
+            exampleFile,
+            "---\n\nfirst prompt\n\n---\n\nsecond prompt\nspanning two lines\n\n---\n\n",
+            "Fix the bug\n",
+            "",
+        ).forEach { text ->
+            everyLineOf(text).forEach { line ->
+                assertEquals(
+                    promptBlockTextContainingLine(text, line) != null,
+                    promptBlockContainsLine(text, line),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun onlyTheLastBlockOfAMultiBlockFileEndsTheFile() {
+        val twoBlocks = "---\n\nfirst prompt\n\n---\n\nsecond prompt\n"
+
+        assertFalse(isLastPromptBlock(twoBlocks, 2))
+        assertTrue(isLastPromptBlock(twoBlocks, 6))
+    }
+
+    @Test
+    fun everyLineOfTheLastBlockEndsTheFileAndNoLineOfAnEarlierOneDoes() {
+        val twoBlocks = "---\n\nfirst prompt\nmore of it\n\n---\n\nsecond prompt\nspanning two lines\n"
+
+        assertFalse(isLastPromptBlock(twoBlocks, 2))
+        assertFalse(isLastPromptBlock(twoBlocks, 3))
+        assertTrue(isLastPromptBlock(twoBlocks, 7))
+        assertTrue(isLastPromptBlock(twoBlocks, 8))
+    }
+
+    @Test
+    fun theOnlyBlockOfASingleBlockFileEndsTheFile() {
+        val singleBlock = "Fix the bug\nand add a test\n"
+
+        assertTrue(isLastPromptBlock(singleBlock, 0))
+        assertTrue(isLastPromptBlock(singleBlock, 1))
+    }
+
+    @Test
+    fun noLineOutsideAnyBlockEndsTheFile() {
+        val appended = withAppendedSeparator("---\n\nfirst prompt\n")
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\n", appended)
+        assertTrue(isLastPromptBlock(appended, 2))
+        assertFalse(isLastPromptBlock(appended, 4))
+        assertFalse(isLastPromptBlock(appended, 6))
+        assertFalse(isLastPromptBlock("", 0))
+        assertFalse(isLastPromptBlock("\n\n", 1))
+    }
+
+    @Test
+    fun theLastBlockIsTheOnlyOneAnAppendedSeparatorFollows() {
+        val twoBlocks = "---\n\nfirst prompt\n\n---\n\nsecond prompt\n"
+        val appended = withAppendedSeparator(twoBlocks)
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\nsecond prompt\n\n---\n\n", appended)
+        assertFalse(isLastPromptBlock(appended, 2))
+        assertTrue(isLastPromptBlock(appended, 6))
+    }
+
+    private fun everyLineOf(text: String): IntRange = 0..text.count { it == '\n' }
 }

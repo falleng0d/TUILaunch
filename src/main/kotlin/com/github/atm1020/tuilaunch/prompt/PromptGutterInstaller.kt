@@ -1,13 +1,10 @@
 package com.github.atm1020.tuilaunch.prompt
 
-import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
-import com.intellij.codeInsight.hint.HintManager
+import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.editor.EditorKind
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryEvent
@@ -16,7 +13,6 @@ import com.intellij.openapi.editor.ex.util.EditorUtil
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.RangeHighlighter
-import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.util.Disposer
@@ -26,10 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.Icon
 import org.jetbrains.annotations.TestOnly
 
-private const val PROMPT_FILE_NAME = "PROMPT.md"
-private val IGNORED_EDITOR_KINDS = setOf(EditorKind.DIFF, EditorKind.PREVIEW, EditorKind.CONSOLE)
-private const val SEND_TOOLTIP = "Type this prompt into the active TUI session"
-private const val NO_SESSION_MESSAGE = "No TUI session is open"
+private const val TYPE_TOOLTIP = "Type this prompt into the active TUI session"
+private const val SUBMIT_TOOLTIP = "Send this prompt to the active TUI session"
 private const val REFRESH_MERGE_MILLIS = 100
 
 internal object PromptGutterRefreshes {
@@ -53,8 +47,7 @@ class PromptGutterInstaller : EditorFactoryListener {
 
     override fun editorCreated(event: EditorFactoryEvent) {
         val editor = event.editor
-        if (editor.editorKind in IGNORED_EDITOR_KINDS) return
-        if (fileNameOf(editor) != PROMPT_FILE_NAME) return
+        if (!editorShowsThePromptFile(editor)) return
         guttersByEditor.remove(editor)?.release()
         guttersByEditor[editor] = PromptBlockGutter(editor).also { it.install() }
     }
@@ -97,7 +90,7 @@ private class PromptBlockGutter(private val editor: Editor) {
     }
 
     private fun refreshIsNeededFor(event: DocumentEvent): Boolean =
-        fileNameOf(editor) != PROMPT_FILE_NAME ||
+        !editorShowsThePromptFile(editor) ||
             editCanChangeBlockStructure(event) ||
             anInstalledHighlighterWasInvalidated(event)
 
@@ -110,7 +103,7 @@ private class PromptBlockGutter(private val editor: Editor) {
 
     private fun refresh() {
         PromptGutterRefreshes.record()
-        if (fileNameOf(editor) != PROMPT_FILE_NAME) {
+        if (!editorShowsThePromptFile(editor)) {
             removeInstalledHighlighters()
             return
         }
@@ -153,9 +146,6 @@ private class PromptBlockGutter(private val editor: Editor) {
     }
 }
 
-private fun fileNameOf(editor: Editor): String? =
-    FileDocumentManager.getInstance().getFile(editor.document)?.name ?: editor.virtualFile?.name
-
 internal fun editCanChangeBlockStructure(event: DocumentEvent): Boolean {
     if (spansLines(event.oldFragment) || spansLines(event.newFragment)) return true
     val document = event.document
@@ -188,7 +178,7 @@ private data class PromptBlockGutterIconRenderer(
 
     override fun getIcon(): Icon = AllIcons.RunConfigurations.TestState.Run
 
-    override fun getTooltipText(): String = SEND_TOOLTIP
+    override fun getTooltipText(): String = sendTooltip()
 
     override fun isNavigateAction(): Boolean = true
 
@@ -197,22 +187,17 @@ private data class PromptBlockGutterIconRenderer(
     override fun getClickAction(): AnAction = SendPromptBlockAction(editor, highlighter)
 }
 
+private fun sendTooltip(): String =
+    if (TuiLauncherSettings.getInstance().state.submitPromptOnSend) SUBMIT_TOOLTIP else TYPE_TOOLTIP
+
 private class SendPromptBlockAction(
     private val editor: Editor,
     private val highlighter: RangeHighlighter,
-) : DumbAwareAction(SEND_TOOLTIP) {
+) : DumbAwareAction(sendTooltip()) {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = editor.project ?: e.project ?: return
         val blockText = promptBlockTextUnder(editor, highlighter) ?: return
-        if (!project.service<TuiAppLaunchService>().sendTextToActiveSession(blockText)) {
-            HintManager.getInstance().showErrorHint(editor, NO_SESSION_MESSAGE)
-        }
+        sendPromptBlock(project, editor, promptBlockLineUnder(editor, highlighter), blockText)
     }
-}
-
-internal fun promptBlockTextUnder(editor: Editor, highlighter: RangeHighlighter): String? {
-    if (!highlighter.isValid) return null
-    val document = editor.document
-    return promptBlockTextAt(document.charsSequence, document.getLineNumber(highlighter.startOffset))
 }

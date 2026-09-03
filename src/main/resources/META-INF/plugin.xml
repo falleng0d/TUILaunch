@@ -92,6 +92,14 @@
                 description="Move to the previous open TUI session tab without requesting terminal focus">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
+        <!-- No <keyboard-shortcut>: a default keystroke here would silently shadow whatever the
+             IDE keymap already binds it to, so the user assigns one in Settings | Keymap. -->
+        <action id="TUILauncher.SendPromptBlock"
+                class="com.github.atm1020.tuilaunch.action.SendPromptBlockUnderCaretAction"
+                text="TUILaunch Send Prompt Block"
+                description="Send the PROMPT.md prompt block under the cursor to the active TUI session">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
         <!-- Not added to any menu group: looked up by id from TuiLaunchToolWindowFactory.init and
              installed as the tool window tab bar's "+" button (TSK-9013). -->
         <action id="TUILaunch.NewSession"

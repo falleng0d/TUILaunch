@@ -206,6 +206,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `ContentManagerImpl.setSelectedContent` fires nothing when the content is already selected, which is why the very first tab added to an empty strip produces a `contentAdded` and an auto-selection but no further selection event for plugin code to react to.
 - `$WORKSPACE_FILE$` resolves to `.idea/workspace.xml`, and only that name is covered by the standard JetBrains `.gitignore`; `$PRODUCT_WORKSPACE_FILE$` resolves to `.idea/product-workspace.xml` only under `isUnitTestMode` and otherwise to `<IDE config dir>/workspace/<projectWorkspaceId>.xml`, which the platform uses for open editors and the tool window layout.
 - `MergingUpdateQueue.flushAllQueues()` only does anything when the `intellij.MergingUpdateQueue.enable.global.flusher` system property is set before the class loads, and even a zero merge span still hands the update to the alarm thread before it reaches the event queue, so a single `dispatchAllInvocationEventsInIdeEventQueue` races it; a test has to poll the queue's own `isEmpty` while pumping the event queue.
+- Inside `ESC[200~`/`ESC[201~` a carriage return is paste content rather than a submit, so submitting text sent as a paste needs a separate key event after the paste ends; appending the return to the payload cannot work because the payload is trimmed of trailing returns before the markers go on.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

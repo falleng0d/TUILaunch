@@ -81,6 +81,69 @@ class TuiAppLaunchServiceFocusTest : BasePlatformTestCase() {
         assertTrue(session.focusCount > focusCountBeforeSend)
     }
 
+    fun testSendTextWithoutSessionFocusStillShowsAndSelectsTheTab() {
+        val session = FakeSession()
+        val (service, host) = newService(FakeFactory(session))
+        service.launchNew("claude", "claude")
+        val focusCountBeforeSend = session.focusCount
+
+        assertTrue(service.sendTextToActiveSession("a prompt", focusSession = false))
+
+        assertEquals(listOf("a prompt"), session.sentText)
+        assertTrue(host.visible)
+        assertSame(host.tabs.single(), host.activeTab())
+        assertEquals(focusCountBeforeSend, session.focusCount)
+    }
+
+    fun testSendTextWithSessionFocusFocusesTheSession() {
+        val session = FakeSession()
+        val (service, _) = newService(FakeFactory(session))
+        service.launchNew("claude", "claude")
+        val focusCountBeforeSend = session.focusCount
+
+        assertTrue(service.sendTextToActiveSession("a prompt", focusSession = true))
+
+        assertEquals(focusCountBeforeSend + 1, session.focusCount)
+    }
+
+    fun testSendTextWithoutSubmitSendsNoEnterKey() {
+        val session = FakeSession()
+        val (service, _) = newService(FakeFactory(session))
+        service.launchNew("claude", "claude")
+
+        assertTrue(service.sendTextToActiveSession("a prompt"))
+
+        assertEmpty(session.sentKeys)
+    }
+
+    fun testSubmittingSendsEnterAfterTheText() {
+        val session = FakeSession()
+        val (service, _) = newService(FakeFactory(session))
+        service.launchNew("claude", "claude")
+
+        assertTrue(service.sendTextToActiveSession("a prompt", submit = true))
+
+        assertEquals(listOf("a prompt"), session.sentText)
+        assertEquals(listOf(SentKey(KeyEvent.VK_ENTER, 0, '\r')), session.sentKeys)
+    }
+
+    fun testSubmittingSendsNoEnterWhenTheTerminalRejectsTheText() {
+        val session = FakeSession(terminalAcceptsText = false)
+        val (service, _) = newService(FakeFactory(session))
+        service.launchNew("claude", "claude")
+
+        assertFalse(service.sendTextToActiveSession("a prompt", submit = true))
+
+        assertEquals(listOf("a prompt"), session.sentText)
+        assertEmpty(session.sentKeys)
+    }
+
+    fun testSubmittingSendsNothingWhenNoSessionIsOpen() {
+        val (service, _) = newService()
+
+        assertFalse(service.sendTextToActiveSession("a prompt", submit = true))
+    }
+
     fun testFocusTuiDoesNothingWhenNoAppOpen() {
         val (service, host) = newService()
 

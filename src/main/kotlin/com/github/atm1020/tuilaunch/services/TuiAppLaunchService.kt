@@ -18,8 +18,11 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
+import java.awt.event.KeyEvent
 
 const val TUI_TOOL_WINDOW_ID = "TUILaunch"
+
+private const val SUBMIT_KEY_CHAR = '\r'
 
 internal fun uniqueSessionTitle(base: String, taken: Set<String>): String {
     if (base !in taken) return base
@@ -229,11 +232,13 @@ class TuiAppLaunchService(private val project: Project) {
         editorFocusRequest()
     }
 
-    fun sendTextToActiveSession(text: String): Boolean {
+    fun sendTextToActiveSession(text: String, submit: Boolean = false, focusSession: Boolean = true): Boolean {
         val host = hostWithListeners() ?: return false
         val tab = activeOrLastOpenTab(host) ?: return false
-        selectTuiTab(host, tab)
-        return tab.session.sendText(text)
+        selectTuiTab(host, tab, requestFocus = focusSession)
+        if (!tab.session.sendText(text)) return false
+        if (submit) tab.session.sendKey(KeyEvent.VK_ENTER, 0, SUBMIT_KEY_CHAR)
+        return true
     }
 
     fun toggleFocus() {

@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
@@ -8,13 +9,35 @@ import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
+import com.intellij.testFramework.PlatformTestUtil
 import javax.swing.JComponent
 import javax.swing.JPanel
+
+private const val MAXIMUM_LEFTOVER_SESSIONS = 100
+
+internal fun closeSessionsLeftOpenByEarlierTests(service: TuiAppLaunchService) {
+    repeat(MAXIMUM_LEFTOVER_SESSIONS) {
+        if (!aSessionIsStillOpen(service)) return
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+    }
+    error("A session left open by an earlier test could not be closed")
+}
+
+private fun aSessionIsStillOpen(service: TuiAppLaunchService): Boolean {
+    val probeHost = FakeHost()
+    service.host = probeHost
+    service.focusTui()
+    return probeHost.showCount > 0
+}
+
+internal data class SentKey(val keyCode: Int, val modifiers: Int, val keyChar: Char)
 
 internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
     val component: JComponent = JPanel()
     var focusCount = 0
     val sentText = mutableListOf<String>()
+    val sentKeys = mutableListOf<SentKey>()
     fun requestFocus() {
         focusCount++
     }
@@ -23,6 +46,7 @@ internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
         component = component,
         requestFocus = { requestFocus() },
         registerTerminationCallback = {},
+        sendKey = { keyCode, modifiers, keyChar -> sentKeys.add(SentKey(keyCode, modifiers, keyChar)) },
         sendText = { text ->
             sentText.add(text)
             terminalAcceptsText

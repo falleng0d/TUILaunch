@@ -19,6 +19,7 @@ import java.awt.FlowLayout
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import javax.swing.BorderFactory
+import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -29,6 +30,9 @@ import javax.swing.table.AbstractTableModel
 import kotlin.reflect.KMutableProperty1
 
 internal const val RESTORE_OPEN_TABS_LABEL = "Reopen TUI tabs when the project is opened"
+internal const val SUBMIT_PROMPT_ON_SEND_LABEL = "Send the prompt immediately instead of only typing it"
+internal const val APPEND_PROMPT_SEPARATOR_LABEL = "Add a new prompt separator to PROMPT.md after sending"
+internal const val FOCUS_PROMPT_FILE_LABEL = "Focus PROMPT.md again after sending"
 
 class TuiLauncherConfiguration : Configurable {
     private var tuiLauncherPanel: JPanel? = null
@@ -38,6 +42,9 @@ class TuiLauncherConfiguration : Configurable {
 
     private var tmuxKeybindingsEnabledCheckBox: JBCheckBox? = null
     private var restoreOpenTabsCheckBox: JBCheckBox? = null
+    private var submitPromptOnSendCheckBox: JBCheckBox? = null
+    private var appendPromptSeparatorCheckBox: JBCheckBox? = null
+    private var focusPromptFileCheckBox: JBCheckBox? = null
     private var modifierCombo: JComboBox<String>? = null
     private val tmuxShortcutComponents = mutableListOf<JComponent>()
     private var shortcutsTable: JBTable? = null
@@ -134,12 +141,28 @@ class TuiLauncherConfiguration : Configurable {
         }
     }
 
-    private fun createSessionAndKeybindingsPanel(): JComponent {
-        val restoreCheckBox = JBCheckBox(RESTORE_OPEN_TABS_LABEL, settings.state.restoreOpenTabs)
-        restoreOpenTabsCheckBox = restoreCheckBox
-        return JPanel(BorderLayout(0, 6)).apply {
-            add(restoreCheckBox, BorderLayout.NORTH)
+    private fun createSessionAndKeybindingsPanel(): JComponent =
+        JPanel(BorderLayout(0, 6)).apply {
+            add(createSessionOptionsPanel(), BorderLayout.NORTH)
             add(createTmuxKeybindingsPanel(), BorderLayout.CENTER)
+        }
+
+    private fun createSessionOptionsPanel(): JComponent {
+        val restoreCheckBox = JBCheckBox(RESTORE_OPEN_TABS_LABEL, settings.state.restoreOpenTabs)
+        val submitCheckBox = JBCheckBox(SUBMIT_PROMPT_ON_SEND_LABEL, settings.state.submitPromptOnSend)
+        val separatorCheckBox =
+            JBCheckBox(APPEND_PROMPT_SEPARATOR_LABEL, settings.state.appendPromptSeparatorOnSend)
+        val focusPromptCheckBox = JBCheckBox(FOCUS_PROMPT_FILE_LABEL, settings.state.focusPromptFileAfterSend)
+        restoreOpenTabsCheckBox = restoreCheckBox
+        submitPromptOnSendCheckBox = submitCheckBox
+        appendPromptSeparatorCheckBox = separatorCheckBox
+        focusPromptFileCheckBox = focusPromptCheckBox
+        return JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(restoreCheckBox)
+            add(submitCheckBox)
+            add(separatorCheckBox)
+            add(focusPromptCheckBox)
         }
     }
 
@@ -367,6 +390,9 @@ class TuiLauncherConfiguration : Configurable {
         tableModel?.setRows(settings.state.tuiApps.map { it.copy() })
         tmuxKeybindingsEnabledCheckBox?.isSelected = settings.state.tmuxKeybindingsEnabled
         restoreOpenTabsCheckBox?.isSelected = settings.state.restoreOpenTabs
+        submitPromptOnSendCheckBox?.isSelected = settings.state.submitPromptOnSend
+        appendPromptSeparatorCheckBox?.isSelected = settings.state.appendPromptSeparatorOnSend
+        focusPromptFileCheckBox?.isSelected = settings.state.focusPromptFileAfterSend
         modifierCombo?.selectedItem = modifierComboItem()
         builtInShortcuts.forEach { it.keyCode = it.stateProperty.get(settings.state) }
 
@@ -380,6 +406,9 @@ class TuiLauncherConfiguration : Configurable {
         tuiApps = tableModel?.snapshot() ?: settings.state.tuiApps,
         tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true,
         restoreOpenTabs = restoreOpenTabsCheckBox?.isSelected == true,
+        submitPromptOnSend = submitPromptOnSendCheckBox?.isSelected == true,
+        appendPromptSeparatorOnSend = appendPromptSeparatorCheckBox?.isSelected == true,
+        focusPromptFileAfterSend = focusPromptFileCheckBox?.isSelected == true,
         escapeModifier = selectedEscapeModifier(),
     ).also { edited ->
         builtInShortcuts.forEach { it.stateProperty.set(edited, it.keyCode) }
@@ -397,6 +426,9 @@ class TuiLauncherConfiguration : Configurable {
         settings.state.tuiApps = newApps
         settings.state.tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true
         settings.state.restoreOpenTabs = restoreOpenTabsCheckBox?.isSelected == true
+        settings.state.submitPromptOnSend = submitPromptOnSendCheckBox?.isSelected == true
+        settings.state.appendPromptSeparatorOnSend = appendPromptSeparatorCheckBox?.isSelected == true
+        settings.state.focusPromptFileAfterSend = focusPromptFileCheckBox?.isSelected == true
         settings.state.escapeModifier = selectedEscapeModifier()
         builtInShortcuts.forEach { it.stateProperty.set(settings.state, it.keyCode) }
         settings.loadActions()
