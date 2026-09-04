@@ -31,7 +31,6 @@ data class CopilotServerPlatform(val os: String, val arch: String) {
 }
 
 object CopilotServerLocator {
-    const val COPILOT_PLUGIN_ID = "com.github.copilot"
     const val COPILOT_AGENT_DIRECTORY = "copilot-agent"
 
     fun currentPlatform(): CopilotServerPlatform = CopilotServerPlatform(currentOs(), currentArch())
@@ -44,7 +43,12 @@ object CopilotServerLocator {
         isExecutable: (Path) -> Boolean = ::isExecutableFile,
     ): CopilotServerLocation {
         if (explicitPath.isNotBlank()) {
-            val configured = Path.of(explicitPath)
+            val configured = runCatching { Path.of(explicitPath) }.getOrElse { invalid ->
+                return CopilotServerLocation.NotFound(
+                    "The configured GitHub Copilot language server path $explicitPath " +
+                        "is not a valid path: ${invalid.message ?: invalid.javaClass.simpleName}"
+                )
+            }
             return if (isExecutable(configured)) {
                 CopilotServerLocation.Found(configured, CopilotServerSource.EXPLICIT_PATH)
             } else {

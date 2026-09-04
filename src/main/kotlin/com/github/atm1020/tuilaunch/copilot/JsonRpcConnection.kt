@@ -19,6 +19,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -38,6 +39,7 @@ class JsonRpcConnection(
     private val pendingRequests = ConcurrentHashMap<Int, CompletableDeferred<JsonElement>>()
     private val notificationHandlers = ConcurrentHashMap<String, (JsonElement?) -> Unit>()
     private val requestHandlers = ConcurrentHashMap<String, (JsonElement?) -> JsonElement?>()
+    private val closeListeners = CopyOnWriteArrayList<() -> Unit>()
     private val closed = AtomicBoolean(false)
 
     val isClosed: Boolean
@@ -54,6 +56,10 @@ class JsonRpcConnection(
 
     fun onRequest(method: String, handler: (JsonElement?) -> JsonElement?) {
         requestHandlers[method] = handler
+    }
+
+    fun onClosed(listener: () -> Unit) {
+        if (closed.get()) listener() else closeListeners += listener
     }
 
     fun notify(method: String, params: JsonElement?) {
@@ -88,6 +94,8 @@ class JsonRpcConnection(
         }
         runCatching { incoming.close() }
         runCatching { output.close() }
+        closeListeners.forEach { listener -> runCatching { listener() } }
+        closeListeners.clear()
     }
 
     private fun closedException() =
@@ -179,7 +187,12 @@ class JsonRpcConnection(
 
     private fun readFrameBody(): ByteArray? {
         val headers = readHeaders() ?: return null
-        val length = headers[CONTENT_LENGTH.lowercase()]?.toIntOrNull() ?: return null
+        val announced = headers[CONTENT_LENGTH.lowercase()] ?: return null
+        val length = announced.toIntOrNull()
+        if (length == null || length < 0 || length > MAX_CONTENT_LENGTH) {
+            thisLogger().warn("The GitHub Copilot language server announced a $CONTENT_LENGTH of $announced")
+            return null
+        }
         val body = ByteArray(length)
         var read = 0
         while (read < length) {
@@ -211,6 +224,10 @@ class JsonRpcConnection(
                 val bytes = line.toByteArray()
                 val end = if (bytes.isNotEmpty() && bytes.last() == '\r'.code.toByte()) bytes.size - 1 else bytes.size
                 return String(bytes, 0, end, StandardCharsets.US_ASCII)
+            }
+            if (line.size() >= MAX_HEADER_LINE_BYTES) {
+                thisLogger().warn("The GitHub Copilot language server sent a header line without an end")
+                return null
             }
             line.write(byte)
         }
@@ -279,5 +296,7 @@ class JsonRpcConnection(
 
         private const val JSON_RPC_VERSION = "2.0"
         private const val CONTENT_LENGTH = "Content-Length"
+        private const val MAX_CONTENT_LENGTH = 64 * 1024 * 1024
+        private const val MAX_HEADER_LINE_BYTES = 8 * 1024
     }
 }

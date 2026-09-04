@@ -231,7 +231,6 @@ class CopilotLanguageServer(
         const val SHOW_DOCUMENT = "window/showDocument"
         const val DID_CHANGE_STATUS = "didChangeStatus"
         const val ACCEPT_COMPLETION_COMMAND = "github.copilot.didAcceptCompletionItem"
-        const val PLUGIN_ID = "com.github.atm1020.tuilaunch"
 
         private const val UNKNOWN_STATUS = "Unknown"
         private const val DEFAULT_TAB_SIZE = 4

@@ -64,8 +64,8 @@
   No file of the project is opened for any of this.
 - The prompt box falls back to JetBrains AI Assistant whenever Copilot is not ready, whether no binary
   was found, no Copilot client on the machine is signed in, or the server failed to start, and a balloon
-  names the reason once per IDE session. The server starts as soon as a prompt box becomes visible with
-  Copilot selected, so only the first suggestion of a session waits for it.
+  names it once per reason. The server starts as soon as a prompt box becomes visible with Copilot
+  selected, so only the first suggestion of a session waits for it.
 
 ## [0.7.0] - 2026-09-03
 

@@ -14,8 +14,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -33,12 +36,14 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class CopilotLanguageServerServiceTest {
 
     private lateinit var scope: CoroutineScope
     private val startedProcesses = CopyOnWriteArrayList<FakeServerProcess>()
+    private val scopesToCancel = CopyOnWriteArrayList<CoroutineScope>()
 
     @Before
     fun setUp() {
@@ -48,6 +53,7 @@ class CopilotLanguageServerServiceTest {
     @After
     fun tearDown() {
         startedProcesses.forEach { it.terminate() }
+        scopesToCancel.forEach { it.cancel() }
         scope.cancel()
     }
 
@@ -330,6 +336,81 @@ class CopilotLanguageServerServiceTest {
         assertTrue(process.isTerminated)
     }
 
+    @Test
+    fun `a frame the client cannot read ends the session and a retry replaces it`() {
+        val service = service(processFactory = {
+            FakeServerProcess().also {
+                startedProcesses += it
+                serve(it, status("OK", "falleng0d"))
+            }
+        })
+
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.Ready }
+        val firstServer = service.server()
+        startedProcesses.first().peer.sendRaw("Content-Length: not-a-number\r\n\r\n")
+
+        awaitTrue("the session was never replaced") { startedProcesses.size == 2 }
+        awaitState(service) { it is CopilotServerState.Ready && service.server() !== firstServer }
+        assertTrue(startedProcesses.first().isTerminated)
+        assertNotNull(service.server())
+    }
+
+    @Test
+    fun `a follow up command that fails leaves the session running`() {
+        val process = FakeServerProcess()
+        startedProcesses += process
+        val strictScope = CoroutineScope(Dispatchers.IO + Job())
+        scopesToCancel += strictScope
+        val service = service(processFactory = { process }, scope = strictScope)
+        serve(process, status("OK", "falleng0d"))
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.Ready }
+
+        val attempted = AtomicBoolean()
+        service.launchFollowUp {
+            attempted.set(true)
+            throw IllegalStateException("the accept command failed")
+        }
+        awaitTrue("the follow-up command never ran") { attempted.get() }
+        letTheFailureSettle()
+
+        val ranAfterTheFailure = CopyOnWriteArrayList<String>()
+        service.launchFollowUp { ranAfterTheFailure += "accepted" }
+
+        awaitTrue("no follow-up command ran after the failing one") { ranAfterTheFailure.isNotEmpty() }
+        assertTrue(strictScope.isActive)
+        assertNotNull(service.server())
+    }
+
+    @Test
+    fun `a start request queued behind a stop cannot resurrect the server`() {
+        val settings = SwitchableCompletionSource()
+        val starts = AtomicInteger()
+        val service = service(
+            settings = settings,
+            processFactory = {
+                starts.incrementAndGet()
+                FakeServerProcess().also {
+                    startedProcesses += it
+                    serve(it, status("OK", "falleng0d"))
+                }
+            },
+        )
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.Ready }
+
+        settings.copilotIsTheCompletionSource = false
+        service.stop()
+        awaitState(service) { it is CopilotServerState.Stopped }
+        service.ensureStarted()
+        letTheFailureSettle()
+
+        assertEquals(1, starts.get())
+        assertEquals(CopilotServerState.Stopped, service.state.value)
+        assertNull(service.server())
+    }
+
     private fun checkStatus(service: CopilotLanguageServerService, explicitPath: String): CopilotServerState =
         runBlocking {
             withTimeout(AWAIT_TIMEOUT_MS) { service.checkStatusNow(explicitPath) }
@@ -346,6 +427,7 @@ class CopilotLanguageServerServiceTest {
         locator: (String) -> CopilotServerLocation = { foundAt("/fake/copilot-language-server") },
         retryDelaysMs: List<Long> = listOf(1L),
         handshakeTimeoutMs: Long = HANDSHAKE_TIMEOUT_MS,
+        scope: CoroutineScope = this.scope,
     ) = CopilotLanguageServerService(
         scope,
         settings,
@@ -365,6 +447,12 @@ class CopilotLanguageServerServiceTest {
 
     private fun settingsWith(path: String) = object : CopilotServerSettings {
         override val explicitServerPath: String = path
+        override val copilotIsTheCompletionSource: Boolean = true
+    }
+
+    private class SwitchableCompletionSource(override val explicitServerPath: String = "") : CopilotServerSettings {
+        @Volatile
+        override var copilotIsTheCompletionSource: Boolean = true
     }
 
     private fun foundAt(path: String) =
@@ -435,6 +523,16 @@ class CopilotLanguageServerServiceTest {
         withTimeout(AWAIT_TIMEOUT_MS) { service.state.first(predicate) }
     }
 
+    private fun awaitTrue(description: String, condition: () -> Boolean) = runBlocking {
+        try {
+            withTimeout(AWAIT_TIMEOUT_MS) { while (!condition()) delay(POLL_MS) }
+        } catch (timeout: TimeoutCancellationException) {
+            throw AssertionError(description, timeout)
+        }
+    }
+
+    private fun letTheFailureSettle() = runBlocking { delay(SETTLE_MS) }
+
     private class FakeServerProcess : CopilotServerProcess {
         private val streams = CopilotTestStreams()
         private val terminationListeners = CopyOnWriteArrayList<() -> Unit>()
@@ -471,6 +569,8 @@ class CopilotLanguageServerServiceTest {
         const val HANDSHAKE_TIMEOUT_MS = 5_000L
         const val SCOPE_COMPLETION_TIMEOUT_MS = 3_000L
         const val UNREACHABLE_TIMEOUT_MS = 600_000L
+        const val POLL_MS = 5L
+        const val SETTLE_MS = 200L
 
         const val INITIALIZE_RESULT = """
             {"capabilities":{"inlineCompletionProvider":{}},

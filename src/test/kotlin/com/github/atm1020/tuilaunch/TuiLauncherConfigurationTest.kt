@@ -16,6 +16,7 @@ import com.github.atm1020.tuilaunch.ui.COPILOT_PROMPT_HISTORY_CONTEXT_LABEL
 import com.github.atm1020.tuilaunch.ui.COPILOT_SERVER_HINT_NAME
 import com.github.atm1020.tuilaunch.ui.COPILOT_SERVER_PATH_PLACEHOLDER
 import com.github.atm1020.tuilaunch.ui.COPILOT_STATUS_NAME
+import com.github.atm1020.tuilaunch.ui.DETECTING_COPILOT_SERVER_TEXT
 import com.github.atm1020.tuilaunch.ui.FOCUS_PROMPT_FILE_LABEL
 import com.github.atm1020.tuilaunch.ui.FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.JETBRAINS_AI_COMPLETION_SOURCE_ITEM
@@ -24,8 +25,10 @@ import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_VISIBILITY_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.RESTORE_OPEN_TABS_LABEL
 import com.github.atm1020.tuilaunch.ui.SUBMIT_PROMPT_ON_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.ui.components.JBTextField
 import java.awt.Component
@@ -33,6 +36,7 @@ import java.awt.Container
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.nio.file.Path
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
@@ -940,10 +944,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         }
         val component = configuration().createComponent() as JPanel
 
-        assertEquals(
-            "Found in the GitHub Copilot plugin: /plugins/copilot/copilot-language-server",
-            findLabel(component, COPILOT_SERVER_HINT_NAME)!!.text,
-        )
+        awaitTheServerHint(component, "Found in the GitHub Copilot plugin: /plugins/copilot/copilot-language-server")
 
         findServerPathField(component)!!.text = "/opt/copilot/copilot-language-server"
 
@@ -954,7 +955,28 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertEquals(listOf("", "/opt/copilot/copilot-language-server"), copilotServer.locatedPaths)
     }
 
-    fun testChoosingGitHubCopilotIsPersistedWithoutStartingTheServer() {
+    fun testTheServerIsAutoDetectedOffTheEventDispatchThread() {
+        copilotServer.locations = { foundInPlugin("/plugins/copilot/copilot-language-server") }
+        val component = configuration().createComponent() as JPanel
+
+        assertEquals(DETECTING_COPILOT_SERVER_TEXT, findLabel(component, COPILOT_SERVER_HINT_NAME)!!.text)
+        awaitTheServerHint(component, "Found in the GitHub Copilot plugin: /plugins/copilot/copilot-language-server")
+
+        assertEquals(listOf(false), copilotServer.autoDetectionsOnTheEdt)
+    }
+
+    fun testADisposedPanelIsNeverModified() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        findCompletionSourceCombo(component)!!.selectedItem = COPILOT_COMPLETION_SOURCE_ITEM
+        assertTrue(configurable.isModified())
+
+        configurable.disposeUIResources()
+
+        assertFalse(configurable.isModified())
+    }
+
+    fun testChoosingGitHubCopilotIsPersistedAndStartsTheServer() {
         val settings = TuiLauncherSettings.getInstance()
         val configurable = configuration()
         val component = configurable.createComponent() as JPanel
@@ -968,6 +990,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertEquals(PromptBoxCompletionSource.COPILOT, settings.state.promptBoxCompletionSource)
         assertEquals("/opt/copilot/copilot-language-server", settings.state.copilotLanguageServerPath)
         assertFalse(settings.state.copilotPromptHistoryContext)
+        assertEquals(1, copilotServer.starts)
         assertEquals(0, copilotServer.restarts)
         assertEquals(0, copilotServer.stops)
         assertFalse(configurable.isModified())
@@ -985,6 +1008,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
         assertEquals("/usr/local/bin/copilot-language-server", settings.state.copilotLanguageServerPath)
         assertEquals(1, copilotServer.restarts)
+        assertEquals(0, copilotServer.starts)
         assertEquals(0, copilotServer.stops)
     }
 
@@ -999,6 +1023,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         configurable.apply()
 
         assertEquals(0, copilotServer.restarts)
+        assertEquals(0, copilotServer.starts)
         assertEquals(0, copilotServer.stops)
     }
 
@@ -1015,6 +1040,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
         assertEquals(PromptBoxCompletionSource.JETBRAINS_AI, settings.state.promptBoxCompletionSource)
         assertEquals(1, copilotServer.stops)
+        assertEquals(0, copilotServer.starts)
         assertEquals(0, copilotServer.restarts)
     }
 
@@ -1097,13 +1123,23 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     private fun comboItems(combo: JComboBox<*>): List<Any?> = (0 until combo.itemCount).map { combo.getItemAt(it) }
 
+    private fun awaitTheServerHint(component: JPanel, expected: String) {
+        PlatformTestUtil.waitWithEventsDispatching(
+            "The Copilot server hint never named the auto-detected server",
+            { findLabel(component, COPILOT_SERVER_HINT_NAME)?.text == expected },
+            AUTO_DETECTION_TIMEOUT_SECONDS,
+        )
+    }
+
     private fun serverPathPlaceholder(component: JPanel): String =
         (findServerPathField(component)!!.textField as JBTextField).emptyText.text
 
     private class FakeCopilotServerControl : CopilotServerControl {
         var locations: (String) -> CopilotServerLocation = { CopilotServerLocation.NotFound("nothing was tried") }
-        val locatedPaths = mutableListOf<String>()
+        val locatedPaths = CopyOnWriteArrayList<String>()
+        val autoDetectionsOnTheEdt = CopyOnWriteArrayList<Boolean>()
         val statusRequests = mutableListOf<String>()
+        var starts = 0
         var restarts = 0
         var stops = 0
 
@@ -1111,12 +1147,19 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
         override fun locate(explicitPath: String): CopilotServerLocation {
             locatedPaths += explicitPath
+            if (explicitPath.isEmpty()) {
+                autoDetectionsOnTheEdt += ApplicationManager.getApplication().isDispatchThread
+            }
             return locations(explicitPath)
         }
 
         override fun checkStatus(explicitPath: String, onResult: (CopilotServerState) -> Unit) {
             statusRequests += explicitPath
             pendingStatusResult = onResult
+        }
+
+        override fun ensureStarted() {
+            starts++
         }
 
         override fun restart() {
@@ -1195,4 +1238,8 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     private fun findShortcutTable(container: Container): JTable? =
         findComponent<JTable>(container) { it.columnCount == 2 && it.getColumnName(0) == "Action" }
+
+    private companion object {
+        const val AUTO_DETECTION_TIMEOUT_SECONDS = 30
+    }
 }

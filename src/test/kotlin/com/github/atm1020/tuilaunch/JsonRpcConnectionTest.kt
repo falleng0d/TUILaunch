@@ -4,12 +4,14 @@ import com.github.atm1020.tuilaunch.copilot.JsonRpcConnection
 import com.github.atm1020.tuilaunch.copilot.JsonRpcConnectionClosedException
 import com.github.atm1020.tuilaunch.copilot.JsonRpcException
 import com.google.gson.JsonObject
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -19,6 +21,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.CopyOnWriteArrayList
 
 class JsonRpcConnectionTest {
 
@@ -26,10 +29,12 @@ class JsonRpcConnectionTest {
     private lateinit var streams: CopilotTestStreams
     private lateinit var peer: CopilotTestPeer
     private lateinit var connection: JsonRpcConnection
+    private val uncaughtFailures = CopyOnWriteArrayList<Throwable>()
 
     @Before
     fun setUp() {
-        scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        val recordFailures = CoroutineExceptionHandler { _, failure -> uncaughtFailures += failure }
+        scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + recordFailures)
         streams = CopilotTestStreams()
         peer = streams.peer
         connection = JsonRpcConnection(streams.clientInput, streams.clientOutput, scope)
@@ -156,13 +161,78 @@ class JsonRpcConnectionTest {
         assertTrue(connection.isClosed)
     }
 
+    @Test
+    fun `a negative content length is a protocol error that closes the connection`() {
+        val answer = scope.async { connection.request("checkStatus", null) }
+        peer.read()
+
+        peer.sendRaw("Content-Length: -1\r\n\r\n")
+
+        assertTrue(failure(answer) is JsonRpcConnectionClosedException)
+        assertTrue(connection.isClosed)
+        assertEquals(emptyList<Throwable>(), settledUncaughtFailures())
+    }
+
+    @Test
+    fun `a content length nobody could allocate closes the connection instead`() {
+        val answer = scope.async { connection.request("checkStatus", null) }
+        peer.read()
+
+        peer.sendRaw("Content-Length: 2147483647\r\n\r\n")
+
+        assertTrue(failure(answer) is JsonRpcConnectionClosedException)
+        assertTrue(connection.isClosed)
+        assertEquals(emptyList<Throwable>(), settledUncaughtFailures())
+    }
+
+    @Test
+    fun `a header line that never ends closes the connection`() {
+        val answer = scope.async { connection.request("checkStatus", null) }
+        peer.read()
+
+        peer.sendRaw("X-Endless: " + "a".repeat(ENDLESS_HEADER_BYTES))
+
+        assertTrue(failure(answer) is JsonRpcConnectionClosedException)
+        assertTrue(connection.isClosed)
+        assertEquals(emptyList<Throwable>(), settledUncaughtFailures())
+    }
+
+    @Test
+    fun `a close listener learns that the connection is gone`() {
+        val closures = ArrayList<String>()
+        connection.onClosed { closures += "read loop" }
+
+        peer.sendRaw("Content-Length: -1\r\n\r\n")
+
+        awaitTrue { connection.isClosed }
+        assertEquals(listOf("read loop"), closures)
+
+        connection.onClosed { closures += "after the close" }
+
+        assertEquals(listOf("read loop", "after the close"), closures)
+    }
+
     private fun <T> await(answer: Deferred<T>): T = runBlocking { withTimeout(AWAIT_TIMEOUT_MS) { answer.await() } }
 
     private fun failure(answer: Deferred<*>): Throwable? = runBlocking {
         withTimeout(AWAIT_TIMEOUT_MS) { runCatching { answer.await() }.exceptionOrNull() }
     }
 
+    private fun awaitTrue(condition: () -> Boolean) = runBlocking {
+        withTimeout(AWAIT_TIMEOUT_MS) {
+            while (!condition()) delay(POLL_MS)
+        }
+    }
+
+    private fun settledUncaughtFailures(): List<Throwable> {
+        runBlocking { delay(SETTLE_MS) }
+        return uncaughtFailures.toList()
+    }
+
     private companion object {
         const val AWAIT_TIMEOUT_MS = 10_000L
+        const val POLL_MS = 5L
+        const val SETTLE_MS = 200L
+        const val ENDLESS_HEADER_BYTES = 16 * 1024
     }
 }

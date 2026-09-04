@@ -110,6 +110,11 @@ class CopilotTestPeer(private val input: InputStream, private val output: Output
         output.flush()
     }
 
+    fun sendRaw(bytes: String) {
+        output.write(bytes.toByteArray(StandardCharsets.US_ASCII))
+        output.flush()
+    }
+
     fun respond(id: Int, result: JsonElement) = send(
         JsonObject().apply {
             addProperty("jsonrpc", "2.0")

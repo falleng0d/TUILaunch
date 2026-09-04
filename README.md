@@ -126,7 +126,7 @@ characters. With it off only the draft is sent. Either way the text is a Markdow
 file of the project is opened for it.
 
 While Copilot is not ready — no binary found, no signed-in client, or a server that failed to start — the box quietly
-falls back to JetBrains AI Assistant, and a balloon names the reason once per IDE session, quoting the status the
+falls back to JetBrains AI Assistant, and a balloon names it once per reason, quoting the status the
 server answered rather than guessing at it. A sign-in that happens after the server started is picked up from the
 server's own status notifications, so the box begins completing without a restart. The server is started when a
 prompt box first becomes visible with Copilot selected, so the first suggestion of a session takes a second or two

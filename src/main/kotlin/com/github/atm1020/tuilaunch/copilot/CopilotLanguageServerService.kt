@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch.copilot
 
+import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.configurations.PathEnvironmentVariableUtil
@@ -18,6 +19,7 @@ import com.intellij.serviceContainer.NonInjectable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
@@ -29,6 +31,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.InputStream
@@ -40,17 +43,24 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 interface CopilotServerSettings {
     val explicitServerPath: String
+
+    val copilotIsTheCompletionSource: Boolean
 }
 
 object PersistentCopilotServerSettings : CopilotServerSettings {
     override val explicitServerPath: String
         get() = TuiLauncherSettings.getInstance().state.copilotLanguageServerPath
+
+    override val copilotIsTheCompletionSource: Boolean
+        get() = TuiLauncherSettings.getInstance().state.promptBoxCompletionSource == PromptBoxCompletionSource.COPILOT
 }
 
 interface CopilotServerControl {
     fun locate(explicitPath: String): CopilotServerLocation
 
     fun checkStatus(explicitPath: String, onResult: (CopilotServerState) -> Unit)
+
+    fun ensureStarted()
 
     fun restart()
 
@@ -62,6 +72,8 @@ object InstalledCopilotServerControl : CopilotServerControl {
 
     override fun checkStatus(explicitPath: String, onResult: (CopilotServerState) -> Unit) =
         installedService().checkStatus(explicitPath, onResult)
+
+    override fun ensureStarted() = installedService().ensureStarted()
 
     override fun restart() = installedService().restart()
 
@@ -147,7 +159,15 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
     override fun completionServer(): CopilotCompletionServer? = server()
 
     override fun launchFollowUp(work: suspend (CopilotCompletionServer) -> Unit) {
-        scope.launch { server()?.let { work(it) } }
+        scope.launch {
+            try {
+                server()?.let { work(it) }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Exception) {
+                thisLogger().debug("A GitHub Copilot follow-up command failed", failure)
+            }
+        }
     }
 
     override fun ensureStarted() {
@@ -195,12 +215,14 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
     }
 
     suspend fun checkStatusNow(explicitPath: String): CopilotServerState {
-        val location = locator(explicitPath)
+        val location = locateServer(explicitPath)
         if (location is CopilotServerLocation.NotFound) {
             return CopilotServerState.NotConfigured(location.reason)
         }
         val executablePath = (location as CopilotServerLocation.Found).path.toString()
-        val running = session?.takeUnless { it.executablePath != executablePath || it.process.isTerminated }
+        val running = transitions.withLock {
+            session?.takeUnless { it.executablePath != executablePath || it.process.isTerminated }
+        }
         return running?.let { statusOf(it.server) } ?: statusOfSingleUseSession(executablePath)
     }
 
@@ -214,7 +236,7 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
 
     private suspend fun statusOfSingleUseSession(executablePath: String): CopilotServerState {
         val process = try {
-            processFactory.start(executablePath)
+            startProcess(executablePath)
         } catch (failure: Exception) {
             return CopilotServerState.Failed(startFailureReason(executablePath, failure))
         }
@@ -240,10 +262,11 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
     }
 
     private suspend fun startIfNeeded() {
+        if (!settings.copilotIsTheCompletionSource) return
         wanted = true
         if (session != null) return
 
-        val location = locator(settings.explicitServerPath)
+        val location = locateServer(settings.explicitServerPath)
         if (location is CopilotServerLocation.NotFound) {
             stateFlow.value = CopilotServerState.NotConfigured(location.reason)
             return
@@ -252,7 +275,7 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
         stateFlow.value = CopilotServerState.Starting
 
         val process = try {
-            processFactory.start(executablePath)
+            startProcess(executablePath)
         } catch (failure: Exception) {
             stateFlow.value = CopilotServerState.Failed(startFailureReason(executablePath, failure))
             return
@@ -263,7 +286,8 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
         session = started
         started.teardown = tearDownWhenTheScopeIsCancelled(started)
         started.statusWatch = followStatusChanges(started)
-        process.onTerminated { onProcessTerminated(started) }
+        process.onTerminated { endSession(started, PROCESS_EXITED_REASON) }
+        connection.onClosed { endSession(started, CONNECTION_CLOSED_REASON) }
 
         try {
             withTimeout(handshakeTimeoutMs) {
@@ -287,15 +311,21 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
             return
         }
 
-        if (process.isTerminated) onProcessTerminated(started)
+        if (process.isTerminated) endSession(started, PROCESS_EXITED_REASON)
     }
 
-    private fun onProcessTerminated(terminated: Session) {
+    private suspend fun locateServer(explicitPath: String): CopilotServerLocation =
+        withContext(Dispatchers.IO) { locator(explicitPath) }
+
+    private suspend fun startProcess(executablePath: String): CopilotServerProcess =
+        withContext(Dispatchers.IO) { processFactory.start(executablePath) }
+
+    private fun endSession(ended: Session, reason: String) {
         scope.launch {
             transitions.withLock {
-                if (session !== terminated) return@withLock
-                discard(terminated)
-                scheduleRetry("The GitHub Copilot language server process exited")
+                if (session !== ended) return@withLock
+                discard(ended)
+                scheduleRetry(reason)
             }
         }
     }
@@ -426,6 +456,8 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
         private const val STOP_POLL_MS = 25L
         private const val NORMAL_STATUS_KIND = "Normal"
         private const val ERROR_STATUS_KIND = "Error"
+        private const val PROCESS_EXITED_REASON = "The GitHub Copilot language server process exited"
+        private const val CONNECTION_CLOSED_REASON = "The GitHub Copilot language server connection closed"
 
         private val SIGN_IN_HINTS = listOf(
             "sign in",

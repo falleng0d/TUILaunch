@@ -10,6 +10,8 @@ import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiAppTableModel
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ConfigurationException
@@ -60,6 +62,7 @@ internal const val COPILOT_SERVER_PATH_PLACEHOLDER = "Auto-detect"
 internal const val COPILOT_PROMPT_HISTORY_CONTEXT_LABEL = "Include the PROMPT.md history as completion context"
 internal const val CHECK_COPILOT_STATUS_LABEL = "Check Copilot status"
 internal const val CHECKING_COPILOT_STATUS_TEXT = "Checking…"
+internal const val DETECTING_COPILOT_SERVER_TEXT = "Looking for the GitHub Copilot language server…"
 internal const val COPILOT_SERVER_HINT_NAME = "copilotServerHint"
 internal const val COPILOT_STATUS_NAME = "copilotStatus"
 
@@ -106,6 +109,8 @@ class TuiLauncherConfiguration internal constructor(
     private var copilotStatusLabel: JBLabel? = null
     private val copilotComponents = mutableListOf<JComponent>()
     private var copilotStatusRequests = 0
+    private var copilotServerHintRequests = 0
+    private var autoDetectedServer: CopilotServerLocation? = null
     private var modifierCombo: JComboBox<String>? = null
     private val tmuxShortcutComponents = mutableListOf<JComponent>()
     private var shortcutsTable: JBTable? = null
@@ -144,8 +149,6 @@ class TuiLauncherConfiguration internal constructor(
     ): BuiltInShortcut = BuiltInShortcut(actionName, includeModifier, stateProperty, stateProperty.get(settings.state))
 
     override fun getDisplayName(): String = "TUI Launcher"
-
-    private val autoDetectedServer: CopilotServerLocation by lazy { copilotServer.locate("") }
 
     override fun createComponent(): JComponent {
         tmuxShortcutComponents.clear()
@@ -329,8 +332,34 @@ class TuiLauncherConfiguration internal constructor(
     private fun updateCopilotServerHint() {
         val hintLabel = copilotServerHintLabel ?: return
         val typedPath = typedCopilotServerPath()
-        val location = if (typedPath.isEmpty()) autoDetectedServer else copilotServer.locate(typedPath)
-        hintLabel.text = copilotServerHintText(location)
+        if (typedPath.isNotEmpty()) {
+            hintLabel.text = copilotServerHintText(copilotServer.locate(typedPath))
+            return
+        }
+        val alreadyDetected = autoDetectedServer
+        if (alreadyDetected != null) {
+            hintLabel.text = copilotServerHintText(alreadyDetected)
+            return
+        }
+        hintLabel.text = DETECTING_COPILOT_SERVER_TEXT
+        autoDetectTheServer()
+    }
+
+    private fun autoDetectTheServer() {
+        val request = ++copilotServerHintRequests
+        val application = ApplicationManager.getApplication()
+        application.executeOnPooledThread {
+            val located = copilotServer.locate("")
+            application.invokeLater({ showTheAutoDetectedServer(request, located) }, ModalityState.any())
+        }
+    }
+
+    private fun showTheAutoDetectedServer(request: Int, located: CopilotServerLocation) {
+        if (request != copilotServerHintRequests) return
+        autoDetectedServer = located
+        if (typedCopilotServerPath().isEmpty()) {
+            copilotServerHintLabel?.text = copilotServerHintText(located)
+        }
     }
 
     private fun checkCopilotStatus() {
@@ -588,6 +617,29 @@ class TuiLauncherConfiguration internal constructor(
 
     override fun disposeUIResources() {
         copilotStatusRequests++
+        copilotServerHintRequests++
+        tuiLauncherPanel = null
+        tableModel = null
+        appsTable = null
+        tmuxKeybindingsEnabledCheckBox = null
+        restoreOpenTabsCheckBox = null
+        submitPromptOnSendCheckBox = null
+        appendPromptSeparatorCheckBox = null
+        focusPromptFileCheckBox = null
+        promptBoxVisibilityPerAppCheckBox = null
+        promptBoxSizePerAppCheckBox = null
+        focusTuiAfterPromptBoxSendCheckBox = null
+        completionSourceCombo = null
+        copilotServerPathField = null
+        copilotServerHintLabel = null
+        copilotPromptHistoryContextCheckBox = null
+        copilotStatusLabel = null
+        copilotComponents.clear()
+        modifierCombo = null
+        tmuxShortcutComponents.clear()
+        shortcutsTable = null
+        shortcutsModel = null
+        clearShortcutButton = null
     }
 
     private fun modifierComboItem(): String = if (settings.state.escapeModifier == "ALT") "Alt" else "Ctrl"
@@ -647,7 +699,10 @@ class TuiLauncherConfiguration internal constructor(
             source == PromptBoxCompletionSource.COPILOT
         val leftCopilot = previousSource == PromptBoxCompletionSource.COPILOT &&
             source != PromptBoxCompletionSource.COPILOT
+        val enteredCopilot = previousSource != PromptBoxCompletionSource.COPILOT &&
+            source == PromptBoxCompletionSource.COPILOT
         when {
+            enteredCopilot -> copilotServer.ensureStarted()
             stayedOnCopilot && path != previousPath -> copilotServer.restart()
             leftCopilot -> copilotServer.stop()
         }

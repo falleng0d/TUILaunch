@@ -50,6 +50,19 @@ class CopilotServerLocatorTest {
     }
 
     @Test
+    fun `a configured path that is not a path at all is reported`() {
+        val location = CopilotServerLocator.locate(
+            explicitPath = "/opt/copilot/copilot\u0000language-server",
+            copilotPluginPath = pluginWithBinary(linuxOnX64),
+            pathLookup = { executable("path", "copilot-language-server") },
+            platform = linuxOnX64,
+        )
+
+        val reason = (location as CopilotServerLocation.NotFound).reason
+        assertTrue(reason.contains("is not a valid path"))
+    }
+
+    @Test
     fun `the copilot plugin binary is used when no path is configured`() {
         val pluginPath = pluginWithBinary(linuxOnX64)
 
