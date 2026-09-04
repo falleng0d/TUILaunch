@@ -3,6 +3,8 @@ package com.github.atm1020.tuilaunch
 import com.github.atm1020.tuilaunch.copilot.CopilotInlineCompletionProvider
 import com.github.atm1020.tuilaunch.copilot.InlineCompletionItem
 import com.github.atm1020.tuilaunch.copilot.InlineCompletionTriggerKind
+import com.github.atm1020.tuilaunch.copilot.JsonRpcConnectionClosedException
+import com.github.atm1020.tuilaunch.copilot.JsonRpcException
 import com.github.atm1020.tuilaunch.copilot.LspPosition
 import com.github.atm1020.tuilaunch.copilot.LspRange
 import com.github.atm1020.tuilaunch.copilot.PromptBoxCopilotEditorListener
@@ -14,6 +16,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -21,6 +24,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 private const val ACCEPT_COMMAND = "github.copilot.didAcceptCompletionItem"
 private const val COMPLETION_UUID = "5f5e1a3a-0000-4000-8000-000000000001"
 private const val DRAFT = "Fix the "
+private const val PROMPT_FILE_NAME = "PROMPT.md"
 
 class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
 
@@ -28,6 +32,7 @@ class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
     private lateinit var settings: FakePromptBoxCompletionSettings
     private var server = FakeCopilotCompletionServer()
     private var backend = FakeCopilotCompletionBackend()
+    private var promptDocumentLookups = 0
 
     private val wholeLine = InlineCompletionItem(
         insertText = "Fix the crash in the parser",
@@ -39,6 +44,7 @@ class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
     override fun setUp() {
         super.setUp()
         settings = FakePromptBoxCompletionSettings()
+        promptDocumentLookups = 0
         answerWith(wholeLine)
     }
 
@@ -56,11 +62,27 @@ class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
         backend = FakeCopilotCompletionBackend(server = server)
     }
 
+    private fun failWith(failure: Throwable) {
+        server = FakeCopilotCompletionServer(failure = failure)
+        backend = FakeCopilotCompletionBackend(server = server)
+    }
+
     private fun boxWithADraft(promptFileText: String? = null): PromptBox {
-        val disposable = Disposer.newDisposable("PromptBoxCopilotCompletionTest")
-        boxDisposable = disposable
         val promptDocument: Document? = promptFileText?.let { EditorFactory.getInstance().createDocument(it) }
-        val box = PromptBox(project, disposable, promptDocument = { promptDocument })
+        return draftIn(
+            PromptBox(project, newBoxDisposable(), existingPromptDocument = {
+                promptDocumentLookups++
+                promptDocument
+            })
+        )
+    }
+
+    private fun boxOverTheProjectPromptFile(): PromptBox = draftIn(PromptBox(project, newBoxDisposable()))
+
+    private fun newBoxDisposable(): Disposable =
+        Disposer.newDisposable("PromptBoxCopilotCompletionTest").also { boxDisposable = it }
+
+    private fun draftIn(box: PromptBox): PromptBox {
         box.installEditor()
         box.text = DRAFT
         box.editor.caretModel.moveToOffset(DRAFT.length)
@@ -151,6 +173,57 @@ class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
             openedDocument().text,
         )
         assertEquals(LspPosition(8, DRAFT.length), asked.position)
+    }
+
+    fun testAProjectWithoutAPromptFileIsStillCompletedAndKeepsItsFilesAlone() {
+        settings.includePromptHistory = true
+        val box = boxOverTheProjectPromptFile()
+
+        showACompletionIn(box)
+
+        assertEquals("crash in the parser", InlineCompletionContext.getOrNull(box.editor)?.textToInsert())
+        assertEquals(DRAFT, openedDocument().text)
+        assertNull(project.guessProjectDir()?.findChild(PROMPT_FILE_NAME))
+    }
+
+    fun testThePromptFileOfTheProjectIsTheHistoryTheServerSees() {
+        settings.includePromptHistory = true
+        myFixture.addFileToProject(PROMPT_FILE_NAME, "first prompt\n\n---\n\nsecond prompt\n\n---\n\n")
+        val box = boxOverTheProjectPromptFile()
+
+        showACompletionIn(box)
+
+        assertEquals("first prompt\n\n---\n\nsecond prompt\n\n---\n\n$DRAFT", openedDocument().text)
+    }
+
+    fun testThePromptFileIsNotEvenLookedUpWhileTheHistoryIsOff() {
+        settings.includePromptHistory = false
+        val box = boxWithADraft("first prompt\n")
+
+        showACompletionIn(box)
+
+        assertEquals(0, promptDocumentLookups)
+        assertEquals(DRAFT, openedDocument().text)
+    }
+
+    fun testAnOrdinaryServerErrorLeavesTheBoxWithoutGhostText() {
+        failWith(JsonRpcException(-32802, "Request was superseded by a new request"))
+        val box = boxWithADraft()
+
+        showACompletionIn(box)
+
+        assertNull(InlineCompletionContext.getOrNull(box.editor)?.textToInsert())
+        assertFalse(box.aCompletionIsShowing())
+    }
+
+    fun testAClosedConnectionLeavesTheBoxWithoutGhostText() {
+        failWith(JsonRpcConnectionClosedException("The GitHub Copilot language server connection is closed"))
+        val box = boxWithADraft()
+
+        showACompletionIn(box)
+
+        assertNull(InlineCompletionContext.getOrNull(box.editor)?.textToInsert())
+        assertFalse(box.aCompletionIsShowing())
     }
 
     fun testReleasingTheBoxEditorClosesTheVirtualDocument() {

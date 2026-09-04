@@ -1,6 +1,7 @@
 package com.github.atm1020.tuilaunch.prompt
 
 import com.github.atm1020.tuilaunch.action.findOrCreatePromptFile
+import com.github.atm1020.tuilaunch.action.findPromptFile
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.codeInsight.hint.HintManager
 import com.intellij.openapi.command.WriteCommandAction
@@ -15,6 +16,10 @@ private const val SEND_PROMPT_EDIT_NAME = "Send Prompt"
 
 internal fun promptFileDocumentSupplier(project: Project): () -> Document? = {
     findOrCreatePromptFile(project)?.let { FileDocumentManager.getInstance().getDocument(it) }
+}
+
+internal fun existingPromptFileDocumentSupplier(project: Project): () -> Document? = {
+    findPromptFile(project)?.let { FileDocumentManager.getInstance().getDocument(it) }
 }
 
 internal class PromptBoxSender(

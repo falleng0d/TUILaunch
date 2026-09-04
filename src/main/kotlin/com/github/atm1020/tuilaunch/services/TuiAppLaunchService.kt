@@ -6,6 +6,7 @@ import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.PromptBoxSender
+import com.github.atm1020.tuilaunch.prompt.existingPromptFileDocumentSupplier
 import com.github.atm1020.tuilaunch.prompt.promptFileDocumentSupplier
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
@@ -79,6 +80,7 @@ class TuiAppLaunchService(private val project: Project) {
     private val pendingLaunchesBySessionId = mutableMapOf<String, PendingLaunch>()
     private val promptBoxPreferences = PromptBoxPreferences { TuiLauncherSettings.getInstance().state }
     private val promptDocument = promptFileDocumentSupplier(project)
+    private val existingPromptDocument = existingPromptFileDocumentSupplier(project)
 
     private val closingSessions = mutableSetOf<String>()
     private val sessionIdsRemovedForDrag = mutableSetOf<String>()
@@ -398,7 +400,7 @@ class TuiAppLaunchService(private val project: Project) {
                     parentDisposable = disposable,
                     sender = promptBoxSenderFor(session),
                     focusSession = { session.requestFocus() },
-                    promptDocument = promptDocument,
+                    existingPromptDocument = existingPromptDocument,
                 )
                 val layout = newTabLayout(host, appName, session, promptBox)
                 val handle = host.addTab(layout.component, title, disposable)

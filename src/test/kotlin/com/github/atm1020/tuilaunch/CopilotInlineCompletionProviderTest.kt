@@ -53,7 +53,7 @@ class CopilotInlineCompletionProviderTest : BasePlatformTestCase() {
     private fun newInstalledBox(): PromptBox {
         val disposable = Disposer.newDisposable("CopilotInlineCompletionProviderTest")
         boxDisposable = disposable
-        return PromptBox(project, disposable, promptDocument = { null }).also { it.installEditor() }
+        return PromptBox(project, disposable, existingPromptDocument = { null }).also { it.installEditor() }
     }
 
     private fun manualCallOn(editor: Editor): InlineCompletionEvent =

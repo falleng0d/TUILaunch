@@ -38,6 +38,9 @@ internal fun findOrCreatePromptFile(project: Project): VirtualFile? {
     return findOrCreatePromptFileIn(projectRoot)
 }
 
+internal fun findPromptFile(project: Project): VirtualFile? =
+    project.guessProjectDir()?.findChild(PROMPT_FILE_NAME)
+
 internal fun findOrCreatePromptFileIn(projectRoot: VirtualFile): VirtualFile? =
     projectRoot.findChild(PROMPT_FILE_NAME) ?: createPromptFile(projectRoot)
 

@@ -88,7 +88,7 @@ internal class PromptBox(
     private val parentDisposable: Disposable,
     private val sender: PromptBoxSender? = null,
     private val focusSession: () -> Unit = {},
-    private val promptDocument: () -> Document? = promptFileDocumentSupplier(project),
+    private val existingPromptDocument: () -> Document? = existingPromptFileDocumentSupplier(project),
 ) {
 
     private var editorIfInstalled: EditorEx? = null
@@ -142,7 +142,7 @@ internal class PromptBox(
     }
 
     fun promptHistoryBlocks(): List<String> {
-        val document = promptDocument() ?: return emptyList()
+        val document = existingPromptDocument() ?: return emptyList()
         return parsePromptBlocks(document.text).map { it.text }
     }
 

@@ -23,6 +23,7 @@ import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -168,6 +169,19 @@ class PromptBoxHistoryNavigationTest : BasePlatformTestCase() {
 
         assertEquals("a draft being typed", box.text)
         assertEquals(box.text.length, box.editor.caretModel.offset)
+    }
+
+    fun testUpIsIgnoredAndCreatesNoFileInAProjectWithoutAPromptFile() {
+        val disposable = Disposer.newDisposable("PromptBoxHistoryNavigationTest")
+        boxDisposables.add(disposable)
+        val box = PromptBox(project, disposable)
+        box.installEditor()
+        box.text = "a draft being typed"
+
+        box.historyPrevious()
+
+        assertEquals("a draft being typed", box.text)
+        assertNull(project.guessProjectDir()?.findChild("PROMPT.md"))
     }
 
     fun testUpIsIgnoredWhenNoPromptHasBeenRecordedYet() {
