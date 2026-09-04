@@ -2,6 +2,7 @@ package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.prompt.canChangeBlockStructure
 import com.github.atm1020.tuilaunch.prompt.isLastPromptBlock
+import com.github.atm1020.tuilaunch.prompt.opensAFencedBlock
 import com.github.atm1020.tuilaunch.prompt.parsePromptBlocks
 import com.github.atm1020.tuilaunch.prompt.promptBlockContainsLine
 import com.github.atm1020.tuilaunch.prompt.promptBlockTextAt
@@ -280,6 +281,24 @@ class PromptBlocksTest {
         assertFalse(canChangeBlockStructure("`inline` code and ``double`` spans"))
         assertFalse(canChangeBlockStructure("----"))
         assertFalse(canChangeBlockStructure("- - -"))
+    }
+
+    @Test
+    fun onlyARunOfAtLeastThreeFenceMarkersOpensAFencedBlock() {
+        assertTrue(opensAFencedBlock("```"))
+        assertTrue(opensAFencedBlock("```kotlin"))
+        assertTrue(opensAFencedBlock("   ```"))
+        assertTrue(opensAFencedBlock("\t~~~"))
+        assertTrue(opensAFencedBlock("~~~~~ bash"))
+
+        assertFalse(opensAFencedBlock(""))
+        assertFalse(opensAFencedBlock("   \t "))
+        assertFalse(opensAFencedBlock("``"))
+        assertFalse(opensAFencedBlock("~~"))
+        assertFalse(opensAFencedBlock("`inline` code"))
+        assertFalse(opensAFencedBlock("---"))
+        assertFalse(opensAFencedBlock("plain prose"))
+        assertFalse(opensAFencedBlock("text ``` after"))
     }
 
     private fun withAppendedSeparator(text: String): String {

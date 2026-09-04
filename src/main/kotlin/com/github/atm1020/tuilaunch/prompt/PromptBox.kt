@@ -3,6 +3,7 @@ package com.github.atm1020.tuilaunch.prompt
 import com.github.atm1020.tuilaunch.action.PromptHistoryNextAction
 import com.github.atm1020.tuilaunch.action.PromptHistoryPreviousAction
 import com.github.atm1020.tuilaunch.action.promptHistoryShortcutSet
+import com.intellij.codeInsight.folding.CodeFoldingManager
 import com.intellij.codeInsight.inline.completion.session.InlineCompletionContext
 import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.icons.AllIcons
@@ -23,6 +24,7 @@ import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.actionSystem.impl.ActionButtonWithText
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.FoldRegion
 import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.editor.event.CaretEvent
 import com.intellij.openapi.editor.event.CaretListener
@@ -229,7 +231,7 @@ internal class PromptBox(
             setLineMarkerAreaShown(false)
             setGutterIconsShown(false)
             setLineNumbersShown(false)
-            setFoldingOutlineShown(false)
+            setFoldingOutlineShown(true)
             setRightMarginShown(false)
             setIndentGuidesShown(false)
             setCaretRowShown(false)
@@ -287,12 +289,34 @@ internal class PromptBox(
         if (entry == null) return
         text = entry
         val editor = installEditor()
+        collapseCodeBlocks(editor)
         val caretOffset = when (direction) {
             PromptHistoryDirection.PREVIOUS -> 0
             PromptHistoryDirection.NEXT -> editor.document.textLength
         }
         editor.caretModel.moveToOffset(caretOffset)
         editor.scrollingModel.scrollToCaret(ScrollType.MAKE_VISIBLE)
+    }
+
+    private fun collapseCodeBlocks(editor: EditorEx) {
+        PsiDocumentManager.getInstance(project).commitDocument(editor.document)
+        CodeFoldingManager.getInstance(project).updateFoldRegions(editor)
+        val foldingModel = editor.foldingModel
+        val codeBlocks = foldingModel.allFoldRegions.filter { startsOnAFenceOpener(editor.document, it) }
+        if (codeBlocks.isEmpty()) return
+        foldingModel.runBatchFoldingOperation {
+            codeBlocks.forEach { it.isExpanded = false }
+        }
+    }
+
+    private fun startsOnAFenceOpener(document: Document, region: FoldRegion): Boolean {
+        if (!region.isValid || region.startOffset > document.textLength) return false
+        val line = document.getLineNumber(region.startOffset)
+        val lineText = document.immutableCharSequence.subSequence(
+            document.getLineStartOffset(line),
+            document.getLineEndOffset(line),
+        )
+        return opensAFencedBlock(lineText)
     }
 
     private fun uninstallEditor(editor: EditorEx) {

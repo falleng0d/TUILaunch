@@ -66,7 +66,7 @@ class PromptBoxInlineCompletionTest : BasePlatformTestCase() {
         assertTrue(settings.isUseSoftWraps)
         assertFalse(settings.isLineNumbersShown)
         assertFalse(settings.isLineMarkerAreaShown)
-        assertFalse(settings.isFoldingOutlineShown)
+        assertTrue(settings.isFoldingOutlineShown)
         assertFalse(settings.isRightMarginShown)
         assertFalse(settings.isIndentGuidesShown)
         assertFalse(settings.isCaretRowShown)

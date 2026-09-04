@@ -85,7 +85,9 @@ one. Whatever you were typing is kept aside and comes back when <kbd>Down</kbd> 
 a prompt from the file turns that edit into the text kept aside while the prompt in the file stays as it is, so
 walking away and back shows the original again. The list is re-read from `PROMPT.md` every time browsing starts, so a
 prompt sent in the meantime is there, and a send ends browsing. A prompt that contains `---` lines of its own is
-appended to the file verbatim and comes back as several separate history entries.
+appended to the file verbatim and comes back as several separate history entries. A prompt arriving from the history
+opens with its fenced code blocks folded, so a long block does not bury the prose around it; the fold markers in the
+box's gutter expand them again.
 
 <kbd>Escape</kbd> in the box hands the keyboard to that tab's terminal, after dropping a text selection or closing a
 completion popup first, as <kbd>Escape</kbd> does in any editor.
@@ -332,6 +334,9 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `EditorFactoryListener.editorCreated` runs before the owner of a light editor can attach its own user data, but `editorReleased` still sees that data, which makes the release hook the only listener able to recognise a plugin's own editor without holding a reference to it.
 - Coroutine cancellation cannot interrupt a thread parked in `InputStream.read` on a child process's stdout, so a scope that owns such a read loop never completes and its `Job.invokeOnCompletion` never runs, which stalls IDE exit for the shutdown timeout; teardown has to start when cancellation starts instead, from a child coroutine whose `finally` after `awaitCancellation` closes the stream and destroys the process.
 - `LineStatusTrackerManager` is a project service and reports every `EditorKind.MAIN_EDITOR` editor still alive when it is disposed, while a tool window's `ContentManager` is disposed after the project services, so an editor owned by a tool window tab has to be released from `ProjectCloseListener.projectClosing` rather than from a disposable parented to the `Content`.
+- `CodeFoldingManager.updateFoldRegions(Editor)` is annotated `@RequiresReadLock` only, but it finishes by running a batch folding operation, so it has to be called on the EDT; it also produces nothing while `EditorSettings.isAutoCodeFoldingEnabled` is off, and reads the PSI, which is why the document has to be committed first.
+- `FoldingModel.runBatchFoldingOperation(Runnable)` is the variant that is allowed to move the caret out of a region it collapses; `runBatchFoldingOperationDoNotCollapseCaret` leaves a region holding the caret expanded instead.
+- Fold regions are built whether or not `EditorSettings.isFoldingOutlineShown` is on, so an editor that collapses regions programmatically still has to turn the outline on for the user to be able to expand them.
 - `BaseOSProcessHandler.startNotify` attaches a `BaseOutputReader` that consumes the child's stdout and decodes it into lines, which destroys `Content-Length` framing, and `ProcessHandler.destroyProcess` queues its work behind `startNotify`, so a handler for a stdio LSP server has to call `startNotify` and override `createProcessOutReader` to hand the base class an empty reader while the JSON-RPC loop reads `handler.process.inputStream` itself.
 
 ---

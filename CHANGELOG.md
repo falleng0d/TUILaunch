@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- A prompt recalled with Up or Down in the prompt box now arrives with its fenced code blocks folded,
+  so the prose around a long block stays readable. The box shows fold markers in its gutter, and
+  clicking one expands that block again. Prompts you type yourself are left alone.
+
 ## [0.8.0] - 2026-09-04
 
 ### Added

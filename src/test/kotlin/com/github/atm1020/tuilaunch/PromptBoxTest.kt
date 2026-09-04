@@ -181,7 +181,7 @@ class PromptBoxTest : BasePlatformTestCase() {
         assertTrue(settings.isUseSoftWraps)
         assertFalse(settings.isLineNumbersShown)
         assertFalse(settings.isLineMarkerAreaShown)
-        assertFalse(settings.isFoldingOutlineShown)
+        assertTrue(settings.isFoldingOutlineShown)
         assertFalse(settings.isRightMarginShown)
         assertFalse(settings.isIndentGuidesShown)
         assertEquals(0, settings.additionalLinesCount)
