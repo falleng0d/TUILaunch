@@ -51,6 +51,6 @@ internal class PromptBoxSender(
         WriteCommandAction.writeCommandAction(project).withName(SEND_PROMPT_EDIT_NAME).run<RuntimeException> {
             document.replaceString(edit.from, edit.to, edit.text)
         }
-        FileDocumentManager.getInstance().saveDocument(document)
+        FileDocumentManager.getInstance().saveDocumentAsIs(document)
     }
 }

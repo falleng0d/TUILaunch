@@ -275,6 +275,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `Console.History.Previous` and `Console.History.Next` ship with no default keystroke at all, so the arrow keys reach them only through the shortcut sets borrowed from `EditorUp` and `EditorDown`, which is what keeps them out of every other editor.
 - The macOS keymaps bind `control P` and `control N` to `EditorUp` and `EditorDown` on top of the arrow keys, so borrowing those shortcut sets brings the Emacs-style pair along with them.
 - `JLayeredPane`'s layer constants are `Integer`, and Kotlin unboxes them, so `add(component, JLayeredPane.PALETTE_LAYER)` binds to `Container.add(Component, int index)` instead of the constraint overload: the layer is never assigned and the component lands behind everything already in the default layer. `setLayer(component, layer)` followed by a plain `add(component)` is the unambiguous way to place it.
+- `FileDocumentManager.saveDocument` lets `TrailingSpacesStripper` edit the document from `beforeDocumentSaving`, and with the IDE's "Remove trailing blank lines at end of saved files" option on it deletes every blank line at the end, so text that deliberately ends in one loses it in the document as well as on disk; `saveDocumentAsIs` turns the stripper off for that file around the save.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

@@ -11,6 +11,7 @@ import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.ui.Splitter
 import com.intellij.openapi.util.Disposer
@@ -26,12 +27,20 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
     private val focusCheckOutsideThisTest = promptBoxHoldsFocus
     private val focusedBoxes = mutableListOf<PromptBox>()
     private lateinit var settingsState: TuiLauncherSettings.State
+    private lateinit var editorSettings: EditorSettingsExternalizable
     private var submitPromptOnSendBeforeTest = true
     private var appendPromptSeparatorBeforeTest = true
     private var focusTuiAfterSendBeforeTest = false
+    private var stripTrailingSpacesBeforeTest = EditorSettingsExternalizable.STRIP_TRAILING_SPACES_CHANGED
+    private var removeTrailingBlankLinesBeforeTest = false
+    private var ensureNewLineAtEofBeforeTest = false
 
     override fun setUp() {
         super.setUp()
+        editorSettings = EditorSettingsExternalizable.getInstance()
+        stripTrailingSpacesBeforeTest = editorSettings.stripTrailingSpaces
+        removeTrailingBlankLinesBeforeTest = editorSettings.isRemoveTrailingBlankLines
+        ensureNewLineAtEofBeforeTest = editorSettings.isEnsureNewLineAtEOF
         settingsState = TuiLauncherSettings.getInstance().state
         submitPromptOnSendBeforeTest = settingsState.submitPromptOnSend
         appendPromptSeparatorBeforeTest = settingsState.appendPromptSeparatorOnSend
@@ -60,6 +69,9 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
             settingsState.submitPromptOnSend = submitPromptOnSendBeforeTest
             settingsState.appendPromptSeparatorOnSend = appendPromptSeparatorBeforeTest
             settingsState.focusTuiAfterPromptBoxSend = focusTuiAfterSendBeforeTest
+            editorSettings.stripTrailingSpaces = stripTrailingSpacesBeforeTest
+            editorSettings.isRemoveTrailingBlankLines = removeTrailingBlankLinesBeforeTest
+            editorSettings.isEnsureNewLineAtEOF = ensureNewLineAtEofBeforeTest
         } finally {
             super.tearDown()
         }
@@ -160,6 +172,23 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
         box.send()
 
         assertEquals("---\n\nfirst prompt\n\n---\n\nsecond prompt\n\n---\n\n", promptFileText())
+    }
+
+    fun testTheFreshSlotSurvivesASaveThatStripsTrailingBlankLines() {
+        settingsState.appendPromptSeparatorOnSend = true
+        editorSettings.stripTrailingSpaces = EditorSettingsExternalizable.STRIP_TRAILING_SPACES_WHOLE
+        editorSettings.isRemoveTrailingBlankLines = true
+        editorSettings.isEnsureNewLineAtEOF = true
+        writePromptFile("---\n\nfirst prompt\n")
+        val box = launchTabWithABox(FakeSession())
+        box.text = "second prompt"
+
+        box.send()
+
+        val recorded = "---\n\nfirst prompt\n\n---\n\nsecond prompt\n\n---\n\n"
+        assertEquals(recorded, promptFileText())
+        assertFalse(FileDocumentManager.getInstance().isDocumentUnsaved(promptFileDocument()))
+        assertEquals(recorded, promptFileTextOnDisk())
     }
 
     fun testTheFirstPromptOfAnEmptyProjectStartsThePromptFile() {
