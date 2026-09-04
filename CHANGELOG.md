@@ -4,6 +4,46 @@
 
 ## [Unreleased]
 
+### Added
+
+- Every TUI tab can now show a prompt box next to its session: a real editor to write the next prompt
+  in. The new "Toggle Prompt Box" button in the TUILaunch tool window title bar, left of the button
+  that opens `PROMPT.md`, splits the active tab and shows it. The box sits under the terminal while the
+  tool window is docked to the left or right edge and next to it while the window is docked to the top
+  or the bottom, follows the window when it is moved to another edge, and takes 30% of the tab until
+  its divider is dragged. It starts hidden, and the button is how it appears.
+- Two settings decide how much the prompt box remembers: "Remember the prompt box visibility per TUI
+  app" and "Remember the prompt box size per TUI app". While both are off, showing the box or dragging
+  its divider applies to every open tab and to the next tab that opens. Turn one on and each TUI app
+  keeps its own answer, the way the tool window size is already remembered per app.
+- Ctrl+Enter, or Cmd+Return on macOS, sends what is typed in the prompt box to that tab's TUI session
+  and appends it to `PROMPT.md` as a new prompt, so the box doubles as a way of writing the file. The
+  box is then emptied for the next prompt. Enter still inserts a newline, and the shortcut only sends
+  while the cursor is in a prompt box, so it keeps doing whatever the IDE binds it to everywhere else.
+  Rebind it in Settings | Keymap under "TUILaunch Send Prompt Box"; the box's own grey hint text names
+  the shortcut currently assigned. A "Send" button floating in the bottom-right corner of the box does
+  the same thing, and steps out of the way while you type or move the cursor.
+- Sending from the box follows the existing "Send the prompt immediately instead of only typing it"
+  and "Add a new prompt separator to PROMPT.md after sending" settings. A new setting, "Move focus to
+  the TUI after sending from the prompt box", hands the keyboard to the session after each send; while
+  it is off, which is the default, the cursor stays in the box like a chat input. Nothing is written to
+  `PROMPT.md` and the box is not emptied when the session refuses the text.
+- Up on the first line of the prompt box and Down on the last line walk the prompts already recorded
+  in `PROMPT.md` the way a shell walks its command history: Up shows the prompt sent last, then the one
+  before it, and Down works back towards the newest one. Anywhere else inside a longer prompt both keys
+  still just move the cursor. Whatever was being typed is kept aside and comes back when Down walks
+  past the newest prompt, and editing a prompt from the file turns that edit into the text kept aside
+  while the prompt in the file stays as it is. The list is re-read from `PROMPT.md` every time browsing
+  starts, so a prompt sent in the meantime is there, and a send ends browsing. On macOS Ctrl+P and
+  Ctrl+N do the same; other keys can be assigned in Settings | Keymap under "TUILaunch Previous Prompt
+  in History" and "TUILaunch Next Prompt in History".
+- Escape in the prompt box hands the keyboard to that tab's terminal, after dropping a text selection
+  or closing a completion popup first, as it does in any editor. A new action, "TUILaunch Focus Prompt
+  Box", goes the other way: it shows the box of the active TUI tab and puts the cursor in it, from the
+  editor, from the terminal, or from the box itself. It ships with no shortcut, so bind one in
+  Settings | Keymap, or record a key for the new "Focus prompt box" row in the tmux-like keybindings
+  table to reach the box from inside a running session.
+
 ## [0.7.0] - 2026-09-03
 
 ### Added

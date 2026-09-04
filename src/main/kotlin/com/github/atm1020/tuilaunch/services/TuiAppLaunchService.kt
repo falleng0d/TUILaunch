@@ -3,12 +3,16 @@ package com.github.atm1020.tuilaunch.services
 import com.github.atm1020.tuilaunch.model.ACTION_ID_PREFIX
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
+import com.github.atm1020.tuilaunch.prompt.PromptBox
+import com.github.atm1020.tuilaunch.prompt.PromptBoxSender
+import com.github.atm1020.tuilaunch.prompt.promptFileDocumentSupplier
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
+import com.github.atm1020.tuilaunch.toolwindow.TuiTabLayout
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.Service
@@ -59,6 +63,8 @@ class TuiAppLaunchService(private val project: Project) {
         val appName: String,
         var title: String,
         val session: TerminalSession,
+        val layout: TuiTabLayout,
+        val promptBox: PromptBox,
         val handle: Any,
         val disposable: Disposable,
         var openedFromTui: Boolean,
@@ -68,6 +74,8 @@ class TuiAppLaunchService(private val project: Project) {
 
     private val tabsBySessionId = mutableMapOf<String, OpenTab>()
     private val pendingLaunchesBySessionId = mutableMapOf<String, PendingLaunch>()
+    private val promptBoxPreferences = PromptBoxPreferences { TuiLauncherSettings.getInstance().state }
+    private val promptDocument = promptFileDocumentSupplier(project)
 
     private val closingSessions = mutableSetOf<String>()
     private val sessionIdsRemovedForDrag = mutableSetOf<String>()
@@ -102,6 +110,9 @@ class TuiAppLaunchService(private val project: Project) {
             beforeRemoval = { handle -> onTabRemoving(host, handle) },
             afterRemoval = { handle -> onTabRemoved(host, handle) },
         )
+        host.onAnchorChanged { dockedHorizontally ->
+            tabsBySessionId.values.forEach { it.layout.setDockedHorizontally(dockedHorizontally) }
+        }
     }
 
     private fun tabFor(handle: Any): OpenTab? = tabsBySessionId.values.firstOrNull { it.handle == handle }
@@ -115,6 +126,7 @@ class TuiAppLaunchService(private val project: Project) {
     private fun onTabSelected(host: IdeToolWindowHost, handle: Any) {
         val tab = tabFor(handle) ?: return
         applySavedSize(host, tab.appName)
+        applySavedPromptBoxState(tab)
         recordOpenTabs()
     }
 
@@ -236,9 +248,46 @@ class TuiAppLaunchService(private val project: Project) {
         val host = hostWithListeners() ?: return false
         val tab = activeOrLastOpenTab(host) ?: return false
         selectTuiTab(host, tab, requestFocus = focusSession)
-        if (!tab.session.sendText(text)) return false
-        if (submit) tab.session.sendKey(KeyEvent.VK_ENTER, 0, SUBMIT_KEY_CHAR)
+        return sendTo(tab.session, text, submit)
+    }
+
+    private fun sendTo(session: TerminalSession, text: String, submit: Boolean): Boolean {
+        if (!session.sendText(text)) return false
+        if (submit) session.sendKey(KeyEvent.VK_ENTER, 0, SUBMIT_KEY_CHAR)
         return true
+    }
+
+    fun isPromptBoxVisible(): Boolean? {
+        if (tabsNotClosing().isEmpty()) return null
+        val host = resolveHost() ?: return null
+        val tab = activeOrLastOpenTab(host) ?: return null
+        return tab.layout.promptBoxVisible
+    }
+
+    fun setPromptBoxVisible(visible: Boolean) {
+        val host = hostWithListeners() ?: return
+        val tab = activeOrLastOpenTab(host) ?: return
+        promptBoxPreferences.rememberVisibility(tab.appName, visible)
+        val promptBoxHadFocus = tab.promptBox.hasFocus()
+        tabsSharingPromptBoxVisibilityWith(tab).forEach { showPromptBox(it, visible) }
+        if (visible) {
+            tab.promptBox.requestFocus()
+        } else if (promptBoxHadFocus) {
+            tab.session.requestFocus()
+        }
+    }
+
+    fun togglePromptBox() {
+        val visible = isPromptBoxVisible() ?: return
+        setPromptBoxVisible(!visible)
+    }
+
+    fun focusPromptBox() {
+        val host = hostWithListeners() ?: return
+        val tab = activeOrLastOpenTab(host) ?: return
+        tab.openedFromTui = isTuiFocused()
+        selectTuiTab(host, tab, requestFocus = false)
+        if (tab.layout.promptBoxVisible) tab.promptBox.requestFocus() else setPromptBoxVisible(true)
     }
 
     fun toggleFocus() {
@@ -289,6 +338,7 @@ class TuiAppLaunchService(private val project: Project) {
             state.toggleToolWindowKeyCode to ::toggleToolWindow,
             state.nextTuiWithoutFocusKeyCode to ::nextTuiTabWithoutFocus,
             state.previousTuiWithoutFocusKeyCode to ::previousTuiTabWithoutFocus,
+            state.focusPromptBoxKeyCode to ::focusPromptBox,
         )
         return buildMap {
             builtInCommands.forEach { (keyCode, command) -> keyCode?.let { putIfAbsent(it, command) } }
@@ -336,17 +386,28 @@ class TuiAppLaunchService(private val project: Project) {
                 if (pendingLaunchesBySessionId.remove(sessionId)?.disposable !== disposable || disposable.isDisposed) {
                     return@createAsync
                 }
-                val handle = host.addTab(session.component, title, disposable)
+                val promptBox = PromptBox(
+                    project = project,
+                    parentDisposable = disposable,
+                    sender = promptBoxSenderFor(session),
+                    focusSession = { session.requestFocus() },
+                    promptDocument = promptDocument,
+                )
+                val layout = newTabLayout(host, appName, session, promptBox)
+                val handle = host.addTab(layout.component, title, disposable)
                 val tab = OpenTab(
                     sessionId = sessionId,
                     appName = appName,
                     title = title,
                     session = session,
+                    layout = layout,
+                    promptBox = promptBox,
                     handle = handle,
                     disposable = disposable,
                     openedFromTui = isTuiFocused(),
                 )
                 tabsBySessionId[sessionId] = tab
+                layout.onPromptBoxPercentChanged = { percent -> onPromptBoxPercentChanged(tab, percent) }
                 session.onTerminated { closeTab(sessionId) }
                 recordOpenTabs()
                 if (onOpened != null) onOpened(tab) else selectTuiTab(host, tab)
@@ -358,6 +419,58 @@ class TuiAppLaunchService(private val project: Project) {
                 onFailed?.invoke()
             },
         )
+    }
+
+    private fun promptBoxSenderFor(session: TerminalSession): PromptBoxSender = PromptBoxSender(
+        project = project,
+        sendToSession = { text, submit -> sendTo(session, text, submit) },
+        focusSession = { session.requestFocus() },
+        promptDocument = promptDocument,
+    )
+
+    private fun newTabLayout(
+        host: IdeToolWindowHost,
+        appName: String,
+        session: TerminalSession,
+        promptBox: PromptBox,
+    ): TuiTabLayout {
+        val promptBoxVisible = promptBoxPreferences.visibilityFor(appName)
+        if (promptBoxVisible) promptBox.installEditor()
+        return TuiTabLayout(
+            terminal = session.component,
+            promptBox = promptBox.component,
+            dockedHorizontally = host.isDockedHorizontally(),
+            promptBoxPercent = promptBoxPreferences.percentFor(appName),
+            promptBoxVisible = promptBoxVisible,
+        )
+    }
+
+    private fun applySavedPromptBoxState(tab: OpenTab) {
+        showPromptBox(tab, promptBoxPreferences.visibilityFor(tab.appName))
+        tab.layout.promptBoxPercent = promptBoxPreferences.percentFor(tab.appName)
+    }
+
+    private fun showPromptBox(tab: OpenTab, visible: Boolean) {
+        if (visible) tab.promptBox.installEditor()
+        tab.layout.promptBoxVisible = visible
+    }
+
+    private fun onPromptBoxPercentChanged(tab: OpenTab, percent: Int) {
+        promptBoxPreferences.rememberPercent(tab.appName, percent)
+        tabsSharingPromptBoxSizeWith(tab)
+            .filter { it !== tab }
+            .forEach { it.layout.promptBoxPercent = percent }
+    }
+
+    private fun tabsSharingPromptBoxVisibilityWith(tab: OpenTab): List<OpenTab> =
+        tabsSharingPreferencesWith(tab, promptBoxPreferences.visibilityIsPerApp())
+
+    private fun tabsSharingPromptBoxSizeWith(tab: OpenTab): List<OpenTab> =
+        tabsSharingPreferencesWith(tab, promptBoxPreferences.sizeIsPerApp())
+
+    private fun tabsSharingPreferencesWith(tab: OpenTab, perApp: Boolean): List<OpenTab> {
+        val openTabs = tabsNotClosing().values
+        return if (perApp) openTabs.filter { it.appName == tab.appName } else openTabs.toList()
     }
 
     private fun selectTuiTab(
@@ -432,6 +545,7 @@ class TuiAppLaunchService(private val project: Project) {
                 host.hide()
             }
         }
+        tab.layout.promptBoxVisible = false
         Disposer.dispose(tab.disposable)
     }
 

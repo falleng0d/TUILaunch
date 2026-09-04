@@ -23,6 +23,11 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         var submitPromptOnSend: Boolean = true,
         var appendPromptSeparatorOnSend: Boolean = true,
         var focusPromptFileAfterSend: Boolean = true,
+        var promptBoxVisible: Boolean = false,
+        var promptBoxPercent: Int = 30,
+        var rememberPromptBoxVisibilityPerApp: Boolean = false,
+        var rememberPromptBoxSizePerApp: Boolean = false,
+        var focusTuiAfterPromptBoxSend: Boolean = false,
         var escapeModifier: String = "CTRL",
         var escapeKeyCode: Int? = null,
         var focusEditorKeyCode: Int? = null,
@@ -32,6 +37,7 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         var toggleToolWindowKeyCode: Int? = null,
         var nextTuiWithoutFocusKeyCode: Int? = null,
         var previousTuiWithoutFocusKeyCode: Int? = null,
+        var focusPromptBoxKeyCode: Int? = null,
     )
 
     override fun loadState(state: State) {

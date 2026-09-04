@@ -21,7 +21,10 @@ class TuiLaunchToolWindowFactory : ToolWindowFactory, DumbAware {
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         toolWindow.setTitleActions(
-            listOfNotNull(ActionManager.getInstance().getAction("TUILaunch.OpenPromptFile"))
+            listOfNotNull(
+                ActionManager.getInstance().getAction("TUILaunch.TogglePromptBox"),
+                ActionManager.getInstance().getAction("TUILaunch.OpenPromptFile"),
+            )
         )
         invokeLater {
             if (!project.isDisposed) project.service<TuiAppLaunchService>().restoreSavedTabs()

@@ -6,6 +6,7 @@ import com.github.atm1020.tuilaunch.prompt.parsePromptBlocks
 import com.github.atm1020.tuilaunch.prompt.promptBlockContainsLine
 import com.github.atm1020.tuilaunch.prompt.promptBlockTextAt
 import com.github.atm1020.tuilaunch.prompt.promptBlockTextContainingLine
+import com.github.atm1020.tuilaunch.prompt.promptAppendEdit
 import com.github.atm1020.tuilaunch.prompt.promptMarkerLines
 import com.github.atm1020.tuilaunch.prompt.promptSeparatorEdit
 import org.junit.Assert.assertEquals
@@ -495,6 +496,112 @@ class PromptBlocksTest {
         assertEquals("---\n\nfirst prompt\n\n---\n\nsecond prompt\n\n---\n\n", appended)
         assertFalse(isLastPromptBlock(appended, 2))
         assertTrue(isLastPromptBlock(appended, 6))
+    }
+
+    private fun withAppendedPrompt(text: String, prompt: String, leaveOpenSlot: Boolean = false): String {
+        val edit = promptAppendEdit(text, prompt, leaveOpenSlot)
+        return text.substring(0, edit.from) + edit.text + text.substring(edit.to)
+    }
+
+    @Test
+    fun anEmptyFileTakesThePromptOnItsOwn() {
+        assertEquals("Fix the bug", withAppendedPrompt("", "Fix the bug"))
+        assertEquals("Fix the bug\n\n---\n\n", withAppendedPrompt("", "Fix the bug", leaveOpenSlot = true))
+    }
+
+    @Test
+    fun aFileOfOnlyBlankLinesIsReplacedByThePrompt() {
+        assertEquals("Fix the bug", withAppendedPrompt("\n \n\t\n", "Fix the bug"))
+        assertEquals("Fix the bug\n\n---\n\n", withAppendedPrompt("\n\n", "Fix the bug", leaveOpenSlot = true))
+    }
+
+    @Test
+    fun aFileEndingInContentWithoutANewlineGetsADividerBeforeThePrompt() {
+        assertEquals("first prompt\n\n---\n\nsecond", withAppendedPrompt("first prompt", "second"))
+        assertEquals(
+            "first prompt\n\n---\n\nsecond\n\n---\n\n",
+            withAppendedPrompt("first prompt", "second", leaveOpenSlot = true),
+        )
+    }
+
+    @Test
+    fun theTrailingNewlinesOfAFileEndingInContentAreReplaced() {
+        assertEquals("first prompt\n\n---\n\nsecond", withAppendedPrompt("first prompt\n", "second"))
+        assertEquals("first prompt\n\n---\n\nsecond", withAppendedPrompt("first prompt\n\n\n \n", "second"))
+        assertEquals(
+            "first prompt\n\n---\n\nsecond\n\n---\n\n",
+            withAppendedPrompt("first prompt\n \n\t\n", "second", leaveOpenSlot = true),
+        )
+    }
+
+    @Test
+    fun theEmptySlotAtTheEndOfTheFileTakesThePromptWithoutASecondDivider() {
+        val openSlot = "---\n\nfirst prompt\n\n---\n\n"
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\nsecond", withAppendedPrompt(openSlot, "second"))
+        assertEquals(
+            "---\n\nfirst prompt\n\n---\n\nsecond\n\n---\n\n",
+            withAppendedPrompt(openSlot, "second", leaveOpenSlot = true),
+        )
+    }
+
+    @Test
+    fun anEmptySlotPaddedWithSpacesAndTabsStillTakesThePrompt() {
+        assertEquals(
+            "---\n\nfirst prompt\n\n---\n\nsecond",
+            withAppendedPrompt("---\n\nfirst prompt\n\n---\n  \t\n \n", "second"),
+        )
+    }
+
+    @Test
+    fun aFileEndingInADividerOnItsLastLineTakesThePromptIntoThatSlot() {
+        assertEquals("first prompt\n---\n\nsecond", withAppendedPrompt("first prompt\n---\n", "second"))
+    }
+
+    @Test
+    fun aPromptAppendedInsideAnUnclosedFenceGetsAWholeNewSlot() {
+        assertEquals(
+            "---\n\nfirst prompt\n```\nstill fenced\n\n---\n\nsecond",
+            withAppendedPrompt("---\n\nfirst prompt\n```\nstill fenced\n", "second"),
+        )
+    }
+
+    @Test
+    fun aPromptAppendedWithASlotLeavesTheFileInTheShapeTheGutterFlowWants() {
+        val appended = withAppendedPrompt("---\n\nfirst prompt\n", "second", leaveOpenSlot = true)
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\nsecond\n\n---\n\n", appended)
+        assertNull(promptSeparatorEdit(appended))
+    }
+
+    @Test
+    fun anAppendedPromptJoinsTheOnesAlreadyInTheFileExactlyOnce() {
+        listOf(
+            "",
+            "\n\n",
+            "first prompt",
+            "first prompt\n",
+            "---\n\nfirst prompt\n\n---\n\n",
+            "---\n\nfirst prompt\n\n---\n\nsecond prompt\nspanning two lines\n",
+            exampleFile,
+        ).forEach { text ->
+            val promptsBefore = parsePromptBlocks(text).map { it.text }
+
+            listOf(false, true).forEach { leaveOpenSlot ->
+                val appended = withAppendedPrompt(text, "Fix the bug", leaveOpenSlot)
+
+                assertEquals(promptsBefore + "Fix the bug", parsePromptBlocks(appended).map { it.text })
+            }
+        }
+    }
+
+    @Test
+    fun appendingTwiceKeepsBothPromptsAndOneDividerBetweenThem() {
+        val once = withAppendedPrompt("---\n\nfirst prompt\n", "second", leaveOpenSlot = true)
+        val twice = withAppendedPrompt(once, "third", leaveOpenSlot = true)
+
+        assertEquals("---\n\nfirst prompt\n\n---\n\nsecond\n\n---\n\nthird\n\n---\n\n", twice)
+        assertEquals(listOf("first prompt", "second", "third"), parsePromptBlocks(twice).map { it.text })
     }
 
     private fun everyLineOf(text: String): IntRange = 0..text.count { it == '\n' }

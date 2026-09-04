@@ -11,5 +11,7 @@ data class TuiAppConfig(
     var windowHeight: Int? = null,
     var windowSizeAxis: String? = null,
     var shortcutKeyCode: Int? = null,
+    var promptBoxVisible: Boolean? = null,
+    var promptBoxPercent: Int? = null,
 )
 

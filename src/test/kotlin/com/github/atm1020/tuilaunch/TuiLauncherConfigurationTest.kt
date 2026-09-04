@@ -5,6 +5,9 @@ import com.github.atm1020.tuilaunch.model.TuiAppTableModel
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.github.atm1020.tuilaunch.ui.APPEND_PROMPT_SEPARATOR_LABEL
 import com.github.atm1020.tuilaunch.ui.FOCUS_PROMPT_FILE_LABEL
+import com.github.atm1020.tuilaunch.ui.FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL
+import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_SIZE_PER_APP_LABEL
+import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_VISIBILITY_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.RESTORE_OPEN_TABS_LABEL
 import com.github.atm1020.tuilaunch.ui.SUBMIT_PROMPT_ON_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
@@ -31,6 +34,11 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             submitPromptOnSend = true
             appendPromptSeparatorOnSend = true
             focusPromptFileAfterSend = true
+            promptBoxVisible = false
+            promptBoxPercent = 30
+            rememberPromptBoxVisibilityPerApp = false
+            rememberPromptBoxSizePerApp = false
+            focusTuiAfterPromptBoxSend = false
             escapeModifier = "CTRL"
             escapeKeyCode = null
             focusEditorKeyCode = null
@@ -40,6 +48,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             toggleToolWindowKeyCode = null
             nextTuiWithoutFocusKeyCode = null
             previousTuiWithoutFocusKeyCode = null
+            focusPromptBoxKeyCode = null
         }
     }
 
@@ -59,8 +68,8 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val component = TuiLauncherConfiguration().createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
-        assertEquals(9, shortcutTable.rowCount)
-        assertEquals("Launch htop", shortcutTable.model.getValueAt(8, 0))
+        assertEquals(10, shortcutTable.rowCount)
+        assertEquals("Launch htop", shortcutTable.model.getValueAt(9, 0))
     }
 
     fun testAddingAppAddsLaunchShortcutRow() {
@@ -69,11 +78,11 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val appsTable = findAppsTable(component)!!
         val shortcutTable = findShortcutTable(component)!!
 
-        assertEquals(8, shortcutTable.rowCount)
+        assertEquals(9, shortcutTable.rowCount)
         (appsTable.model as TuiAppTableModel).addRow(TuiAppConfig(name = "lazygit", command = "lazygit"))
 
-        assertEquals(9, shortcutTable.rowCount)
-        assertEquals("Launch lazygit", shortcutTable.model.getValueAt(8, 0))
+        assertEquals(10, shortcutTable.rowCount)
+        assertEquals("Launch lazygit", shortcutTable.model.getValueAt(9, 0))
     }
 
     fun testTmuxKeybindingsCheckboxPersistsEnabledFlag() {
@@ -267,10 +276,10 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val (configurable, component) = configurableWithApp("lazygit")
         val shortcutTable = findShortcutTable(component)!!
 
-        shortcutTable.selectionModel.setSelectionInterval(8, 8)
+        shortcutTable.selectionModel.setSelectionInterval(9, 9)
         pressKeyOn(shortcutTable, KeyEvent.VK_G)
 
-        assertEquals("G", shortcutTable.model.getValueAt(8, 1))
+        assertEquals("G", shortcutTable.model.getValueAt(9, 1))
         assertTrue(configurable.isModified())
     }
 
@@ -329,7 +338,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         configurable.reset()
 
         assertEquals(listOf("lazygit"), appsModel.snapshot().map { it.name })
-        assertEquals(9, findShortcutTable(component)!!.rowCount)
+        assertEquals(10, findShortcutTable(component)!!.rowCount)
         assertFalse(configurable.isModified())
     }
 
@@ -408,13 +417,13 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val (configurable, component) = configurableWithApp("lazygit")
         val shortcutTable = findShortcutTable(component)!!
 
-        shortcutTable.selectionModel.setSelectionInterval(8, 8)
+        shortcutTable.selectionModel.setSelectionInterval(9, 9)
         pressKeyOn(shortcutTable, KeyEvent.VK_G)
         assertTrue(configurable.isModified())
 
         configurable.reset()
 
-        assertEquals("Not set", shortcutTable.model.getValueAt(8, 1))
+        assertEquals("Not set", shortcutTable.model.getValueAt(9, 1))
         assertFalse(configurable.isModified())
     }
 
@@ -429,12 +438,12 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
         (appsTable.model as TuiAppTableModel).addRow(TuiAppConfig(name = "beta", command = "beta"))
         appsTable.selectionModel.setSelectionInterval(1, 1)
-        shortcutTable.selectionModel.setSelectionInterval(9, 9)
+        shortcutTable.selectionModel.setSelectionInterval(10, 10)
 
         configurable.reset()
 
         assertEquals(1, appsTable.rowCount)
-        assertEquals(9, shortcutTable.rowCount)
+        assertEquals(10, shortcutTable.rowCount)
         assertEquals(-1, appsTable.selectedRow)
         assertEquals(-1, shortcutTable.selectedRow)
         assertFalse(configurable.isModified())
@@ -452,7 +461,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
         val shortcutTable = findShortcutTable(component)!!
         assertEquals("X", shortcutTable.model.getValueAt(1, 1))
-        assertEquals("G", shortcutTable.model.getValueAt(8, 1))
+        assertEquals("G", shortcutTable.model.getValueAt(9, 1))
         assertEquals("Alt", findComponent<JComboBox<*>>(component) { it.itemCount == 2 }!!.selectedItem)
         assertFalse(configurable.isModified())
     }
@@ -683,6 +692,180 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val configurable = TuiLauncherConfiguration()
         configurable.createComponent()
 
+        assertFalse(configurable.isModified())
+    }
+
+    fun testThePromptBoxPerAppCheckBoxesArePresentAndOffByDefault() {
+        val component = TuiLauncherConfiguration().createComponent() as JPanel
+
+        assertFalse(findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!.isSelected)
+        assertFalse(findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!.isSelected)
+    }
+
+    fun testTurningThePromptBoxPerAppModesOnIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!.isSelected = true
+        findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!.isSelected = true
+        configurable.apply()
+
+        assertTrue(settings.state.rememberPromptBoxVisibilityPerApp)
+        assertTrue(settings.state.rememberPromptBoxSizePerApp)
+    }
+
+    fun testTurningThePromptBoxPerAppModesBackOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.rememberPromptBoxVisibilityPerApp = true
+        settings.state.rememberPromptBoxSizePerApp = true
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        assertTrue(findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!.isSelected)
+        assertTrue(findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!.isSelected)
+
+        findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!.isSelected = false
+        findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.rememberPromptBoxVisibilityPerApp)
+        assertFalse(settings.state.rememberPromptBoxSizePerApp)
+    }
+
+    fun testTogglingAPromptBoxPerAppModeMarksThePanelModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresBothPromptBoxPerAppCheckBoxes() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val visibilityCheckBox = findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!
+        val sizeCheckBox = findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!
+
+        visibilityCheckBox.doClick()
+        sizeCheckBox.doClick()
+        configurable.reset()
+
+        assertFalse(visibilityCheckBox.isSelected)
+        assertFalse(sizeCheckBox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testAnUntouchedPanelIsUnmodifiedWithThePromptBoxPerAppModesOn() {
+        TuiLauncherSettings.getInstance().state.rememberPromptBoxVisibilityPerApp = true
+        TuiLauncherSettings.getInstance().state.rememberPromptBoxSizePerApp = true
+
+        val configurable = TuiLauncherConfiguration()
+        configurable.createComponent()
+
+        assertFalse(configurable.isModified())
+    }
+
+    fun testTheFocusTuiAfterSendCheckBoxIsPresentAndOffByDefault() {
+        val component = TuiLauncherConfiguration().createComponent() as JPanel
+
+        assertFalse(findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!.isSelected)
+    }
+
+    fun testTurningTheFocusTuiAfterSendFlagOnIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!.isSelected = true
+        configurable.apply()
+
+        assertTrue(settings.state.focusTuiAfterPromptBoxSend)
+    }
+
+    fun testTurningTheFocusTuiAfterSendFlagBackOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.focusTuiAfterPromptBoxSend = true
+
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!
+        assertTrue(checkbox.isSelected)
+
+        checkbox.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.focusTuiAfterPromptBoxSend)
+    }
+
+    fun testTogglingTheFocusTuiAfterSendFlagMarksThePanelModified() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresTheFocusTuiAfterSendCheckBox() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!
+
+        checkbox.doClick()
+        configurable.reset()
+
+        assertFalse(checkbox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testAnUntouchedPanelIsUnmodifiedWithTheFocusTuiAfterSendFlagOn() {
+        TuiLauncherSettings.getInstance().state.focusTuiAfterPromptBoxSend = true
+
+        val configurable = TuiLauncherConfiguration()
+        configurable.createComponent()
+
+        assertFalse(configurable.isModified())
+    }
+
+    fun testFocusingThePromptBoxIsTheLastBuiltInPrefixCommandRow() {
+        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val shortcutTable = findShortcutTable(component)!!
+
+        assertEquals(9, shortcutTable.rowCount)
+        assertEquals("Focus prompt box", shortcutTable.model.getValueAt(8, 0))
+        assertEquals("Not set", shortcutTable.model.getValueAt(8, 1))
+    }
+
+    fun testAssigningThePromptBoxPrefixKeyIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val shortcutTable = findShortcutTable(component)!!
+
+        shortcutTable.selectionModel.setSelectionInterval(8, 8)
+        pressKeyOn(shortcutTable, KeyEvent.VK_B)
+        assertTrue(configurable.isModified())
+
+        configurable.apply()
+
+        assertEquals(KeyEvent.VK_B, settings.state.focusPromptBoxKeyCode)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetRestoresThePromptBoxPrefixKey() {
+        val configurable = TuiLauncherConfiguration()
+        val component = configurable.createComponent() as JPanel
+        val shortcutTable = findShortcutTable(component)!!
+
+        shortcutTable.selectionModel.setSelectionInterval(8, 8)
+        pressKeyOn(shortcutTable, KeyEvent.VK_B)
+        configurable.reset()
+
+        assertEquals("Not set", shortcutTable.model.getValueAt(8, 1))
         assertFalse(configurable.isModified())
     }
 

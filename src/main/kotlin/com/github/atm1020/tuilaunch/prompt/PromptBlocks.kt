@@ -57,6 +57,20 @@ internal fun promptSeparatorEdit(text: CharSequence): PromptSeparatorEdit? {
     return PromptSeparatorEdit(from, text.length, tail)
 }
 
+internal fun promptAppendEdit(text: CharSequence, prompt: String, leaveOpenSlot: Boolean): PromptSeparatorEdit {
+    val trailingSlot = if (leaveOpenSlot) NEW_SLOT_TAIL else ""
+    val lines = LineOffsets(text)
+    val lastContentLine = lines.lastNonBlankLine()
+        ?: return PromptSeparatorEdit(0, text.length, prompt + trailingSlot)
+    val fileAlreadyEndsInAnOpenSlot = lines.isBlockSeparatorLine(lastContentLine)
+    val leadingSeparator = if (fileAlreadyEndsInAnOpenSlot) OPEN_SLOT_TAIL else NEW_SLOT_TAIL
+    return PromptSeparatorEdit(
+        lines.contentEndOf(lastContentLine),
+        text.length,
+        leadingSeparator + prompt + trailingSlot,
+    )
+}
+
 private fun endsAt(text: CharSequence, from: Int, expected: String): Boolean =
     text.length - from == expected.length && expected.indices.all { text[from + it] == expected[it] }
 

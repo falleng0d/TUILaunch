@@ -94,12 +94,51 @@
         </action>
         <!-- No <keyboard-shortcut>: a default keystroke here would silently shadow whatever the
              IDE keymap already binds it to, so the user assigns one in Settings | Keymap. -->
+        <action id="TUILauncher.FocusPromptBox"
+                class="com.github.atm1020.tuilaunch.action.FocusPromptBoxAction"
+                text="TUILaunch Focus Prompt Box"
+                description="Show the prompt box of the active TUI session and move keyboard focus into it">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
         <action id="TUILauncher.SendPromptBlock"
                 class="com.github.atm1020.tuilaunch.action.SendPromptBlockUnderCaretAction"
                 text="TUILaunch Send Prompt Block"
                 description="Send the PROMPT.md prompt block under the cursor to the active TUI session">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
+        <!-- The one action here that ships with a default keystroke, because the prompt box needs a
+             send key the way any chat input does. control ENTER is already bound in $default to
+             EditorSplitLine, ViewSource, SplitChooser.Duplicate, Console.Execute.Multiline and
+             DirDiffMenu.SynchronizeDiff.All. Sharing it is safe: IdeKeyEventDispatcher collects the
+             actions registered on the focused component chain before the keymap ones and runs the
+             first *enabled* one, and update() enables this action only when the data context carries
+             a prompt box, so everywhere else the IDE's own binding still wins. That is the scheme
+             the platform's own Console.Execute.Multiline uses for the same keystroke. The macOS
+             keymaps get Cmd+Return instead, which is what Mac chat inputs use and is unbound in
+             every shipped keymap; a keymap that declares its own shortcuts for an action id does not
+             inherit the parent keymap's for that id, so they end up with Cmd+Return only. -->
+        <action id="TUILauncher.SendPromptBox"
+                class="com.github.atm1020.tuilaunch.action.SendPromptBoxAction"
+                text="TUILaunch Send Prompt Box"
+                description="Send the prompt typed in the prompt box to its TUI session">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="control ENTER"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta ENTER"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta ENTER"/>
+        </action>
+        <!-- No <keyboard-shortcut> and no group: browsing the prompt box history means nothing outside a
+             prompt box, so these two are registered per box on its panel with a composite of whatever the
+             keymap binds them to and EditorUp / EditorDown's own shortcut sets. Up and Down on the box's
+             first and last line therefore browse the history while the caret still moves everywhere else,
+             and both actions still show up in Settings | Keymap for anyone who wants another binding. -->
+        <action id="TUILauncher.PromptHistoryPrevious"
+                class="com.github.atm1020.tuilaunch.action.PromptHistoryPreviousAction"
+                text="TUILaunch Previous Prompt in History"
+                description="Show the previous prompt from PROMPT.md in the prompt box"/>
+        <action id="TUILauncher.PromptHistoryNext"
+                class="com.github.atm1020.tuilaunch.action.PromptHistoryNextAction"
+                text="TUILaunch Next Prompt in History"
+                description="Show the next prompt from PROMPT.md in the prompt box"/>
         <!-- Not added to any menu group: looked up by id from TuiLaunchToolWindowFactory.init and
              installed as the tool window tab bar's "+" button (TSK-9013). -->
         <action id="TUILaunch.NewSession"
@@ -113,6 +152,13 @@
                 class="com.github.atm1020.tuilaunch.action.OpenPromptFileAction"
                 text="Open Prompt File"
                 description="Open this project's PROMPT.md, creating it if it does not exist yet"/>
+        <!-- Not added to any menu group: looked up by id from
+             TuiLaunchToolWindowFactory.createToolWindowContent and installed as the first tool window
+             title bar button, left of "Open Prompt File". -->
+        <action id="TUILaunch.TogglePromptBox"
+                class="com.github.atm1020.tuilaunch.action.TogglePromptBoxAction"
+                text="Toggle Prompt Box"
+                description="Show or hide the prompt box under the active TUI session"/>
         <action id="TUILaunch.RenameSession"
                 class="com.github.atm1020.tuilaunch.action.TuiRenameSessionAction"
                 text="Rename Session"

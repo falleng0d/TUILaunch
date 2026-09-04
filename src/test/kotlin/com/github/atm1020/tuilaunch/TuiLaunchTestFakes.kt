@@ -1,5 +1,7 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.action.SendPromptBoxAction
+import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
@@ -7,13 +9,38 @@ import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.KeyboardShortcut
+import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.PlatformTestUtil
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.KeyStroke
 
 private const val MAXIMUM_LEFTOVER_SESSIONS = 100
+
+internal const val SEND_PROMPT_BOX_TEST_KEYSTROKE = "control ENTER"
+
+internal fun registerTheSendPromptBoxAction(parentDisposable: Disposable) {
+    val actionManager = ActionManager.getInstance()
+    if (actionManager.getAction(SEND_PROMPT_BOX_ACTION_ID) != null) return
+    actionManager.registerAction(SEND_PROMPT_BOX_ACTION_ID, SendPromptBoxAction())
+    val keymap = KeymapManager.getInstance().activeKeymap
+    keymap.addShortcut(
+        SEND_PROMPT_BOX_ACTION_ID,
+        KeyboardShortcut(KeyStroke.getKeyStroke(SEND_PROMPT_BOX_TEST_KEYSTROKE), null),
+    )
+    Disposer.register(parentDisposable) {
+        unbindTheSendPromptBoxShortcut()
+        actionManager.unregisterAction(SEND_PROMPT_BOX_ACTION_ID)
+    }
+}
+
+internal fun unbindTheSendPromptBoxShortcut() {
+    KeymapManager.getInstance().activeKeymap.removeAllActionShortcuts(SEND_PROMPT_BOX_ACTION_ID)
+}
 
 internal fun closeSessionsLeftOpenByEarlierTests(service: TuiAppLaunchService) {
     repeat(MAXIMUM_LEFTOVER_SESSIONS) {
@@ -106,6 +133,7 @@ internal class FakeHost : IdeToolWindowHost(null) {
     var visible = false
     var pinned = true
     var showCount = 0
+    var dockedHorizontally = false
     private var selected: Any? = null
     val tabs = mutableListOf<Any>()
     val titles = mutableListOf<String>()
@@ -119,8 +147,10 @@ internal class FakeHost : IdeToolWindowHost(null) {
     private var tabAdded: ((Any) -> Unit)? = null
     private var tabRemoving: ((Any) -> Unit)? = null
     private var tabRemoved: ((Any) -> Unit)? = null
+    private var anchorChanged: ((Boolean) -> Unit)? = null
     private val tabsRemovedForDrag = mutableSetOf<Any>()
     private val disposableByTab = mutableMapOf<Any, CheckedDisposable>()
+    private val componentByTab = mutableMapOf<Any, JComponent>()
 
     override fun isVisible(): Boolean = visible
     override fun isPinned(): Boolean = pinned
@@ -137,6 +167,7 @@ internal class FakeHost : IdeToolWindowHost(null) {
         val handle = Any()
         tabs.add(handle)
         titles.add(title)
+        componentByTab[handle] = component
         (disposable as? CheckedDisposable)?.let {
             disposables.add(it)
             disposableByTab[handle] = it
@@ -202,6 +233,19 @@ internal class FakeHost : IdeToolWindowHost(null) {
     }
 
     fun visiblePositionOfActiveTab(): Int = tabs.indexOf(selected) + 1
+
+    fun componentOf(handle: Any): JComponent? = componentByTab[handle]
+
+    override fun isDockedHorizontally(): Boolean = dockedHorizontally
+
+    override fun onAnchorChanged(listener: (Boolean) -> Unit) {
+        anchorChanged = listener
+    }
+
+    fun triggerAnchorChanged(dockedHorizontally: Boolean) {
+        this.dockedHorizontally = dockedHorizontally
+        anchorChanged?.invoke(dockedHorizontally)
+    }
 
     override fun isTabRemovedForDrag(handle: Any): Boolean = handle in tabsRemovedForDrag
 

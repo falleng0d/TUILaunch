@@ -48,6 +48,56 @@ Multiple TUI apps can stay open at the same time as separate tabs, and each tab 
 
 TUILaunch remembers the last tool window size used by each app and restores it when that app tab is selected again.
 
+### Prompt box
+
+The **Toggle Prompt Box** button in the `TUILaunch` tool window title bar, left of the button that opens `PROMPT.md`,
+splits the active TUI tab and shows a prompt box next to the session: a real IntelliJ editor for writing the next
+prompt. The box sits under the terminal while the tool window is docked to the left or right edge and beside it while
+the window is docked to the top or the bottom, and it follows the window when you move it to another edge. It takes
+30% of the tab until you drag the divider, and it starts hidden.
+
+Two settings decide how far that state carries. While **Remember the prompt box visibility per TUI app** and
+**Remember the prompt box size per TUI app** are both off, showing the box or dragging its divider applies to every
+open tab and to the next tab that opens. Turn one on and each TUI app keeps its own answer, the way the tool window
+size is already remembered per app.
+
+Type in the box as in any editor: <kbd>Enter</kbd> inserts a newline, undo and redo work, and long lines are wrapped.
+<kbd>Ctrl</kbd> + <kbd>Enter</kbd>, or <kbd>Cmd</kbd> + <kbd>Return</kbd> on macOS, sends the prompt to that tab's
+session, and a **Send** button floating in the bottom-right corner of the box does the same. The button steps out of
+the way while you type or move the cursor and comes back a second later. The shortcut only sends while the cursor is
+inside a prompt box, so it keeps doing whatever the IDE binds it to everywhere else; rebind it in
+<kbd>Settings/Preferences</kbd> > <kbd>Keymap</kbd> under "TUILaunch Send Prompt Box", and the box's grey hint text
+names the shortcut currently assigned.
+
+A send also appends the prompt to `PROMPT.md`, so the box doubles as a way of writing that file. The prompt goes in
+behind a `---` separator, or into the empty slot at the end of the file when an earlier send left one there, and the
+box is emptied for the next prompt. Sending follows the same settings as the play buttons in the `PROMPT.md` gutter:
+**Send the prompt immediately instead of only typing it** decides whether the session gets <kbd>Enter</kbd> after the
+text, and **Add a new prompt separator to PROMPT.md after sending** decides whether the file is left with a fresh
+empty slot. Nothing is written to the file and the box is not emptied when the session refuses the text. The cursor
+stays in the box after a send, like a chat input, unless **Move focus to the TUI after sending from the prompt box**
+is turned on.
+
+<kbd>Up</kbd> on the first line and <kbd>Down</kbd> on the last line walk the prompts already recorded in `PROMPT.md`
+the way a shell walks its command history; anywhere else inside a longer prompt both keys just move the cursor.
+<kbd>Up</kbd> shows the prompt sent last, then the one before it, and <kbd>Down</kbd> works back towards the newest
+one. Whatever you were typing is kept aside and comes back when <kbd>Down</kbd> walks past the newest prompt. Editing
+a prompt from the file turns that edit into the text kept aside while the prompt in the file stays as it is, so
+walking away and back shows the original again. The list is re-read from `PROMPT.md` every time browsing starts, so a
+prompt sent in the meantime is there, and a send ends browsing. A prompt that contains `---` lines of its own is
+appended to the file verbatim and comes back as several separate history entries.
+
+<kbd>Escape</kbd> in the box hands the keyboard to that tab's terminal, after dropping a text selection or closing a
+completion popup first, as <kbd>Escape</kbd> does in any editor.
+
+Three more actions ship with no shortcut and can be given one in <kbd>Settings/Preferences</kbd> > <kbd>Keymap</kbd>:
+
+- `TUILauncher.FocusPromptBox` — show the prompt box of the active TUI tab and put the cursor in it, from the editor,
+  from the terminal, or from the box itself. It is also available as a tmux-like prefix command, "Focus prompt box".
+- `TUILauncher.PromptHistoryPrevious` / `TUILauncher.PromptHistoryNext` — the same history walk as <kbd>Up</kbd> and
+  <kbd>Down</kbd>, from keys of your own. On macOS <kbd>Ctrl</kbd> + <kbd>P</kbd> and <kbd>Ctrl</kbd> + <kbd>N</kbd>
+  already browse the history, because the box borrows the caret movement keys those are bound to.
+
 ### Reopen TUI tabs when the project is opened
 
 Turn on **Reopen TUI tabs when the project is opened** in the TUILaunch settings and the plugin remembers, per project,
@@ -117,7 +167,7 @@ In the TUILaunch settings you can:
 - Enable or disable tmux-like keybindings.
 - Choose the prefix modifier: <kbd>Ctrl</kbd> or <kbd>Alt</kbd>.
 - Record the prefix key.
-- Assign prefix commands for focusing the editor, closing the active TUI, switching tabs, toggling the tool window, and launching saved apps.
+- Assign prefix commands for focusing the editor, focusing the prompt box, closing the active TUI, switching tabs, toggling the tool window, and launching saved apps.
 - Clear assigned shortcuts with <kbd>Delete</kbd> or <kbd>Backspace</kbd>.
 
 <p align="center">
@@ -180,6 +230,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - JediTerm's `TerminalKeyEncoder` has no `VK_ESCAPE` entry, so `TerminalStarter.getCode(27, 0)` returns null and callers must fall back to sending the character themselves, exactly as `TerminalPanel` does.
 - Sending with `userInput = true` also scrolls to the cursor and clears the selection, which is what makes a forwarded key indistinguishable from real typing.
 - The platform's `TerminalEscapeKeyListener` moves focus to the editor on bare Escape in any tool window other than the bundled "Terminal", so a custom terminal window has to intercept Escape before it.
+- That listener is a field of `JBTerminalPanel` driven from that panel's own `handleKeyEvent`, so it only ever sees keys delivered to a terminal panel; a sibling component in the same tool window tab can bind Escape without it interfering.
 - IntelliJ delivers each `KEY_PRESSED` to a global `KeyEventDispatcher` twice; de-duplicate on (timestamp, key code) or a forwarded Escape reaches the child process twice.
 - Consuming a `KEY_PRESSED` does not suppress the matching `KEY_TYPED`, which has to be swallowed separately or its character still lands in the terminal.
 - `NextTab`/`PreviousTab` keystrokes differ across the default, macOS and system-shortcut keymaps, so resolve them from `ActionManager` at event time rather than hardcoding them.
@@ -207,6 +258,22 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `$WORKSPACE_FILE$` resolves to `.idea/workspace.xml`, and only that name is covered by the standard JetBrains `.gitignore`; `$PRODUCT_WORKSPACE_FILE$` resolves to `.idea/product-workspace.xml` only under `isUnitTestMode` and otherwise to `<IDE config dir>/workspace/<projectWorkspaceId>.xml`, which the platform uses for open editors and the tool window layout.
 - `MergingUpdateQueue.flushAllQueues()` only does anything when the `intellij.MergingUpdateQueue.enable.global.flusher` system property is set before the class loads, and even a zero merge span still hands the update to the alarm thread before it reaches the event queue, so a single `dispatchAllInvocationEventsInIdeEventQueue` races it; a test has to poll the queue's own `isEmpty` while pumping the event queue.
 - Inside `ESC[200~`/`ESC[201~` a carriage return is paste content rather than a submit, so submitting text sent as a paste needs a separate key event after the paste ends; appending the return to the payload cannot work because the payload is trimmed of trailing returns before the markers go on.
+- `Splitter.doLayout` treats a null or invisible second component as absent and hides the divider, so hiding that child gives the first one the whole area while its component, and anything living in it, stays in the hierarchy.
+- `JBSplitter.setSplitterProportionKey` stores the proportion in the application-level `PropertiesComponent`, so a split size that belongs to a project or to one TUI app has to be persisted by the plugin itself.
+- `EditorFactoryImpl.createEditor` installs a file-type highlighter only in the overloads that take a `VirtualFile` or a `FileType`, so an editor built from a bare `Document` shows unhighlighted text.
+- `UndoRedoAction` reads only `PlatformCoreDataKeys.FILE_EDITOR` while `EditorComponentImpl` publishes just `EDITOR`, `CARET` and `EDITOR_VIRTUAL_SPACE`, so the container around a standalone `EditorFactory` editor has to publish `TextEditorProvider.getInstance().getTextEditor(editor)` or undo does nothing in it.
+- `FileTypeManager.getFileTypeByFileName` answers `UnknownFileType` for a `.md` name when the Markdown plugin is not loaded, and `FileDocumentManager.getDocument` returns null for a binary file type, so a `LightVirtualFile` meant to be edited needs a plain-text fallback whenever the resolved type is binary.
+- `LightIdeaTestFixtureImpl.tearDown` runs `LightPlatformTestCase.checkEditorsReleased`, which fails a test for every editor still alive, and a test host never disposes a tab's disposable, so an editor that belongs to a tool window tab is only created once that tab actually shows it.
+- The three-argument `ToolWindowManagerListener.stateChanged(ToolWindowManager, ToolWindow, ToolWindowManagerEventType)` is `@ApiStatus.Internal`, so a docking edge change has to be observed through the two-argument overload and the anchor re-read from the tool window.
+- `IdeKeyEventDispatcher` collects the actions registered on the focused component chain with `AnAction.registerCustomShortcutSet` before the keymap ones and runs the first *enabled* one, and a disabled action falls through to the next, which is how `Console.Execute.Multiline` shares Ctrl+Enter with `EditorSplitLine`: an action that is enabled only inside its own component can take a keystroke the IDE already uses elsewhere.
+- `AnAction.setShortcutSet` logs a `PluginException` warning for an action registered in `ActionManager` unless the new set is the very same object, so re-registering a global action's own `shortcutSet` on a component is the safe way to give it component-chain precedence, and `ActionManagerImpl.registerAction` replaces whatever set the instance had with a keymap-backed `ProxyShortcutSet`.
+- `IdeKeyEventDispatcher.isControlEnterOnDialog` short-circuits Ctrl+Enter inside a `DialogWrapper` so the dialog's OK button gets it, which means a component-registered Ctrl+Enter action never fires in a dialog.
+- A keymap that declares its own `<keyboard-shortcut>` for an action id does not inherit the parent keymap's shortcuts for that id, so binding `meta ENTER` in "Mac OS X 10.5+" leaves the macOS keymaps with only that keystroke while `$default` keeps `control ENTER`.
+- `SingleAlarm` and `Alarm` are `@ApiStatus.Obsolete` in 262; the supported debounce is `MergingUpdateQueue(...).setRestartTimerOnAdd(true)`, which restarts the merge window on every queued update, and it only collapses updates immediately in unit tests when `usePassThroughInUnitTestMode()` is called.
+- `BasePlatformTestCase` does not load the plugin's own `plugin.xml`, so nothing declared there exists in a test: an action has to be registered through `ActionManager.registerAction` and its default keystroke added to the active keymap by the test itself.
+- `ConsoleHistoryController` shares one console's Up and Down between history browsing and caret movement by registering per-console actions on the console component carrying `ActionManager.getActionOrStub("EditorUp"/"EditorDown").shortcutSet`, and enabling them only when the keystroke came from one of those keys *and* the caret sits on the first or last line; every other Up and Down falls through to the keymap's own caret movement.
+- `Console.History.Previous` and `Console.History.Next` ship with no default keystroke at all, so the arrow keys reach them only through the shortcut sets borrowed from `EditorUp` and `EditorDown`, which is what keeps them out of every other editor.
+- The macOS keymaps bind `control P` and `control N` to `EditorUp` and `EditorDown` on top of the arrow keys, so borrowing those shortcut sets brings the Emacs-style pair along with them.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

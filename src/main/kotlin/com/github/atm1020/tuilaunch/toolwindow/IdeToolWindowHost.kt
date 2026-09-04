@@ -4,8 +4,10 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowAnchor
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.wm.ToolWindowType
 import com.intellij.openapi.wm.ex.ToolWindowEx
+import com.intellij.openapi.wm.ex.ToolWindowManagerListener
 import com.intellij.ui.content.Content
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.content.ContentManagerEvent
@@ -75,6 +77,27 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
         }
         if (size.width <= 0 || size.height <= 0) return null
         return ToolWindowSize(size.width, size.height)
+    }
+
+    open fun isDockedHorizontally(): Boolean = requireToolWindow().anchor.isHorizontal
+
+    open fun onAnchorChanged(listener: (Boolean) -> Unit) {
+        val toolWindow = requireToolWindow()
+        var dockedHorizontally = toolWindow.anchor.isHorizontal
+        toolWindow.project.messageBus.connect(toolWindow.disposable).subscribe(
+            ToolWindowManagerListener.TOPIC,
+            object : ToolWindowManagerListener {
+                override fun stateChanged(
+                    toolWindowManager: ToolWindowManager,
+                    changeType: ToolWindowManagerListener.ToolWindowManagerEventType,
+                ) {
+                    val nowDockedHorizontally = toolWindow.anchor.isHorizontal
+                    if (nowDockedHorizontally == dockedHorizontally) return
+                    dockedHorizontally = nowDockedHorizontally
+                    listener(nowDockedHorizontally)
+                }
+            },
+        )
     }
 
     open fun sizeAxis(): ToolWindowSizeAxis {

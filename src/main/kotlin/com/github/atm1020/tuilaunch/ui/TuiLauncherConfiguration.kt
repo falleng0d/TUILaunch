@@ -33,6 +33,10 @@ internal const val RESTORE_OPEN_TABS_LABEL = "Reopen TUI tabs when the project i
 internal const val SUBMIT_PROMPT_ON_SEND_LABEL = "Send the prompt immediately instead of only typing it"
 internal const val APPEND_PROMPT_SEPARATOR_LABEL = "Add a new prompt separator to PROMPT.md after sending"
 internal const val FOCUS_PROMPT_FILE_LABEL = "Focus PROMPT.md again after sending"
+internal const val PROMPT_BOX_VISIBILITY_PER_APP_LABEL = "Remember the prompt box visibility per TUI app"
+internal const val PROMPT_BOX_SIZE_PER_APP_LABEL = "Remember the prompt box size per TUI app"
+internal const val FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL =
+    "Move focus to the TUI after sending from the prompt box"
 
 class TuiLauncherConfiguration : Configurable {
     private var tuiLauncherPanel: JPanel? = null
@@ -45,6 +49,9 @@ class TuiLauncherConfiguration : Configurable {
     private var submitPromptOnSendCheckBox: JBCheckBox? = null
     private var appendPromptSeparatorCheckBox: JBCheckBox? = null
     private var focusPromptFileCheckBox: JBCheckBox? = null
+    private var promptBoxVisibilityPerAppCheckBox: JBCheckBox? = null
+    private var promptBoxSizePerAppCheckBox: JBCheckBox? = null
+    private var focusTuiAfterPromptBoxSendCheckBox: JBCheckBox? = null
     private var modifierCombo: JComboBox<String>? = null
     private val tmuxShortcutComponents = mutableListOf<JComponent>()
     private var shortcutsTable: JBTable? = null
@@ -64,6 +71,7 @@ class TuiLauncherConfiguration : Configurable {
             false,
             TuiLauncherSettings.State::previousTuiWithoutFocusKeyCode,
         ),
+        builtInShortcut("Focus prompt box", false, TuiLauncherSettings.State::focusPromptBoxKeyCode),
     )
 
     private val builtInShortcutBindings = builtInShortcuts.map { shortcut ->
@@ -153,16 +161,28 @@ class TuiLauncherConfiguration : Configurable {
         val separatorCheckBox =
             JBCheckBox(APPEND_PROMPT_SEPARATOR_LABEL, settings.state.appendPromptSeparatorOnSend)
         val focusPromptCheckBox = JBCheckBox(FOCUS_PROMPT_FILE_LABEL, settings.state.focusPromptFileAfterSend)
+        val promptBoxVisibilityCheckBox =
+            JBCheckBox(PROMPT_BOX_VISIBILITY_PER_APP_LABEL, settings.state.rememberPromptBoxVisibilityPerApp)
+        val promptBoxSizeCheckBox =
+            JBCheckBox(PROMPT_BOX_SIZE_PER_APP_LABEL, settings.state.rememberPromptBoxSizePerApp)
+        val focusTuiAfterSendCheckBox =
+            JBCheckBox(FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL, settings.state.focusTuiAfterPromptBoxSend)
         restoreOpenTabsCheckBox = restoreCheckBox
         submitPromptOnSendCheckBox = submitCheckBox
         appendPromptSeparatorCheckBox = separatorCheckBox
         focusPromptFileCheckBox = focusPromptCheckBox
+        promptBoxVisibilityPerAppCheckBox = promptBoxVisibilityCheckBox
+        promptBoxSizePerAppCheckBox = promptBoxSizeCheckBox
+        focusTuiAfterPromptBoxSendCheckBox = focusTuiAfterSendCheckBox
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             add(restoreCheckBox)
             add(submitCheckBox)
             add(separatorCheckBox)
             add(focusPromptCheckBox)
+            add(promptBoxVisibilityCheckBox)
+            add(promptBoxSizeCheckBox)
+            add(focusTuiAfterSendCheckBox)
         }
     }
 
@@ -393,6 +413,9 @@ class TuiLauncherConfiguration : Configurable {
         submitPromptOnSendCheckBox?.isSelected = settings.state.submitPromptOnSend
         appendPromptSeparatorCheckBox?.isSelected = settings.state.appendPromptSeparatorOnSend
         focusPromptFileCheckBox?.isSelected = settings.state.focusPromptFileAfterSend
+        promptBoxVisibilityPerAppCheckBox?.isSelected = settings.state.rememberPromptBoxVisibilityPerApp
+        promptBoxSizePerAppCheckBox?.isSelected = settings.state.rememberPromptBoxSizePerApp
+        focusTuiAfterPromptBoxSendCheckBox?.isSelected = settings.state.focusTuiAfterPromptBoxSend
         modifierCombo?.selectedItem = modifierComboItem()
         builtInShortcuts.forEach { it.keyCode = it.stateProperty.get(settings.state) }
 
@@ -409,6 +432,9 @@ class TuiLauncherConfiguration : Configurable {
         submitPromptOnSend = submitPromptOnSendCheckBox?.isSelected == true,
         appendPromptSeparatorOnSend = appendPromptSeparatorCheckBox?.isSelected == true,
         focusPromptFileAfterSend = focusPromptFileCheckBox?.isSelected == true,
+        rememberPromptBoxVisibilityPerApp = promptBoxVisibilityPerAppCheckBox?.isSelected == true,
+        rememberPromptBoxSizePerApp = promptBoxSizePerAppCheckBox?.isSelected == true,
+        focusTuiAfterPromptBoxSend = focusTuiAfterPromptBoxSendCheckBox?.isSelected == true,
         escapeModifier = selectedEscapeModifier(),
     ).also { edited ->
         builtInShortcuts.forEach { it.stateProperty.set(edited, it.keyCode) }
@@ -429,6 +455,9 @@ class TuiLauncherConfiguration : Configurable {
         settings.state.submitPromptOnSend = submitPromptOnSendCheckBox?.isSelected == true
         settings.state.appendPromptSeparatorOnSend = appendPromptSeparatorCheckBox?.isSelected == true
         settings.state.focusPromptFileAfterSend = focusPromptFileCheckBox?.isSelected == true
+        settings.state.rememberPromptBoxVisibilityPerApp = promptBoxVisibilityPerAppCheckBox?.isSelected == true
+        settings.state.rememberPromptBoxSizePerApp = promptBoxSizePerAppCheckBox?.isSelected == true
+        settings.state.focusTuiAfterPromptBoxSend = focusTuiAfterPromptBoxSendCheckBox?.isSelected == true
         settings.state.escapeModifier = selectedEscapeModifier()
         builtInShortcuts.forEach { it.stateProperty.set(settings.state, it.keyCode) }
         settings.loadActions()
