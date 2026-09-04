@@ -368,12 +368,18 @@ class TuiAppLaunchService(private val project: Project) {
             val originIndex = stripHandles.indexOfFirst { it == activeHandle }
             if (originIndex < 0) return@invokeLater
             val selectableTabs = tabsNotClosing().values
+            val promptBoxHadFocus = tabFor(stripHandles[originIndex])?.let { promptBoxHoldsTheFocus(it) } == true
             val tab = (1 until stripHandles.size)
                 .asSequence()
                 .map { stripHandles[Math.floorMod(originIndex + offset * it, stripHandles.size)] }
                 .mapNotNull { handle -> selectableTabs.firstOrNull { it.handle == handle } }
                 .firstOrNull() ?: return@invokeLater
-            selectTuiTab(host, tab, requestFocus = requestFocus)
+            selectTuiTab(
+                host,
+                tab,
+                requestFocus = requestFocus,
+                keepFocusInThePromptBox = promptBoxHadFocus,
+            )
         }
     }
 
@@ -491,6 +497,7 @@ class TuiAppLaunchService(private val project: Project) {
         host: IdeToolWindowHost,
         tab: OpenTab,
         requestFocus: Boolean = true,
+        keepFocusInThePromptBox: Boolean = false,
     ) {
         val selectionWillChange = host.activeTab() != tab.handle
         if (selectionWillChange) recordActiveTabSize(host)
@@ -498,8 +505,16 @@ class TuiAppLaunchService(private val project: Project) {
         host.show()
         host.selectTab(tab.handle)
         if (!selectionWillChange) applySavedSize(host, tab.appName)
-        if (requestFocus) tab.session.requestFocus()
+        if (requestFocus) focusTabContent(tab, keepFocusInThePromptBox)
     }
+
+    private fun focusTabContent(tab: OpenTab, keepFocusInThePromptBox: Boolean) {
+        val thePromptBoxCanTakeTheFocus = keepFocusInThePromptBox && tab.layout.promptBoxVisible
+        if (thePromptBoxCanTakeTheFocus) tab.promptBox.requestFocus() else tab.session.requestFocus()
+    }
+
+    private fun promptBoxHoldsTheFocus(tab: OpenTab): Boolean =
+        tab.layout.promptBoxVisible && tab.promptBox.hasFocus()
 
     private fun isTuiFocused(): Boolean = activeToolWindowIdProvider() == TUI_TOOL_WINDOW_ID
 

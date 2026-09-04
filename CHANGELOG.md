@@ -6,6 +6,10 @@
 
 ### Changed
 
+- "Next TUI Tab" and "Previous TUI Tab", and the prefix commands that map to them, now keep the keyboard
+  where it was: the cursor moves from the prompt box of one tab into the prompt box of the tab it lands
+  on, and into that tab's session when the session had the keyboard or the tab it lands on has no box
+  showing. The prompt box visibility of the tab it lands on is left as it is.
 - A prompt recalled with Up or Down in the prompt box now arrives with its fenced code blocks folded,
   so the prose around a long block stays readable. The box shows fold markers in its gutter, and
   clicking one expands that block again. Prompts you type yourself are left alone.

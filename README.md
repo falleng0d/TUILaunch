@@ -92,6 +92,10 @@ box's gutter expand them again.
 <kbd>Escape</kbd> in the box hands the keyboard to that tab's terminal, after dropping a text selection or closing a
 completion popup first, as <kbd>Escape</kbd> does in any editor.
 
+Switching tabs with `TUILauncher.NextTuiTab`, `TUILauncher.PreviousTuiTab` or their prefix commands keeps the keyboard
+where it already is: the cursor moves from one tab's box into the box of the tab it lands on, or into that tab's
+session when the cursor was in the session or the tab it lands on has no box showing.
+
 Inline completions appear in the box as grey ghost text while you type, exactly as they do in a file: <kbd>Tab</kbd>
 accepts the suggestion, <kbd>Escape</kbd> dismisses it, a second <kbd>Escape</kbd> then hands the keyboard to the
 terminal, and <kbd>Up</kbd> and <kbd>Down</kbd> move the cursor instead of browsing the history while a suggestion is

@@ -23,13 +23,13 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
     private val focusRequestOutsideThisTest = promptBoxFocusRequest
     private val focusCheckOutsideThisTest = promptBoxHoldsFocus
     private val focusedBoxes = mutableListOf<PromptBox>()
-    private var thePromptBoxHasFocus = false
+    private var theBoxHoldingFocus: PromptBox? = null
 
     override fun setUp() {
         super.setUp()
         resetPromptBoxSettings()
         promptBoxFocusRequest = { box -> focusedBoxes.add(box) }
-        promptBoxHoldsFocus = { thePromptBoxHasFocus }
+        promptBoxHoldsFocus = { box -> box === theBoxHoldingFocus }
     }
 
     override fun tearDown() {
@@ -71,12 +71,26 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
         return service to host
     }
 
-    private fun launchTwoApps(): Triple<TuiAppLaunchService, FakeHost, List<Any>> {
+    private class TwoOpenTabs(
+        val service: TuiAppLaunchService,
+        val host: FakeHost,
+        val sessions: List<FakeSession>,
+    ) {
+        val tabs: List<Any> get() = host.tabs.toList()
+    }
+
+    private fun launchTwoAppsWithTheirSessions(): TwoOpenTabs {
         configureApps("claude", "codex")
-        val (service, host) = newService(listOf(FakeSession(), FakeSession()))
+        val sessions = listOf(FakeSession(), FakeSession())
+        val (service, host) = newService(sessions)
         service.toggle("TUILauncher.claude", "claude", "claude")
         service.toggle("TUILauncher.codex", "codex", "codex")
-        return Triple(service, host, host.tabs.toList())
+        return TwoOpenTabs(service, host, sessions)
+    }
+
+    private fun launchTwoApps(): Triple<TuiAppLaunchService, FakeHost, List<Any>> {
+        val open = launchTwoAppsWithTheirSessions()
+        return Triple(open.service, open.host, open.tabs)
     }
 
     private fun splitterOf(host: FakeHost, handle: Any): Splitter = host.componentOf(handle) as Splitter
@@ -86,6 +100,8 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
 
     private fun promptBoxIsVisibleIn(host: FakeHost, handle: Any): Boolean =
         promptBoxPanelOf(host, handle).isVisible
+
+    private fun promptBoxOf(host: FakeHost, handle: Any): PromptBox = promptBoxPanelOf(host, handle).promptBox
 
     fun testATabWrapsTheTerminalAndAHiddenPromptBoxInASplitter() {
         val session = FakeSession()
@@ -226,7 +242,7 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
 
     fun testShowingTheBoxFocusesItAndHidingItHandsTheKeyboardBackToTheTerminal() {
         val session = FakeSession()
-        val (service, _) = newService(listOf(session))
+        val (service, host) = newService(listOf(session))
         service.launchNew("claude", "claude")
         val sessionFocusCountBeforeTheToggle = session.focusCount
 
@@ -235,7 +251,7 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
         assertEquals(1, focusedBoxes.size)
         assertEquals(sessionFocusCountBeforeTheToggle, session.focusCount)
 
-        thePromptBoxHasFocus = true
+        theBoxHoldingFocus = promptBoxOf(host, host.tabs.single())
         service.setPromptBoxVisible(false)
 
         assertEquals(sessionFocusCountBeforeTheToggle + 1, session.focusCount)
@@ -251,6 +267,160 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
         service.setPromptBoxVisible(false)
 
         assertEquals(sessionFocusCountBeforeHiding, session.focusCount)
+    }
+
+    fun testSwitchingToTheNextTabWithTheCursorInTheBoxPutsItInThatTabsBox() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        open.service.setPromptBoxVisible(true)
+        host.selectTab(open.tabs[0])
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[0])
+        focusedBoxes.clear()
+        val sessionFocusCountsBeforeSwitching = open.sessions.map { it.focusCount }
+
+        open.service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[1], host.activeTab())
+        assertEquals(listOf(promptBoxOf(host, open.tabs[1])), focusedBoxes)
+        assertEquals(sessionFocusCountsBeforeSwitching, open.sessions.map { it.focusCount })
+    }
+
+    fun testSwitchingToTheNextTabFromTheSessionKeepsTheKeyboardInThatTabsSession() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        open.service.setPromptBoxVisible(true)
+        host.selectTab(open.tabs[0])
+        focusedBoxes.clear()
+        val codexSessionFocusCountBeforeSwitching = open.sessions[1].focusCount
+
+        open.service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[1], host.activeTab())
+        assertEmpty(focusedBoxes)
+        assertEquals(codexSessionFocusCountBeforeSwitching + 1, open.sessions[1].focusCount)
+    }
+
+    fun testSwitchingToATabWhoseBoxIsHiddenFocusesItsSessionAndLeavesTheBoxHidden() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        state().rememberPromptBoxVisibilityPerApp = true
+        appConfig("claude").promptBoxVisible = true
+        appConfig("codex").promptBoxVisible = false
+        host.selectTab(open.tabs[0])
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[0])
+        focusedBoxes.clear()
+        val codexSessionFocusCountBeforeSwitching = open.sessions[1].focusCount
+
+        open.service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[1], host.activeTab())
+        assertEmpty(focusedBoxes)
+        assertEquals(codexSessionFocusCountBeforeSwitching + 1, open.sessions[1].focusCount)
+        assertFalse(promptBoxIsVisibleIn(host, open.tabs[1]))
+        assertEquals(false, appConfig("codex").promptBoxVisible)
+    }
+
+    fun testSwitchingAwayFromATabWhoseBoxIsHiddenLandsInTheNextTabsSession() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        state().rememberPromptBoxVisibilityPerApp = true
+        appConfig("claude").promptBoxVisible = false
+        appConfig("codex").promptBoxVisible = true
+        host.selectTab(open.tabs[0])
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[0])
+        focusedBoxes.clear()
+        val codexSessionFocusCountBeforeSwitching = open.sessions[1].focusCount
+
+        open.service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[1], host.activeTab())
+        assertEmpty(focusedBoxes)
+        assertEquals(codexSessionFocusCountBeforeSwitching + 1, open.sessions[1].focusCount)
+        assertTrue(promptBoxIsVisibleIn(host, open.tabs[1]))
+    }
+
+    fun testTheCursorStaysInTheBoxWhileSwitchingWrapsAroundBothEndsOfTheStrip() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        open.service.setPromptBoxVisible(true)
+        host.selectTab(open.tabs[1])
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[1])
+        focusedBoxes.clear()
+        val sessionFocusCountsBeforeSwitching = open.sessions.map { it.focusCount }
+
+        open.service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[0], host.activeTab())
+
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[0])
+        open.service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[1], host.activeTab())
+        assertEquals(
+            listOf(promptBoxOf(host, open.tabs[0]), promptBoxOf(host, open.tabs[1])),
+            focusedBoxes,
+        )
+        assertEquals(sessionFocusCountsBeforeSwitching, open.sessions.map { it.focusCount })
+    }
+
+    fun testSwitchingToThePreviousTabWithTheCursorInTheBoxPutsItInThatTabsBox() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        open.service.setPromptBoxVisible(true)
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[1])
+        focusedBoxes.clear()
+        val sessionFocusCountsBeforeSwitching = open.sessions.map { it.focusCount }
+
+        open.service.previousTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[0], host.activeTab())
+        assertEquals(listOf(promptBoxOf(host, open.tabs[0])), focusedBoxes)
+        assertEquals(sessionFocusCountsBeforeSwitching, open.sessions.map { it.focusCount })
+    }
+
+    fun testSwitchingTabsWithASingleTabOpenLeavesTheCursorWhereItIs() {
+        val session = FakeSession()
+        val (service, host) = newService(listOf(session))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        theBoxHoldingFocus = promptBoxOf(host, host.tabs.single())
+        focusedBoxes.clear()
+        val sessionFocusCountBeforeSwitching = session.focusCount
+
+        service.nextTuiTab()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEmpty(focusedBoxes)
+        assertEquals(sessionFocusCountBeforeSwitching, session.focusCount)
+    }
+
+    fun testSwitchingTabsWithoutFocusMovesNeitherTheCursorNorTheKeyboard() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        open.service.setPromptBoxVisible(true)
+        host.selectTab(open.tabs[0])
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[0])
+        focusedBoxes.clear()
+        val sessionFocusCountsBeforeSwitching = open.sessions.map { it.focusCount }
+
+        open.service.nextTuiTabWithoutFocus()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[1], host.activeTab())
+
+        open.service.previousTuiTabWithoutFocus()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertSame(open.tabs[0], host.activeTab())
+        assertEmpty(focusedBoxes)
+        assertEquals(sessionFocusCountsBeforeSwitching, open.sessions.map { it.focusCount })
     }
 
     fun testShowingTheBoxStartsTheCopilotServerWhileCopilotIsTheCompletionSource() {
