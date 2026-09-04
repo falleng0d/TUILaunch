@@ -2,6 +2,7 @@ package com.github.atm1020.tuilaunch.services
 
 import com.github.atm1020.tuilaunch.action.DynamicUserAction
 import com.github.atm1020.tuilaunch.model.ACTION_ID_PREFIX
+import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.Constraints
@@ -28,6 +29,9 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         var rememberPromptBoxVisibilityPerApp: Boolean = false,
         var rememberPromptBoxSizePerApp: Boolean = false,
         var focusTuiAfterPromptBoxSend: Boolean = false,
+        var promptBoxCompletionSource: PromptBoxCompletionSource = PromptBoxCompletionSource.JETBRAINS_AI,
+        var copilotLanguageServerPath: String = "",
+        var copilotPromptHistoryContext: Boolean = true,
         var escapeModifier: String = "CTRL",
         var escapeKeyCode: Int? = null,
         var focusEditorKeyCode: Int? = null,

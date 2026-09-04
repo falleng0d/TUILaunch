@@ -1,7 +1,9 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
+import com.intellij.openapi.util.JDOMUtil
 import com.intellij.util.xmlb.SkipDefaultsSerializationFilter
 import com.intellij.util.xmlb.XmlSerializer
 import org.junit.Assert.assertEquals
@@ -158,6 +160,53 @@ class TuiLauncherSettingsSerializationTest {
         val restored = roundTrip(TuiLauncherSettings.State(focusPromptBoxKeyCode = KeyEvent.VK_B))
 
         assertEquals(KeyEvent.VK_B, restored.focusPromptBoxKeyCode)
+    }
+
+    @Test
+    fun `the prompt box asks JetBrains AI for completions with the PROMPT history as context`() {
+        val state = TuiLauncherSettings.State()
+
+        assertEquals(PromptBoxCompletionSource.JETBRAINS_AI, state.promptBoxCompletionSource)
+        assertEquals("", state.copilotLanguageServerPath)
+        assertTrue(state.copilotPromptHistoryContext)
+        assertFalse(optionNames(state).contains("promptBoxCompletionSource"))
+        assertFalse(optionNames(state).contains("copilotLanguageServerPath"))
+        assertFalse(optionNames(state).contains("copilotPromptHistoryContext"))
+    }
+
+    @Test
+    fun `a Copilot completion source with its own server path survives serialization`() {
+        val restored = roundTrip(
+            TuiLauncherSettings.State(
+                promptBoxCompletionSource = PromptBoxCompletionSource.COPILOT,
+                copilotLanguageServerPath = "/opt/copilot/copilot-language-server",
+                copilotPromptHistoryContext = false,
+            )
+        )
+
+        assertEquals(PromptBoxCompletionSource.COPILOT, restored.promptBoxCompletionSource)
+        assertEquals("/opt/copilot/copilot-language-server", restored.copilotLanguageServerPath)
+        assertFalse(restored.copilotPromptHistoryContext)
+    }
+
+    @Test
+    fun `an unknown stored completion source falls back to JetBrains AI without losing the other options`() {
+        val restored = XmlSerializer.deserialize(
+            JDOMUtil.load(
+                """
+                <State>
+                  <option name="promptBoxCompletionSource" value="TELEPATHY" />
+                  <option name="copilotLanguageServerPath" value="/opt/copilot/copilot-language-server" />
+                  <option name="copilotPromptHistoryContext" value="false" />
+                </State>
+                """.trimIndent()
+            ),
+            TuiLauncherSettings.State::class.java,
+        )
+
+        assertEquals(PromptBoxCompletionSource.JETBRAINS_AI, restored.promptBoxCompletionSource)
+        assertEquals("/opt/copilot/copilot-language-server", restored.copilotLanguageServerPath)
+        assertFalse(restored.copilotPromptHistoryContext)
     }
 
     private fun optionNames(state: TuiLauncherSettings.State): List<String> =

@@ -49,6 +49,14 @@
   keyboard to the terminal, and Up and Down move the cursor instead of browsing the history while a
   suggestion is showing. GitHub Copilot cannot complete here, because its agent only ever learns about
   files opened as editor tabs.
+- A "Prompt box completions" group in the TUILaunch settings holds the settings to choose GitHub
+  Copilot as the prompt box completion source instead of JetBrains AI Assistant, which stays the
+  default. Copilot is reached through the standalone Copilot Language Server, so it needs a Copilot
+  subscription and a Copilot client already signed in on this machine. "Copilot Language Server" takes
+  a binary of your own; left empty, the one that ships with the GitHub Copilot plugin or the one on
+  `PATH` is used, and the line under the field names what was found. "Include the PROMPT.md history as
+  completion context" decides whether the prompts already in the file travel with the draft, and
+  "Check Copilot status" reports who is signed in, for the path currently in the field.
 
 ## [0.7.0] - 2026-09-03
 

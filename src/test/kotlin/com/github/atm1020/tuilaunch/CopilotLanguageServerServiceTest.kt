@@ -21,6 +21,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -31,6 +32,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 class CopilotLanguageServerServiceTest {
 
@@ -157,6 +159,77 @@ class CopilotLanguageServerServiceTest {
         assertEquals(listOf("/opt/copilot/copilot-language-server"), requestedPaths)
     }
 
+    @Test
+    fun `a status check on a missing binary reports that nothing is configured`() {
+        val service = service(
+            locator = { CopilotServerLocation.NotFound("No GitHub Copilot language server found; tried nothing") },
+            processFactory = { throw AssertionError("no process may be started") },
+        )
+
+        val state = checkStatus(service, "/opt/copilot/copilot-language-server")
+
+        assertEquals(
+            CopilotServerState.NotConfigured("No GitHub Copilot language server found; tried nothing"),
+            state,
+        )
+    }
+
+    @Test
+    fun `a status check runs a server of its own and stops it again`() {
+        val process = FakeServerProcess()
+        startedProcesses += process
+        val starts = AtomicInteger()
+        val service = service(processFactory = {
+            starts.incrementAndGet()
+            process
+        })
+        serve(process, status("OK", "falleng0d"))
+
+        val state = checkStatus(service, "/fake/copilot-language-server")
+
+        assertEquals(CopilotServerState.Ready("falleng0d"), state)
+        assertEquals(1, starts.get())
+        assertTrue(process.isTerminated)
+        assertEquals(CopilotServerState.Stopped, service.state.value)
+    }
+
+    @Test
+    fun `a status check reuses the server that is already running`() {
+        val process = FakeServerProcess()
+        startedProcesses += process
+        val starts = AtomicInteger()
+        val service = service(processFactory = {
+            starts.incrementAndGet()
+            process
+        })
+        serve(process, status("OK", "falleng0d"))
+
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.Ready }
+        val state = checkStatus(service, "/fake/copilot-language-server")
+
+        assertEquals(CopilotServerState.Ready("falleng0d"), state)
+        assertEquals(1, starts.get())
+        assertFalse(process.isTerminated)
+    }
+
+    @Test
+    fun `a status check on a server that never answers fails`() {
+        val process = FakeServerProcess()
+        startedProcesses += process
+        val service = service(processFactory = { process }, handshakeTimeoutMs = 100L)
+
+        val state = checkStatus(service, "/fake/copilot-language-server")
+
+        assertTrue((state as CopilotServerState.Failed).reason.contains("did not answer"))
+        assertTrue(process.isTerminated)
+    }
+
+    private fun checkStatus(service: CopilotLanguageServerService, explicitPath: String): CopilotServerState =
+        runBlocking {
+            withTimeout(AWAIT_TIMEOUT_MS) { service.checkStatusNow(explicitPath) }
+        }
+
     private fun serviceStarting(process: FakeServerProcess): CopilotLanguageServerService {
         startedProcesses += process
         return service(processFactory = { process })
@@ -167,6 +240,7 @@ class CopilotLanguageServerServiceTest {
         processFactory: (String) -> CopilotServerProcess,
         locator: (String) -> CopilotServerLocation = { foundAt("/fake/copilot-language-server") },
         retryDelaysMs: List<Long> = listOf(1L),
+        handshakeTimeoutMs: Long = HANDSHAKE_TIMEOUT_MS,
     ) = CopilotLanguageServerService(
         scope,
         settings,
@@ -181,7 +255,7 @@ class CopilotLanguageServerServiceTest {
             )
         },
         retryDelaysMs,
-        HANDSHAKE_TIMEOUT_MS,
+        handshakeTimeoutMs,
     )
 
     private fun settingsWith(path: String) = object : CopilotServerSettings {

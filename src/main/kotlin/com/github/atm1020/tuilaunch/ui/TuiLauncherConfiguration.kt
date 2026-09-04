@@ -1,18 +1,29 @@
 package com.github.atm1020.tuilaunch.ui
 
+import com.github.atm1020.tuilaunch.copilot.CopilotServerControl
+import com.github.atm1020.tuilaunch.copilot.CopilotServerLocation
+import com.github.atm1020.tuilaunch.copilot.CopilotServerSource
+import com.github.atm1020.tuilaunch.copilot.CopilotServerState
+import com.github.atm1020.tuilaunch.copilot.InstalledCopilotServerControl
 import com.github.atm1020.tuilaunch.model.ACTION_ID_PREFIX
+import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiAppTableModel
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
@@ -25,9 +36,12 @@ import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.ListSelectionModel
+import javax.swing.event.DocumentEvent
 import javax.swing.event.TableModelEvent
 import javax.swing.table.AbstractTableModel
 import kotlin.reflect.KMutableProperty1
+
+private const val COPILOT_SERVER_PATH_FIELD_WIDTH = 320
 
 internal const val RESTORE_OPEN_TABS_LABEL = "Reopen TUI tabs when the project is opened"
 internal const val SUBMIT_PROMPT_ON_SEND_LABEL = "Send the prompt immediately instead of only typing it"
@@ -37,8 +51,41 @@ internal const val PROMPT_BOX_VISIBILITY_PER_APP_LABEL = "Remember the prompt bo
 internal const val PROMPT_BOX_SIZE_PER_APP_LABEL = "Remember the prompt box size per TUI app"
 internal const val FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL =
     "Move focus to the TUI after sending from the prompt box"
+internal const val PROMPT_BOX_COMPLETIONS_TITLE = "Prompt box completions"
+internal const val COMPLETION_SOURCE_LABEL = "Completion source"
+internal const val JETBRAINS_AI_COMPLETION_SOURCE_ITEM = "JetBrains AI Assistant"
+internal const val COPILOT_COMPLETION_SOURCE_ITEM = "GitHub Copilot"
+internal const val COPILOT_SERVER_PATH_LABEL = "Copilot Language Server"
+internal const val COPILOT_SERVER_PATH_PLACEHOLDER = "Auto-detect"
+internal const val COPILOT_PROMPT_HISTORY_CONTEXT_LABEL = "Include the PROMPT.md history as completion context"
+internal const val CHECK_COPILOT_STATUS_LABEL = "Check Copilot status"
+internal const val CHECKING_COPILOT_STATUS_TEXT = "Checking…"
+internal const val COPILOT_SERVER_HINT_NAME = "copilotServerHint"
+internal const val COPILOT_STATUS_NAME = "copilotStatus"
 
-class TuiLauncherConfiguration : Configurable {
+internal fun copilotServerHintText(location: CopilotServerLocation): String = when (location) {
+    is CopilotServerLocation.Found -> when (location.source) {
+        CopilotServerSource.EXPLICIT_PATH -> "Found at the configured path: ${location.path}"
+        CopilotServerSource.COPILOT_PLUGIN -> "Found in the GitHub Copilot plugin: ${location.path}"
+        CopilotServerSource.SYSTEM_PATH -> "Found on PATH: ${location.path}"
+    }
+    is CopilotServerLocation.NotFound -> "Not found: ${location.reason}"
+}
+
+internal fun copilotStatusText(state: CopilotServerState): String = when (state) {
+    is CopilotServerState.Ready ->
+        if (state.user.isNullOrBlank()) "Signed in" else "Signed in as ${state.user}"
+    CopilotServerState.NotSignedIn -> "Not signed in"
+    is CopilotServerState.NotConfigured -> "Not configured: ${state.reason}"
+    is CopilotServerState.Failed -> "Failed: ${state.reason}"
+    CopilotServerState.Starting, CopilotServerState.Stopped -> CHECKING_COPILOT_STATUS_TEXT
+}
+
+class TuiLauncherConfiguration internal constructor(
+    private val copilotServer: CopilotServerControl,
+) : Configurable {
+    constructor() : this(InstalledCopilotServerControl)
+
     private var tuiLauncherPanel: JPanel? = null
     private var tableModel: TuiAppTableModel? = null
     private var appsTable: JBTable? = null
@@ -52,6 +99,13 @@ class TuiLauncherConfiguration : Configurable {
     private var promptBoxVisibilityPerAppCheckBox: JBCheckBox? = null
     private var promptBoxSizePerAppCheckBox: JBCheckBox? = null
     private var focusTuiAfterPromptBoxSendCheckBox: JBCheckBox? = null
+    private var completionSourceCombo: JComboBox<String>? = null
+    private var copilotServerPathField: TextFieldWithBrowseButton? = null
+    private var copilotServerHintLabel: JBLabel? = null
+    private var copilotPromptHistoryContextCheckBox: JBCheckBox? = null
+    private var copilotStatusLabel: JBLabel? = null
+    private val copilotComponents = mutableListOf<JComponent>()
+    private var copilotStatusRequests = 0
     private var modifierCombo: JComboBox<String>? = null
     private val tmuxShortcutComponents = mutableListOf<JComponent>()
     private var shortcutsTable: JBTable? = null
@@ -91,8 +145,11 @@ class TuiLauncherConfiguration : Configurable {
 
     override fun getDisplayName(): String = "TUI Launcher"
 
+    private val autoDetectedServer: CopilotServerLocation by lazy { copilotServer.locate("") }
+
     override fun createComponent(): JComponent {
         tmuxShortcutComponents.clear()
+        copilotComponents.clear()
 
         val panel = JPanel(BorderLayout(0, 12)).apply {
             border = JBUI.Borders.empty(10)
@@ -151,7 +208,14 @@ class TuiLauncherConfiguration : Configurable {
 
     private fun createSessionAndKeybindingsPanel(): JComponent =
         JPanel(BorderLayout(0, 6)).apply {
-            add(createSessionOptionsPanel(), BorderLayout.NORTH)
+            add(
+                JPanel().apply {
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    add(createSessionOptionsPanel())
+                    add(createPromptBoxCompletionsPanel())
+                },
+                BorderLayout.NORTH,
+            )
             add(createTmuxKeybindingsPanel(), BorderLayout.CENTER)
         }
 
@@ -183,6 +247,98 @@ class TuiLauncherConfiguration : Configurable {
             add(promptBoxVisibilityCheckBox)
             add(promptBoxSizeCheckBox)
             add(focusTuiAfterSendCheckBox)
+        }
+    }
+
+    private fun createPromptBoxCompletionsPanel(): JComponent {
+        val sourceCombo = JComboBox(arrayOf(JETBRAINS_AI_COMPLETION_SOURCE_ITEM, COPILOT_COMPLETION_SOURCE_ITEM)).apply {
+            selectedItem = completionSourceItem()
+        }
+        completionSourceCombo = sourceCombo
+
+        val pathField = createCopilotServerPathField()
+        copilotServerPathField = pathField
+
+        val hintLabel = JBLabel("", UIUtil.ComponentStyle.SMALL, UIUtil.FontColor.BRIGHTER).apply {
+            name = COPILOT_SERVER_HINT_NAME
+        }
+        copilotServerHintLabel = hintLabel
+
+        val historyContextCheckBox =
+            JBCheckBox(COPILOT_PROMPT_HISTORY_CONTEXT_LABEL, settings.state.copilotPromptHistoryContext)
+        copilotPromptHistoryContextCheckBox = historyContextCheckBox
+
+        val statusLabel = JBLabel("").apply { name = COPILOT_STATUS_NAME }
+        copilotStatusLabel = statusLabel
+        val statusButton = JButton(CHECK_COPILOT_STATUS_LABEL).apply {
+            addActionListener { checkCopilotStatus() }
+        }
+
+        copilotComponents.addAll(listOf(pathField, hintLabel, historyContextCheckBox, statusButton, statusLabel))
+        sourceCombo.addActionListener { updateCopilotComponentsEnabled() }
+        updateCopilotServerHint()
+        updateCopilotComponentsEnabled()
+
+        return JPanel().apply {
+            border = BorderFactory.createTitledBorder(PROMPT_BOX_COMPLETIONS_TITLE)
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(formRow(JBLabel("$COMPLETION_SOURCE_LABEL:"), sourceCombo))
+            add(formRow(JBLabel("$COPILOT_SERVER_PATH_LABEL:"), pathField))
+            add(formRow(hintLabel))
+            add(formRow(historyContextCheckBox))
+            add(formRow(statusButton, statusLabel))
+        }
+    }
+
+    private fun createCopilotServerPathField(): TextFieldWithBrowseButton {
+        val textField = JBTextField().apply { emptyText.text = COPILOT_SERVER_PATH_PLACEHOLDER }
+        return TextFieldWithBrowseButton(textField).apply {
+            text = settings.state.copilotLanguageServerPath
+            preferredSize = Dimension(JBUI.scale(COPILOT_SERVER_PATH_FIELD_WIDTH), preferredSize.height)
+            addBrowseFolderListener(
+                null,
+                FileChooserDescriptorFactory.singleFile().withTitle("Select the GitHub Copilot Language Server"),
+            )
+            addDocumentListener(object : DocumentAdapter() {
+                override fun textChanged(event: DocumentEvent) = updateCopilotServerHint()
+            })
+        }
+    }
+
+    private fun completionSourceItem(): String =
+        if (settings.state.promptBoxCompletionSource == PromptBoxCompletionSource.COPILOT) {
+            COPILOT_COMPLETION_SOURCE_ITEM
+        } else {
+            JETBRAINS_AI_COMPLETION_SOURCE_ITEM
+        }
+
+    private fun selectedCompletionSource(): PromptBoxCompletionSource =
+        if (completionSourceCombo?.selectedItem == COPILOT_COMPLETION_SOURCE_ITEM) {
+            PromptBoxCompletionSource.COPILOT
+        } else {
+            PromptBoxCompletionSource.JETBRAINS_AI
+        }
+
+    private fun typedCopilotServerPath(): String = copilotServerPathField?.text?.trim() ?: ""
+
+    private fun updateCopilotComponentsEnabled() {
+        val copilotSelected = selectedCompletionSource() == PromptBoxCompletionSource.COPILOT
+        copilotComponents.forEach { it.isEnabled = copilotSelected }
+    }
+
+    private fun updateCopilotServerHint() {
+        val hintLabel = copilotServerHintLabel ?: return
+        val typedPath = typedCopilotServerPath()
+        val location = if (typedPath.isEmpty()) autoDetectedServer else copilotServer.locate(typedPath)
+        hintLabel.text = copilotServerHintText(location)
+    }
+
+    private fun checkCopilotStatus() {
+        val statusLabel = copilotStatusLabel ?: return
+        val request = ++copilotStatusRequests
+        statusLabel.text = CHECKING_COPILOT_STATUS_TEXT
+        copilotServer.checkStatus(typedCopilotServerPath()) { state ->
+            if (request == copilotStatusRequests) statusLabel.text = copilotStatusText(state)
         }
     }
 
@@ -236,9 +392,9 @@ class TuiLauncherConfiguration : Configurable {
 
         val shortcutPanel = JPanel(BorderLayout(8, 6)).apply {
             border = BorderFactory.createTitledBorder("Tmux-like keybindings")
-            add(shortcutRow(JBLabel("Prefix modifier:"), combo, JBLabel("Select a row, then press a key. Delete/Backspace clears.")), BorderLayout.NORTH)
+            add(formRow(JBLabel("Prefix modifier:"), combo, JBLabel("Select a row, then press a key. Delete/Backspace clears.")), BorderLayout.NORTH)
             add(JBScrollPane(table), BorderLayout.CENTER)
-            add(shortcutRow(recordButton, clearButton), BorderLayout.SOUTH)
+            add(formRow(recordButton, clearButton), BorderLayout.SOUTH)
         }
 
         tmuxShortcutComponents.addAll(listOf(combo, table, recordButton, clearButton))
@@ -288,7 +444,7 @@ class TuiLauncherConfiguration : Configurable {
         clearShortcutButton?.isEnabled = tmuxEnabled && selectedShortcutModelRow() != null
     }
 
-    private fun shortcutRow(vararg components: JComponent): JPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 2)).apply {
+    private fun formRow(vararg components: JComponent): JPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 2)).apply {
         components.forEach { add(it) }
     }
 
@@ -416,11 +572,22 @@ class TuiLauncherConfiguration : Configurable {
         promptBoxVisibilityPerAppCheckBox?.isSelected = settings.state.rememberPromptBoxVisibilityPerApp
         promptBoxSizePerAppCheckBox?.isSelected = settings.state.rememberPromptBoxSizePerApp
         focusTuiAfterPromptBoxSendCheckBox?.isSelected = settings.state.focusTuiAfterPromptBoxSend
+        completionSourceCombo?.selectedItem = completionSourceItem()
+        copilotServerPathField?.text = settings.state.copilotLanguageServerPath
+        copilotPromptHistoryContextCheckBox?.isSelected = settings.state.copilotPromptHistoryContext
+        copilotStatusLabel?.text = ""
+        copilotStatusRequests++
         modifierCombo?.selectedItem = modifierComboItem()
         builtInShortcuts.forEach { it.keyCode = it.stateProperty.get(settings.state) }
 
         refreshShortcutBindings()
+        updateCopilotServerHint()
+        updateCopilotComponentsEnabled()
         updateTmuxShortcutComponentsEnabled()
+    }
+
+    override fun disposeUIResources() {
+        copilotStatusRequests++
     }
 
     private fun modifierComboItem(): String = if (settings.state.escapeModifier == "ALT") "Alt" else "Ctrl"
@@ -435,6 +602,9 @@ class TuiLauncherConfiguration : Configurable {
         rememberPromptBoxVisibilityPerApp = promptBoxVisibilityPerAppCheckBox?.isSelected == true,
         rememberPromptBoxSizePerApp = promptBoxSizePerAppCheckBox?.isSelected == true,
         focusTuiAfterPromptBoxSend = focusTuiAfterPromptBoxSendCheckBox?.isSelected == true,
+        promptBoxCompletionSource = selectedCompletionSource(),
+        copilotLanguageServerPath = typedCopilotServerPath(),
+        copilotPromptHistoryContext = copilotPromptHistoryContextCheckBox?.isSelected == true,
         escapeModifier = selectedEscapeModifier(),
     ).also { edited ->
         builtInShortcuts.forEach { it.stateProperty.set(edited, it.keyCode) }
@@ -458,9 +628,29 @@ class TuiLauncherConfiguration : Configurable {
         settings.state.rememberPromptBoxVisibilityPerApp = promptBoxVisibilityPerAppCheckBox?.isSelected == true
         settings.state.rememberPromptBoxSizePerApp = promptBoxSizePerAppCheckBox?.isSelected == true
         settings.state.focusTuiAfterPromptBoxSend = focusTuiAfterPromptBoxSendCheckBox?.isSelected == true
+        applyCompletionSource()
         settings.state.escapeModifier = selectedEscapeModifier()
         builtInShortcuts.forEach { it.stateProperty.set(settings.state, it.keyCode) }
         settings.loadActions()
+    }
+
+    private fun applyCompletionSource() {
+        val previousSource = settings.state.promptBoxCompletionSource
+        val previousPath = settings.state.copilotLanguageServerPath
+        val source = selectedCompletionSource()
+        val path = typedCopilotServerPath()
+        settings.state.promptBoxCompletionSource = source
+        settings.state.copilotLanguageServerPath = path
+        settings.state.copilotPromptHistoryContext = copilotPromptHistoryContextCheckBox?.isSelected == true
+
+        val stayedOnCopilot = previousSource == PromptBoxCompletionSource.COPILOT &&
+            source == PromptBoxCompletionSource.COPILOT
+        val leftCopilot = previousSource == PromptBoxCompletionSource.COPILOT &&
+            source != PromptBoxCompletionSource.COPILOT
+        when {
+            stayedOnCopilot && path != previousPath -> copilotServer.restart()
+            leftCopilot -> copilotServer.stop()
+        }
     }
 
     private fun unregisterRemovedActions(newApps: List<TuiAppConfig>) {

@@ -1,32 +1,52 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.copilot.CopilotServerControl
+import com.github.atm1020.tuilaunch.copilot.CopilotServerLocation
+import com.github.atm1020.tuilaunch.copilot.CopilotServerSource
+import com.github.atm1020.tuilaunch.copilot.CopilotServerState
+import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiAppTableModel
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.github.atm1020.tuilaunch.ui.APPEND_PROMPT_SEPARATOR_LABEL
+import com.github.atm1020.tuilaunch.ui.CHECKING_COPILOT_STATUS_TEXT
+import com.github.atm1020.tuilaunch.ui.CHECK_COPILOT_STATUS_LABEL
+import com.github.atm1020.tuilaunch.ui.COPILOT_COMPLETION_SOURCE_ITEM
+import com.github.atm1020.tuilaunch.ui.COPILOT_PROMPT_HISTORY_CONTEXT_LABEL
+import com.github.atm1020.tuilaunch.ui.COPILOT_SERVER_HINT_NAME
+import com.github.atm1020.tuilaunch.ui.COPILOT_SERVER_PATH_PLACEHOLDER
+import com.github.atm1020.tuilaunch.ui.COPILOT_STATUS_NAME
 import com.github.atm1020.tuilaunch.ui.FOCUS_PROMPT_FILE_LABEL
 import com.github.atm1020.tuilaunch.ui.FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL
+import com.github.atm1020.tuilaunch.ui.JETBRAINS_AI_COMPLETION_SOURCE_ITEM
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_SIZE_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_VISIBILITY_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.RESTORE_OPEN_TABS_LABEL
 import com.github.atm1020.tuilaunch.ui.SUBMIT_PROMPT_ON_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
 import com.intellij.openapi.options.ConfigurationException
+import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.ui.components.JBTextField
 import java.awt.Component
 import java.awt.Container
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
+import java.nio.file.Path
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
+import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JTable
 
 class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
+    private lateinit var copilotServer: FakeCopilotServerControl
+
     override fun setUp() {
         super.setUp()
+        copilotServer = FakeCopilotServerControl()
         TuiLauncherSettings.getInstance().state.apply {
             tuiApps.clear()
             tmuxKeybindingsEnabled = true
@@ -39,6 +59,9 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             rememberPromptBoxVisibilityPerApp = false
             rememberPromptBoxSizePerApp = false
             focusTuiAfterPromptBoxSend = false
+            promptBoxCompletionSource = PromptBoxCompletionSource.JETBRAINS_AI
+            copilotLanguageServerPath = ""
+            copilotPromptHistoryContext = true
             escapeModifier = "CTRL"
             escapeKeyCode = null
             focusEditorKeyCode = null
@@ -53,7 +76,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testKeySelectionPanelUsesKeymapLikeShortcutTable() {
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
         val table = findShortcutTable(component)!!
 
         assertEquals("Action", table.columnModel.getColumn(0).headerValue)
@@ -65,7 +88,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.tuiApps.add(TuiAppConfig(name = "htop", command = "htop"))
 
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
         assertEquals(10, shortcutTable.rowCount)
@@ -73,7 +96,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testAddingAppAddsLaunchShortcutRow() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val appsTable = findAppsTable(component)!!
         val shortcutTable = findShortcutTable(component)!!
@@ -90,7 +113,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.tmuxKeybindingsEnabled = true
         settings.state.tuiApps.add(TuiAppConfig(name = "lazygit", command = "lazygit"))
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, "Enable tmux-like prefix keybindings")!!
 
@@ -105,7 +128,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.closeTuiKeyCode = KeyEvent.VK_G
         settings.state.tuiApps.add(TuiAppConfig(name = "lazygit", command = "lazygit", shortcutKeyCode = KeyEvent.VK_G))
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertApplyRejects(configurable, "already assigned")
@@ -116,7 +139,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.focusEditorKeyCode = KeyEvent.VK_X
         settings.state.closeTuiKeyCode = KeyEvent.VK_X
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertApplyRejects(configurable, "already assigned")
@@ -126,7 +149,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.tuiApps.add(TuiAppConfig(name = "", command = "lazygit"))
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertApplyRejects(configurable, "name cannot be empty")
@@ -136,7 +159,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.tuiApps.add(TuiAppConfig(name = "lazygit", command = "lazygit"))
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val appsTable = findAppsTable(component)!!
         (appsTable.model as TuiAppTableModel).addRow(TuiAppConfig(name = "broken", command = ""))
@@ -155,7 +178,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.tuiApps.add(TuiAppConfig(name = "lazygit", command = ""))
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertApplyRejects(configurable, "command cannot be empty")
@@ -165,7 +188,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.escapeKeyCode = KeyEvent.VK_B
 
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
         assertEquals(-1, shortcutTable.selectedRow)
@@ -175,7 +198,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testAssigningShortcutWithoutSelectionLeavesShortcutsUntouched() {
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
         assertEquals(-1, shortcutTable.selectedRow)
@@ -187,7 +210,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testRemoveShortcutButtonIsDisabledWithoutSelection() {
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
         val removeButton = findButton(component, "Remove Shortcut")!!
 
@@ -201,7 +224,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testConfigurableWithoutComponentIsNotModified() {
-        assertFalse(TuiLauncherConfiguration().isModified())
+        assertFalse(configuration().isModified())
     }
 
     fun testUneditedPanelIsNotModified() {
@@ -220,7 +243,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             )
         )
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
         configurable.reset()
 
@@ -248,7 +271,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.tuiApps.add(TuiAppConfig(name = "alpha", command = "alpha"))
         settings.state.tuiApps.add(TuiAppConfig(name = "beta", command = "beta"))
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val appsModel = findAppsTable(component)!!.model as TuiAppTableModel
 
@@ -261,7 +284,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testAssignedShortcutIsModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
@@ -284,7 +307,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testToggledTmuxCheckBoxIsModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         findCheckBox(component, "Enable tmux-like prefix keybindings")!!.isSelected = false
@@ -293,10 +316,10 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testChangedPrefixModifierIsModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
-        findComponent<JComboBox<*>>(component) { it.itemCount == 2 }!!.selectedItem = "Alt"
+        findModifierCombo(component)!!.selectedItem = "Alt"
 
         assertTrue(configurable.isModified())
     }
@@ -343,7 +366,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testResetRestoresTmuxKeybindingsCheckBox() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, "Enable tmux-like prefix keybindings")!!
 
@@ -361,7 +384,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.tmuxKeybindingsEnabled = false
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, "Enable tmux-like prefix keybindings")!!
         val recordButton = findButton(component, "Record Shortcut")!!
@@ -379,9 +402,9 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testResetRestoresPrefixModifier() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
-        val combo = findComponent<JComboBox<*>>(component) { it.itemCount == 2 }!!
+        val combo = findModifierCombo(component)!!
 
         combo.selectedItem = "Alt"
         configurable.reset()
@@ -394,7 +417,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.escapeKeyCode = KeyEvent.VK_B
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
@@ -431,7 +454,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.tuiApps.add(TuiAppConfig(name = "alpha", command = "alpha"))
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val appsTable = findAppsTable(component)!!
         val shortcutTable = findShortcutTable(component)!!
@@ -455,19 +478,19 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.focusEditorKeyCode = KeyEvent.VK_X
         settings.state.tuiApps.add(TuiAppConfig(name = "lazygit", command = "lazygit", shortcutKeyCode = KeyEvent.VK_G))
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         configurable.reset()
 
         val shortcutTable = findShortcutTable(component)!!
         assertEquals("X", shortcutTable.model.getValueAt(1, 1))
         assertEquals("G", shortcutTable.model.getValueAt(9, 1))
-        assertEquals("Alt", findComponent<JComboBox<*>>(component) { it.itemCount == 2 }!!.selectedItem)
+        assertEquals("Alt", findModifierCombo(component)!!.selectedItem)
         assertFalse(configurable.isModified())
     }
 
     fun testResetWithoutComponentIsSafe() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
 
         configurable.reset()
 
@@ -475,7 +498,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testRestoreOpenTabsCheckBoxIsPresentAndOffByDefault() {
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
 
         val checkbox = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)
 
@@ -485,7 +508,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     fun testRestoreOpenTabsCheckBoxPersistsTheEnabledFlag() {
         val settings = TuiLauncherSettings.getInstance()
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
 
@@ -499,7 +522,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.restoreOpenTabs = true
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
         assertTrue(checkbox.isSelected)
@@ -511,7 +534,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testTogglingRestoreOpenTabsMarksThePanelModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         assertFalse(configurable.isModified())
@@ -521,7 +544,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testResetRestoresTheRestoreOpenTabsCheckBox() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
 
@@ -533,7 +556,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testThePromptSendingCheckBoxesArePresentAndOnByDefault() {
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
 
         assertTrue(findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!.isSelected)
         assertTrue(findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!.isSelected)
@@ -542,7 +565,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     fun testTurningTheFocusPromptFileFlagOffIsPersisted() {
         val settings = TuiLauncherSettings.getInstance()
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         findCheckBox(component, FOCUS_PROMPT_FILE_LABEL)!!.isSelected = false
@@ -557,7 +580,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.focusPromptFileAfterSend = false
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, FOCUS_PROMPT_FILE_LABEL)!!
         assertFalse(checkbox.isSelected)
@@ -569,7 +592,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testTogglingTheFocusPromptFileFlagMarksThePanelModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         assertFalse(configurable.isModified())
@@ -579,7 +602,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testResetRestoresTheFocusPromptFileCheckBox() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, FOCUS_PROMPT_FILE_LABEL)!!
 
@@ -593,7 +616,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     fun testAnUntouchedPanelIsUnmodifiedWithTheFocusPromptFileFlagOff() {
         TuiLauncherSettings.getInstance().state.focusPromptFileAfterSend = false
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertFalse(configurable.isModified())
@@ -601,7 +624,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     fun testTurningSubmitPromptOnSendOffIsPersisted() {
         val settings = TuiLauncherSettings.getInstance()
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!.isSelected = false
@@ -613,7 +636,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     fun testTurningTheAppendPromptSeparatorOffIsPersisted() {
         val settings = TuiLauncherSettings.getInstance()
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!.isSelected = false
@@ -628,7 +651,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.submitPromptOnSend = false
         settings.state.appendPromptSeparatorOnSend = false
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         assertFalse(findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!.isSelected)
         assertFalse(findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!.isSelected)
@@ -642,7 +665,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testTogglingSubmitPromptOnSendMarksThePanelModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         assertFalse(configurable.isModified())
@@ -652,7 +675,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testTogglingTheAppendPromptSeparatorMarksThePanelModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         assertFalse(configurable.isModified())
@@ -662,7 +685,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testResetRestoresBothPromptSendingCheckBoxes() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val submitCheckBox = findCheckBox(component, SUBMIT_PROMPT_ON_SEND_LABEL)!!
         val separatorCheckBox = findCheckBox(component, APPEND_PROMPT_SEPARATOR_LABEL)!!
@@ -680,7 +703,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         TuiLauncherSettings.getInstance().state.submitPromptOnSend = false
         TuiLauncherSettings.getInstance().state.appendPromptSeparatorOnSend = false
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertFalse(configurable.isModified())
@@ -689,14 +712,14 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     fun testAnUntouchedPanelIsUnmodifiedWithRestoreOpenTabsOn() {
         TuiLauncherSettings.getInstance().state.restoreOpenTabs = true
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertFalse(configurable.isModified())
     }
 
     fun testThePromptBoxPerAppCheckBoxesArePresentAndOffByDefault() {
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
 
         assertFalse(findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!.isSelected)
         assertFalse(findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!.isSelected)
@@ -704,7 +727,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     fun testTurningThePromptBoxPerAppModesOnIsPersisted() {
         val settings = TuiLauncherSettings.getInstance()
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!.isSelected = true
@@ -720,7 +743,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.rememberPromptBoxVisibilityPerApp = true
         settings.state.rememberPromptBoxSizePerApp = true
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         assertTrue(findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!.isSelected)
         assertTrue(findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!.isSelected)
@@ -734,7 +757,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testTogglingAPromptBoxPerAppModeMarksThePanelModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         assertFalse(configurable.isModified())
@@ -744,7 +767,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testResetRestoresBothPromptBoxPerAppCheckBoxes() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val visibilityCheckBox = findCheckBox(component, PROMPT_BOX_VISIBILITY_PER_APP_LABEL)!!
         val sizeCheckBox = findCheckBox(component, PROMPT_BOX_SIZE_PER_APP_LABEL)!!
@@ -762,21 +785,21 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         TuiLauncherSettings.getInstance().state.rememberPromptBoxVisibilityPerApp = true
         TuiLauncherSettings.getInstance().state.rememberPromptBoxSizePerApp = true
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertFalse(configurable.isModified())
     }
 
     fun testTheFocusTuiAfterSendCheckBoxIsPresentAndOffByDefault() {
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
 
         assertFalse(findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!.isSelected)
     }
 
     fun testTurningTheFocusTuiAfterSendFlagOnIsPersisted() {
         val settings = TuiLauncherSettings.getInstance()
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!.isSelected = true
@@ -789,7 +812,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val settings = TuiLauncherSettings.getInstance()
         settings.state.focusTuiAfterPromptBoxSend = true
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!
         assertTrue(checkbox.isSelected)
@@ -801,7 +824,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testTogglingTheFocusTuiAfterSendFlagMarksThePanelModified() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
 
         assertFalse(configurable.isModified())
@@ -811,7 +834,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testResetRestoresTheFocusTuiAfterSendCheckBox() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val checkbox = findCheckBox(component, FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL)!!
 
@@ -825,14 +848,14 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     fun testAnUntouchedPanelIsUnmodifiedWithTheFocusTuiAfterSendFlagOn() {
         TuiLauncherSettings.getInstance().state.focusTuiAfterPromptBoxSend = true
 
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         configurable.createComponent()
 
         assertFalse(configurable.isModified())
     }
 
     fun testFocusingThePromptBoxIsTheLastBuiltInPrefixCommandRow() {
-        val component = TuiLauncherConfiguration().createComponent() as JPanel
+        val component = configuration().createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
         assertEquals(9, shortcutTable.rowCount)
@@ -842,7 +865,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     fun testAssigningThePromptBoxPrefixKeyIsPersisted() {
         val settings = TuiLauncherSettings.getInstance()
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
@@ -857,7 +880,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
     }
 
     fun testResetRestoresThePromptBoxPrefixKey() {
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         val component = configurable.createComponent() as JPanel
         val shortcutTable = findShortcutTable(component)!!
 
@@ -869,9 +892,242 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertFalse(configurable.isModified())
     }
 
+    fun testThePromptBoxAsksJetBrainsAiForCompletionsUntilCopilotIsChosen() {
+        val component = configuration().createComponent() as JPanel
+
+        assertEquals(JETBRAINS_AI_COMPLETION_SOURCE_ITEM, findCompletionSourceCombo(component)!!.selectedItem)
+        assertEquals(
+            listOf(JETBRAINS_AI_COMPLETION_SOURCE_ITEM, COPILOT_COMPLETION_SOURCE_ITEM),
+            comboItems(findCompletionSourceCombo(component)!!),
+        )
+        assertFalse(findServerPathField(component)!!.isEnabled)
+        assertFalse(findLabel(component, COPILOT_SERVER_HINT_NAME)!!.isEnabled)
+        assertFalse(findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isEnabled)
+        assertFalse(findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.isEnabled)
+    }
+
+    fun testChoosingGitHubCopilotEnablesItsSettings() {
+        val component = configuration().createComponent() as JPanel
+
+        findCompletionSourceCombo(component)!!.selectedItem = COPILOT_COMPLETION_SOURCE_ITEM
+
+        assertTrue(findServerPathField(component)!!.isEnabled)
+        assertTrue(findLabel(component, COPILOT_SERVER_HINT_NAME)!!.isEnabled)
+        assertTrue(findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isEnabled)
+        assertTrue(findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.isEnabled)
+    }
+
+    fun testTheServerPathFieldOffersAutoDetectionAndTheHistoryContextIsOn() {
+        val component = configuration().createComponent() as JPanel
+
+        assertEquals("", findServerPathField(component)!!.text)
+        assertEquals(COPILOT_SERVER_PATH_PLACEHOLDER, serverPathPlaceholder(component))
+        assertTrue(findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isSelected)
+    }
+
+    fun testTheHintNamesTheAutoDetectedServerAndThenTheTypedOne() {
+        copilotServer.locations = { path ->
+            if (path.isEmpty()) foundInPlugin("/plugins/copilot/copilot-language-server") else foundAt(path)
+        }
+        val component = configuration().createComponent() as JPanel
+
+        assertEquals(
+            "Found in the GitHub Copilot plugin: /plugins/copilot/copilot-language-server",
+            findLabel(component, COPILOT_SERVER_HINT_NAME)!!.text,
+        )
+
+        findServerPathField(component)!!.text = "/opt/copilot/copilot-language-server"
+
+        assertEquals(
+            "Found at the configured path: /opt/copilot/copilot-language-server",
+            findLabel(component, COPILOT_SERVER_HINT_NAME)!!.text,
+        )
+        assertEquals(listOf("", "/opt/copilot/copilot-language-server"), copilotServer.locatedPaths)
+    }
+
+    fun testChoosingGitHubCopilotIsPersistedWithoutStartingTheServer() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        findCompletionSourceCombo(component)!!.selectedItem = COPILOT_COMPLETION_SOURCE_ITEM
+        findServerPathField(component)!!.text = "/opt/copilot/copilot-language-server"
+        findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isSelected = false
+        assertTrue(configurable.isModified())
+        configurable.apply()
+
+        assertEquals(PromptBoxCompletionSource.COPILOT, settings.state.promptBoxCompletionSource)
+        assertEquals("/opt/copilot/copilot-language-server", settings.state.copilotLanguageServerPath)
+        assertFalse(settings.state.copilotPromptHistoryContext)
+        assertEquals(0, copilotServer.restarts)
+        assertEquals(0, copilotServer.stops)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testAChangedServerPathRestartsTheServerWhileCopilotStaysSelected() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.promptBoxCompletionSource = PromptBoxCompletionSource.COPILOT
+        settings.state.copilotLanguageServerPath = "/opt/copilot/copilot-language-server"
+
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        findServerPathField(component)!!.text = "/usr/local/bin/copilot-language-server"
+        configurable.apply()
+
+        assertEquals("/usr/local/bin/copilot-language-server", settings.state.copilotLanguageServerPath)
+        assertEquals(1, copilotServer.restarts)
+        assertEquals(0, copilotServer.stops)
+    }
+
+    fun testAnUnchangedServerPathLeavesTheServerAlone() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.promptBoxCompletionSource = PromptBoxCompletionSource.COPILOT
+        settings.state.copilotLanguageServerPath = "/opt/copilot/copilot-language-server"
+
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isSelected = false
+        configurable.apply()
+
+        assertEquals(0, copilotServer.restarts)
+        assertEquals(0, copilotServer.stops)
+    }
+
+    fun testGoingBackToJetBrainsAiStopsTheServer() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.promptBoxCompletionSource = PromptBoxCompletionSource.COPILOT
+
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        assertEquals(COPILOT_COMPLETION_SOURCE_ITEM, findCompletionSourceCombo(component)!!.selectedItem)
+
+        findCompletionSourceCombo(component)!!.selectedItem = JETBRAINS_AI_COMPLETION_SOURCE_ITEM
+        configurable.apply()
+
+        assertEquals(PromptBoxCompletionSource.JETBRAINS_AI, settings.state.promptBoxCompletionSource)
+        assertEquals(1, copilotServer.stops)
+        assertEquals(0, copilotServer.restarts)
+    }
+
+    fun testTogglingTheHistoryContextMarksThePanelModified() {
+        TuiLauncherSettings.getInstance().state.promptBoxCompletionSource = PromptBoxCompletionSource.COPILOT
+
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresTheCompletionSettingsAndTheirEnabledState() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        findCompletionSourceCombo(component)!!.selectedItem = COPILOT_COMPLETION_SOURCE_ITEM
+        findServerPathField(component)!!.text = "/opt/copilot/copilot-language-server"
+        findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.doClick()
+        configurable.reset()
+
+        assertEquals(JETBRAINS_AI_COMPLETION_SOURCE_ITEM, findCompletionSourceCombo(component)!!.selectedItem)
+        assertEquals("", findServerPathField(component)!!.text)
+        assertTrue(findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isSelected)
+        assertFalse(findServerPathField(component)!!.isEnabled)
+        assertFalse(findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.isEnabled)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testAnUntouchedPanelIsUnmodifiedWithCopilotSelected() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.promptBoxCompletionSource = PromptBoxCompletionSource.COPILOT
+        settings.state.copilotLanguageServerPath = "/opt/copilot/copilot-language-server"
+        settings.state.copilotPromptHistoryContext = false
+
+        val configurable = configuration()
+        configurable.createComponent()
+
+        assertFalse(configurable.isModified())
+    }
+
+    fun testTheStatusCheckReportsTheSignedInUserForTheTypedPath() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        findCompletionSourceCombo(component)!!.selectedItem = COPILOT_COMPLETION_SOURCE_ITEM
+        findServerPathField(component)!!.text = "/opt/copilot/copilot-language-server"
+
+        findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.doClick()
+
+        assertEquals(listOf("/opt/copilot/copilot-language-server"), copilotServer.statusRequests)
+        assertEquals(CHECKING_COPILOT_STATUS_TEXT, findLabel(component, COPILOT_STATUS_NAME)!!.text)
+
+        copilotServer.answerStatus(CopilotServerState.Ready("falleng0d"))
+
+        assertEquals("Signed in as falleng0d", findLabel(component, COPILOT_STATUS_NAME)!!.text)
+    }
+
+    fun testAStatusResultThatArrivesAfterAResetIsDropped() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        findCompletionSourceCombo(component)!!.selectedItem = COPILOT_COMPLETION_SOURCE_ITEM
+
+        findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.doClick()
+        configurable.reset()
+        copilotServer.answerStatus(CopilotServerState.NotSignedIn)
+
+        assertEquals("", findLabel(component, COPILOT_STATUS_NAME)!!.text)
+    }
+
+    private fun configuration(): TuiLauncherConfiguration = TuiLauncherConfiguration(copilotServer)
+
+    private fun foundAt(path: String): CopilotServerLocation =
+        CopilotServerLocation.Found(Path.of(path), CopilotServerSource.EXPLICIT_PATH)
+
+    private fun foundInPlugin(path: String): CopilotServerLocation =
+        CopilotServerLocation.Found(Path.of(path), CopilotServerSource.COPILOT_PLUGIN)
+
+    private fun comboItems(combo: JComboBox<*>): List<Any?> = (0 until combo.itemCount).map { combo.getItemAt(it) }
+
+    private fun serverPathPlaceholder(component: JPanel): String =
+        (findServerPathField(component)!!.textField as JBTextField).emptyText.text
+
+    private class FakeCopilotServerControl : CopilotServerControl {
+        var locations: (String) -> CopilotServerLocation = { CopilotServerLocation.NotFound("nothing was tried") }
+        val locatedPaths = mutableListOf<String>()
+        val statusRequests = mutableListOf<String>()
+        var restarts = 0
+        var stops = 0
+
+        private var pendingStatusResult: ((CopilotServerState) -> Unit)? = null
+
+        override fun locate(explicitPath: String): CopilotServerLocation {
+            locatedPaths += explicitPath
+            return locations(explicitPath)
+        }
+
+        override fun checkStatus(explicitPath: String, onResult: (CopilotServerState) -> Unit) {
+            statusRequests += explicitPath
+            pendingStatusResult = onResult
+        }
+
+        override fun restart() {
+            restarts++
+        }
+
+        override fun stop() {
+            stops++
+        }
+
+        fun answerStatus(state: CopilotServerState) {
+            val result = pendingStatusResult ?: throw AssertionError("no status check is waiting for a result")
+            pendingStatusResult = null
+            result(state)
+        }
+    }
+
     private fun configurableWithApp(name: String): Pair<TuiLauncherConfiguration, JPanel> {
         TuiLauncherSettings.getInstance().state.tuiApps.add(TuiAppConfig(name = name, command = name))
-        val configurable = TuiLauncherConfiguration()
+        val configurable = configuration()
         return configurable to (configurable.createComponent() as JPanel)
     }
 
@@ -912,6 +1168,18 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     private fun findButton(container: Container, text: String): JButton? =
         findComponent<JButton>(container) { it.text == text }
+
+    private fun findLabel(container: Container, name: String): JLabel? =
+        findComponent<JLabel>(container) { it.name == name }
+
+    private fun findServerPathField(container: Container): TextFieldWithBrowseButton? =
+        findComponent<TextFieldWithBrowseButton>(container) { true }
+
+    private fun findModifierCombo(container: Container): JComboBox<*>? =
+        findComponent<JComboBox<*>>(container) { it.getItemAt(0) == "Ctrl" }
+
+    private fun findCompletionSourceCombo(container: Container): JComboBox<*>? =
+        findComponent<JComboBox<*>>(container) { it.getItemAt(0) == JETBRAINS_AI_COMPLETION_SOURCE_ITEM }
 
     private fun findAppsTable(container: Container): JTable? =
         findComponent<JTable>(container) { it.columnCount == 4 }

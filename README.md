@@ -90,6 +90,17 @@ appended to the file verbatim and comes back as several separate history entries
 <kbd>Escape</kbd> in the box hands the keyboard to that tab's terminal, after dropping a text selection or closing a
 completion popup first, as <kbd>Escape</kbd> does in any editor.
 
+A **Prompt box completions** group in the TUILaunch settings decides where the box asks for its inline completions.
+**Completion source** offers **JetBrains AI Assistant**, which is the default, and **GitHub Copilot**. Copilot is
+reached through the standalone Copilot Language Server rather than through the JetBrains Copilot plugin, so it needs a
+Copilot subscription and a Copilot client already signed in on this machine; TUILaunch reuses the credentials that
+client stored and never asks for a login of its own. Leave **Copilot Language Server** empty and the binary is looked
+up in the installed GitHub Copilot plugin first and on `PATH` (`copilot-language-server`) second, and the line under
+the field names what was found; fill it in to use a binary of your own, such as one installed with
+`npm i -g @github/copilot-language-server`. **Include the PROMPT.md history as completion context** decides whether
+the prompts already recorded in `PROMPT.md` travel with the draft as context. **Check Copilot status** asks the server
+who is signed in, using the path currently in the field, so a path can be tried before the settings are applied.
+
 Three more actions ship with no shortcut and can be given one in <kbd>Settings/Preferences</kbd> > <kbd>Keymap</kbd>:
 
 - `TUILauncher.FocusPromptBox` — show the prompt box of the active TUI tab and put the cursor in it, from the editor,
@@ -285,6 +296,8 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - Every capability or `copilotCapabilities` entry declared at `initialize` obliges the client to answer a matching server request, and the server blocks its own startup on `workspace/configuration` (an array of one object per entry in `params.items`), so declaring nothing but `workspace.configuration`, `textDocument.inlineCompletion` and `window.showDocument` keeps the handler table down to what is actually implemented.
 - `-32802` (superseded), `-32800` (cancelled), `-32801` (`Document Version Mismatch`) and `1000` (not authenticated) are ordinary control flow from the Copilot server rather than faults: it auto-cancels the previous inline completion for a document, and it rejects a request whose `textDocument.version` does not match the last `didChange`, so the text, the version and the position have to be snapshotted together.
 - Gson's default configuration drops a null-valued field, which would strip the `"result": null` that a JSON-RPC response to `window/showMessageRequest` or `shutdown` must carry, so the serializer needs `serializeNulls()`.
+- `XmlSerializer` leaves a field at its default when the stored value names no constant of that enum, so persisted enum settings survive a renamed or removed constant without any fallback of their own.
+- A settings dialog is modal, so a result computed off the EDT reaches its label only through `invokeLater(runnable, ModalityState.any())`; with the default modality the runnable waits until the dialog is closed.
 - `BaseOSProcessHandler.startNotify` attaches a `BaseOutputReader` that consumes the child's stdout and decodes it into lines, which destroys `Content-Length` framing, and `ProcessHandler.destroyProcess` queues its work behind `startNotify`, so a handler for a stdio LSP server has to call `startNotify` and override `createProcessOutReader` to hand the base class an empty reader while the JSON-RPC loop reads `handler.process.inputStream` itself.
 
 ---
