@@ -55,6 +55,7 @@ abstract class PromptHistoryAction internal constructor(
     override fun update(e: AnActionEvent) {
         val box = e.getData(PROMPT_BOX_DATA_KEY)
         e.presentation.isEnabled = box != null &&
+            !box.aCompletionIsShowing() &&
             (!triggeredByACaretMovementKey(e) || box.caretAtHistoryEdge(direction))
     }
 

@@ -43,6 +43,12 @@
   editor, from the terminal, or from the box itself. It ships with no shortcut, so bind one in
   Settings | Keymap, or record a key for the new "Focus prompt box" row in the tmux-like keybindings
   table to reach the box from inside a running session.
+- The prompt box is now a normal text editor as far as the rest of the IDE is concerned, so inline
+  completions from JetBrains AI Assistant appear in it as grey ghost text while you type, exactly as
+  they do in a file. Tab accepts the suggestion and Escape dismisses it; a second Escape then hands the
+  keyboard to the terminal, and Up and Down move the cursor instead of browsing the history while a
+  suggestion is showing. GitHub Copilot cannot complete here, because its agent only ever learns about
+  files opened as editor tabs.
 
 ## [0.7.0] - 2026-09-03
 

@@ -257,6 +257,19 @@ class PromptBoxHistoryNavigationTest : BasePlatformTestCase() {
         assertTrue(updatedPresentation(down, box, null).isEnabled)
     }
 
+    fun testBothActionsStepAsideWhileGhostTextIsShowing() {
+        val box = boxOver(promptFile("first prompt\n"))
+        val up = PromptHistoryPreviousAction()
+        val down = PromptHistoryNextAction()
+
+        showGhostTextIn(box, testRootDisposable)
+
+        assertFalse(updatedPresentation(up, box, arrowKeyEvent(box, KeyEvent.VK_UP)).isEnabled)
+        assertFalse(updatedPresentation(down, box, arrowKeyEvent(box, KeyEvent.VK_DOWN)).isEnabled)
+        assertFalse(updatedPresentation(up, box, null).isEnabled)
+        assertFalse(updatedPresentation(down, box, null).isEnabled)
+    }
+
     fun testTheActionsAreDisabledWithoutAPromptBox() {
         val action = PromptHistoryPreviousAction()
         val event = AnActionEvent.createEvent(

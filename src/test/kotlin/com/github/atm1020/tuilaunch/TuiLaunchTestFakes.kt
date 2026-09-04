@@ -1,6 +1,7 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.action.SendPromptBoxAction
+import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
@@ -8,6 +9,17 @@ import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
+import com.intellij.codeInsight.inline.completion.InlineCompletion
+import com.intellij.codeInsight.inline.completion.InlineCompletionEvent
+import com.intellij.codeInsight.inline.completion.InlineCompletionHandler
+import com.intellij.codeInsight.inline.completion.InlineCompletionProvider
+import com.intellij.codeInsight.inline.completion.InlineCompletionProviderID
+import com.intellij.codeInsight.inline.completion.InlineCompletionRequest
+import com.intellij.codeInsight.inline.completion.editor.InlineCompletionEditorType
+import com.intellij.codeInsight.inline.completion.elements.InlineCompletionGrayTextElement
+import com.intellij.codeInsight.inline.completion.session.InlineCompletionContext
+import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSingleSuggestion
+import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSuggestion
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.KeyboardShortcut
@@ -20,8 +32,36 @@ import javax.swing.JPanel
 import javax.swing.KeyStroke
 
 private const val MAXIMUM_LEFTOVER_SESSIONS = 100
+private const val GHOST_TEXT = "a suggestion nobody typed"
+private const val GHOST_TEXT_TIMEOUT_SECONDS = 30
 
 internal const val SEND_PROMPT_BOX_TEST_KEYSTROKE = "control ENTER"
+
+private class GhostTextProvider : InlineCompletionProvider {
+
+    override val id: InlineCompletionProviderID = InlineCompletionProviderID("TUILaunchGhostText")
+
+    override fun isEnabled(event: InlineCompletionEvent): Boolean = true
+
+    override fun isEditorTypeSupported(editorType: InlineCompletionEditorType): Boolean = true
+
+    override suspend fun getSuggestion(request: InlineCompletionRequest): InlineCompletionSuggestion =
+        InlineCompletionSingleSuggestion.build { emit(InlineCompletionGrayTextElement(GHOST_TEXT)) }
+}
+
+internal fun showGhostTextIn(box: PromptBox, parentDisposable: Disposable) {
+    InlineCompletionHandler.registerTestHandler(GhostTextProvider(), parentDisposable)
+    val handler = requireNotNull(InlineCompletion.getHandlerOrNull(box.editor)) {
+        "No inline completion handler was installed on the prompt box editor"
+    }
+    @Suppress("DEPRECATION")
+    handler.invoke(InlineCompletionEvent.DirectCall(box.editor, box.editor.caretModel.currentCaret, null))
+    PlatformTestUtil.waitWithEventsDispatching(
+        "The test provider never rendered ghost text in the prompt box",
+        { InlineCompletionContext.getOrNull(box.editor)?.isCurrentlyDisplaying() == true },
+        GHOST_TEXT_TIMEOUT_SECONDS,
+    )
+}
 
 internal fun registerTheSendPromptBoxAction(parentDisposable: Disposable) {
     val actionManager = ActionManager.getInstance()

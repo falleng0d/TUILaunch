@@ -122,6 +122,14 @@ class PromptBoxEscapeTest : BasePlatformTestCase() {
         }
     }
 
+    fun testEscapeIsDisabledWhileGhostTextIsShowing() {
+        val box = standaloneBox()
+
+        showGhostTextIn(box, testRootDisposable)
+
+        assertFalse(updatedPresentation(box).isEnabled)
+    }
+
     fun testEscapeWithATextSelectionOnlyDropsTheSelection() {
         val box = standaloneBox()
         box.text = "a prompt"

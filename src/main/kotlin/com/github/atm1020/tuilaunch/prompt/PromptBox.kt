@@ -3,6 +3,7 @@ package com.github.atm1020.tuilaunch.prompt
 import com.github.atm1020.tuilaunch.action.PromptHistoryNextAction
 import com.github.atm1020.tuilaunch.action.PromptHistoryPreviousAction
 import com.github.atm1020.tuilaunch.action.promptHistoryShortcutSet
+import com.intellij.codeInsight.inline.completion.session.InlineCompletionContext
 import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
@@ -22,15 +23,15 @@ import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.actionSystem.impl.ActionButtonWithText
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
-import com.intellij.openapi.editor.EditorFactory
-import com.intellij.openapi.editor.EditorKind
 import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.editor.event.CaretEvent
 import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.ex.EditorMarkupModel
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider
 import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
@@ -41,6 +42,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.wm.IdeFocusManager
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiFile
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.components.JBLayeredPane
 import com.intellij.util.ui.JBUI
@@ -89,6 +92,8 @@ internal class PromptBox(
 ) {
 
     private var editorIfInstalled: EditorEx? = null
+    private var fileEditorIfInstalled: TextEditor? = null
+    private var psiFileKeptInMemory: PsiFile? = null
     private var sendButtonIfInstalled: PromptBoxSendButton? = null
     private var browsedHistory: PromptBoxHistory? = null
     private val panel = PromptBoxPanel(this)
@@ -96,6 +101,8 @@ internal class PromptBox(
     val component: JComponent get() = panel
 
     val installedEditor: EditorEx? get() = editorIfInstalled
+
+    val installedFileEditor: TextEditor? get() = fileEditorIfInstalled
 
     val installedSendButton: PromptBoxSendButton? get() = sendButtonIfInstalled
 
@@ -155,14 +162,14 @@ internal class PromptBox(
         focusSession()
     }
 
-    fun aCompletionPopupIsOpen(): Boolean {
+    fun aCompletionIsShowing(): Boolean {
         val editor = editorIfInstalled ?: return false
-        return LookupManager.getActiveLookup(editor) != null
+        return LookupManager.getActiveLookup(editor) != null ||
+            InlineCompletionContext.getOrNull(editor)?.isCurrentlyDisplaying() == true
     }
 
     fun caretAtHistoryEdge(direction: PromptHistoryDirection): Boolean {
         val editor = editorIfInstalled ?: return false
-        if (aCompletionPopupIsOpen()) return false
         val document = editor.document
         if (document.lineCount == 0) return true
         val caretLine = document.getLineNumber(editor.caretModel.offset)
@@ -198,8 +205,16 @@ internal class PromptBox(
         val document = requireNotNull(FileDocumentManager.getInstance().getDocument(file)) {
             "No document backing $PROMPT_BOX_FILE_NAME"
         }
-        val editor = EditorFactory.getInstance()
-            .createEditor(document, project, file, false, EditorKind.UNTYPED) as EditorEx
+        val fileEditor = TextEditorProvider.getInstance().createEditor(project, file) as TextEditor
+        fileEditorIfInstalled = fileEditor
+        psiFileKeptInMemory = PsiDocumentManager.getInstance(project).getPsiFile(document)
+        val editor = fileEditor.editor as EditorEx
+        makeItLookLikeAPromptBox(editor)
+        editor.putUserData(PROMPT_BOX_KEY, this)
+        return editor
+    }
+
+    private fun makeItLookLikeAPromptBox(editor: EditorEx) {
         editor.settings.apply {
             setUseSoftWraps(true)
             setLineMarkerAreaShown(false)
@@ -212,10 +227,9 @@ internal class PromptBox(
             setAdditionalLinesCount(0)
             setAdditionalPageAtBottom(false)
         }
+        (editor.markupModel as EditorMarkupModel).isErrorStripeVisible = false
         editor.setPlaceholder(promptBoxPlaceholder())
         editor.setShowPlaceholderWhenFocused(true)
-        editor.putUserData(PROMPT_BOX_KEY, this)
-        return editor
     }
 
     private fun promptBoxFileType(): FileType {
@@ -282,7 +296,9 @@ internal class PromptBox(
         sendButtonIfInstalled?.let { panel.remove(it.component) }
         sendButtonIfInstalled = null
         panel.remove(editor.component)
-        if (!editor.isDisposed) EditorFactory.getInstance().releaseEditor(editor)
+        psiFileKeptInMemory = null
+        fileEditorIfInstalled?.let { Disposer.dispose(it) }
+        fileEditorIfInstalled = null
     }
 }
 
@@ -292,7 +308,7 @@ internal class PromptBoxEscapeAction : DumbAwareAction() {
 
     override fun update(e: AnActionEvent) {
         val box = e.getData(PROMPT_BOX_DATA_KEY)
-        e.presentation.isEnabled = box != null && !box.aCompletionPopupIsOpen()
+        e.presentation.isEnabled = box != null && !box.aCompletionIsShowing()
     }
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -344,9 +360,7 @@ internal class PromptBoxPanel(val promptBox: PromptBox) : JBLayeredPane(), UiDat
         val editor = promptBox.installedEditor ?: return
         sink[PROMPT_BOX_DATA_KEY] = promptBox
         sink[CommonDataKeys.EDITOR] = editor
-        sink.lazy(PlatformCoreDataKeys.FILE_EDITOR) {
-            TextEditorProvider.getInstance().getTextEditor(editor)
-        }
+        sink[PlatformCoreDataKeys.FILE_EDITOR] = promptBox.installedFileEditor
     }
 
     fun addInLayer(component: Component, layer: Int) {
