@@ -17,7 +17,10 @@ import com.intellij.openapi.util.Key
 import com.intellij.serviceContainer.NonInjectable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +36,7 @@ import java.io.OutputStream
 import java.io.Reader
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicBoolean
 
 interface CopilotServerSettings {
     val explicitServerPath: String
@@ -105,7 +109,18 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
         val process: CopilotServerProcess,
         val connection: JsonRpcConnection,
         val server: CopilotLanguageServer,
-    )
+    ) {
+        @Volatile
+        var teardown: Job? = null
+
+        @Volatile
+        var statusWatch: Job? = null
+
+        fun cancelWatchers() {
+            statusWatch?.cancel()
+            teardown?.cancel()
+        }
+    }
 
     private val stateFlow = MutableStateFlow<CopilotServerState>(CopilotServerState.Stopped)
     private val transitions = Mutex()
@@ -115,6 +130,7 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
 
     private var wanted = false
     private var retryAttempts = 0
+    private val statusRecheckRunning = AtomicBoolean(false)
 
     val state: StateFlow<CopilotServerState> = stateFlow.asStateFlow()
 
@@ -245,13 +261,15 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
         val connection = JsonRpcConnection(process.standardOutput, process.standardInput, scope)
         val started = Session(executablePath, process, connection, serverFactory(connection))
         session = started
+        started.teardown = tearDownWhenTheScopeIsCancelled(started)
+        started.statusWatch = followStatusChanges(started)
         process.onTerminated { onProcessTerminated(started) }
 
         try {
             withTimeout(handshakeTimeoutMs) {
                 started.server.initialize()
                 started.server.initialized()
-                stateFlow.value = stateFor(started.server.checkStatus(localChecksOnly = true))
+                stateFlow.value = stateFor(started.server.checkStatus(localChecksOnly = false))
             }
             retryAttempts = 0
         } catch (timeout: TimeoutCancellationException) {
@@ -282,8 +300,59 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
         }
     }
 
+    private fun tearDownWhenTheScopeIsCancelled(started: Session): Job =
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                awaitCancellation()
+            } finally {
+                started.connection.close()
+                started.process.destroy()
+            }
+        }
+
+    private fun followStatusChanges(started: Session): Job = scope.launch {
+        started.server.statusChanges.collect { change -> onStatusChange(started, change) }
+    }
+
+    private suspend fun onStatusChange(source: Session, change: CopilotStatusChange) {
+        if (change.busy) return
+        when {
+            change.kind.equals(ERROR_STATUS_KIND, ignoreCase = true) -> reportSignInProblem(source, change.message)
+            change.kind.equals(NORMAL_STATUS_KIND, ignoreCase = true) -> recheckStatusOf(source)
+        }
+    }
+
+    private suspend fun reportSignInProblem(source: Session, message: String?) {
+        if (message == null || !mentionsSigningIn(message)) return
+        transitions.withLock {
+            if (session === source) stateFlow.value = CopilotServerState.NotSignedIn(message)
+        }
+    }
+
+    private suspend fun recheckStatusOf(source: Session) {
+        if (!statusRecheckRunning.compareAndSet(false, true)) return
+        try {
+            if (session !== source || stateFlow.value !is CopilotServerState.NotSignedIn) return
+            val rechecked = statusOf(source.server)
+            if (rechecked is CopilotServerState.Failed) return
+            transitions.withLock {
+                if (session === source && stateFlow.value is CopilotServerState.NotSignedIn) {
+                    stateFlow.value = rechecked
+                }
+            }
+        } finally {
+            statusRecheckRunning.set(false)
+        }
+    }
+
+    private fun mentionsSigningIn(message: String): Boolean {
+        val text = message.lowercase()
+        return SIGN_IN_HINTS.any { it in text }
+    }
+
     private fun discard(unwanted: Session) {
         if (session === unwanted) session = null
+        unwanted.cancelWatchers()
         unwanted.connection.close()
         unwanted.process.destroy()
     }
@@ -325,12 +394,17 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
                 while (!running.process.isTerminated) delay(STOP_POLL_MS)
             }
         }
+        running.cancelWatchers()
         running.connection.close()
         running.process.destroy()
     }
 
     private fun stateFor(status: CopilotStatus): CopilotServerState =
-        if (status.isSignedIn) CopilotServerState.Ready(status.user) else CopilotServerState.NotSignedIn
+        if (status.isSignedIn) {
+            CopilotServerState.Ready(status.user)
+        } else {
+            CopilotServerState.NotSignedIn(status.status)
+        }
 
     private fun isTerminalFailure(state: CopilotServerState): Boolean =
         state is CopilotServerState.Failed || state is CopilotServerState.NotConfigured
@@ -350,6 +424,18 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
 
         private const val STOP_TIMEOUT_MS = 2_000L
         private const val STOP_POLL_MS = 25L
+        private const val NORMAL_STATUS_KIND = "Normal"
+        private const val ERROR_STATUS_KIND = "Error"
+
+        private val SIGN_IN_HINTS = listOf(
+            "sign in",
+            "signed in",
+            "sign-in",
+            "signin",
+            "authenticate",
+            "authentication",
+            "not authorized",
+        )
 
         fun getInstance(): CopilotLanguageServerService = service()
 

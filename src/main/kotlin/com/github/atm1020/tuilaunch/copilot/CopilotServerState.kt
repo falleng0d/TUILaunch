@@ -9,7 +9,7 @@ sealed class CopilotServerState {
 
     data class Ready(val user: String?) : CopilotServerState()
 
-    data object NotSignedIn : CopilotServerState()
+    data class NotSignedIn(val serverStatus: String) : CopilotServerState()
 
     data class Failed(val reason: String) : CopilotServerState()
 }

@@ -3,7 +3,8 @@ package com.github.atm1020.tuilaunch
 import com.github.atm1020.tuilaunch.copilot.COPILOT_INLINE_COMPLETION_PROVIDER_ID
 import com.github.atm1020.tuilaunch.copilot.CopilotInlineCompletionProvider
 import com.github.atm1020.tuilaunch.copilot.CopilotServerState
-import com.github.atm1020.tuilaunch.copilot.NOT_SIGNED_IN_REASON
+import com.github.atm1020.tuilaunch.copilot.NOT_SIGNED_IN_PREFIX
+import com.github.atm1020.tuilaunch.copilot.notSignedInReason
 import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.intellij.codeInsight.inline.completion.InlineCompletionEvent
@@ -126,12 +127,30 @@ class CopilotInlineCompletionProviderTest : BasePlatformTestCase() {
         val box = newInstalledBox()
         val provider = newProvider()
 
-        backend.serverState = CopilotServerState.NotSignedIn
+        backend.serverState = CopilotServerState.NotSignedIn("NotSignedIn")
         assertFalse(provider.isEnabled(manualCallOn(box.editor)))
         backend.serverState = CopilotServerState.Failed("The process exited")
         assertFalse(provider.isEnabled(manualCallOn(box.editor)))
 
-        assertEquals(listOf(NOT_SIGNED_IN_REASON, "The process exited"), announcedReasons)
+        assertEquals(listOf(notSignedInReason("NotSignedIn"), "The process exited"), announcedReasons)
+    }
+
+    fun testTheAnnouncementRepeatsTheStatusTheServerAnswered() {
+        val box = newInstalledBox()
+        val provider = newProvider()
+
+        backend.serverState = CopilotServerState.NotSignedIn("MaybeOK")
+        assertFalse(provider.isEnabled(manualCallOn(box.editor)))
+        backend.serverState = CopilotServerState.NotSignedIn("You are not signed into GitHub.")
+        assertFalse(provider.isEnabled(manualCallOn(box.editor)))
+
+        assertEquals(
+            listOf(
+                "$NOT_SIGNED_IN_PREFIX MaybeOK",
+                "$NOT_SIGNED_IN_PREFIX You are not signed into GitHub",
+            ),
+            announcedReasons,
+        )
     }
 
     fun testOnlyAManualCallRestartsTheRunningRequest() {

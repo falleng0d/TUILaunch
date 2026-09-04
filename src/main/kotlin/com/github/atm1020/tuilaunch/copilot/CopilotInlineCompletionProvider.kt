@@ -35,7 +35,10 @@ const val COPILOT_INLINE_COMPLETION_PROVIDER_ID = "com.github.atm1020.tuilaunch.
 const val TUILAUNCH_NOTIFICATION_GROUP_ID = "TUILaunch"
 
 internal const val COPILOT_UNAVAILABLE_TITLE = "GitHub Copilot is not completing the prompt box"
-internal const val NOT_SIGNED_IN_REASON = "No Copilot client on this machine is signed in"
+internal const val NOT_SIGNED_IN_PREFIX = "The GitHub Copilot language server answered"
+
+internal fun notSignedInReason(serverStatus: String): String =
+    "$NOT_SIGNED_IN_PREFIX ${serverStatus.trim().trimEnd('.')}"
 
 private val SHOWN_COMPLETION_KEY: Key<InlineCompletionItem> = Key.create("TUILaunch.CopilotShownCompletion")
 private val REPORTED_COMPLETION_KEY: Key<InlineCompletionItem> = Key.create("TUILaunch.CopilotReportedCompletion")
@@ -162,7 +165,7 @@ class CopilotInlineCompletionProvider(
 
     private fun reasonOf(state: CopilotServerState): String? = when (state) {
         is CopilotServerState.NotConfigured -> state.reason
-        CopilotServerState.NotSignedIn -> NOT_SIGNED_IN_REASON
+        is CopilotServerState.NotSignedIn -> notSignedInReason(state.serverStatus)
         is CopilotServerState.Failed -> state.reason
         else -> null
     }

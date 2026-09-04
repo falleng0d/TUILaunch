@@ -16,6 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -77,15 +78,90 @@ class CopilotLanguageServerServiceTest {
     }
 
     @Test
-    fun `a server without credentials reports that nobody is signed in`() {
+    fun `the startup handshake asks the server to verify the token over the network`() {
+        val process = FakeServerProcess()
+        val service = serviceStarting(process)
+        serve(process, status("OK", "falleng0d"))
+
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.Ready }
+
+        assertFalse(checkStatusOptionsOf(process)["localChecksOnly"].asBoolean)
+    }
+
+    @Test
+    fun `a server without credentials reports the status it answered`() {
         val process = FakeServerProcess()
         val service = serviceStarting(process)
         serve(process, status("NotSignedIn", null))
 
         service.ensureStarted()
 
-        assertEquals(CopilotServerState.NotSignedIn, awaitState(service) { it is CopilotServerState.NotSignedIn })
+        assertEquals(
+            CopilotServerState.NotSignedIn("NotSignedIn"),
+            awaitState(service) { it is CopilotServerState.NotSignedIn },
+        )
         assertNull(service.server())
+    }
+
+    @Test
+    fun `a locally cached token alone does not make the server ready`() {
+        assertEquals(CopilotServerState.NotSignedIn("MaybeOK"), stateAnsweredFor("MaybeOK"))
+        assertEquals(CopilotServerState.NotSignedIn("MaybeOk"), stateAnsweredFor("MaybeOk"))
+    }
+
+    @Test
+    fun `a normal status change rechecks a server that was not signed in`() {
+        val process = FakeServerProcess()
+        val service = serviceStarting(process)
+        serve(process, status("NotSignedIn", null), status("OK", "falleng0d"))
+
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.NotSignedIn }
+        process.peer.notify(CopilotLanguageServer.DID_CHANGE_STATUS, statusChange("Normal", null))
+
+        assertEquals(
+            CopilotServerState.Ready("falleng0d"),
+            awaitState(service) { it is CopilotServerState.Ready },
+        )
+        assertNotNull(service.server())
+    }
+
+    @Test
+    fun `an error status change about signing in carries the message the server sent`() {
+        val process = FakeServerProcess()
+        val service = serviceStarting(process)
+        serve(process, status("OK", "falleng0d"))
+
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.Ready }
+        process.peer.notify(
+            CopilotLanguageServer.DID_CHANGE_STATUS,
+            statusChange("Error", "You are not signed into GitHub."),
+        )
+
+        assertEquals(
+            CopilotServerState.NotSignedIn("You are not signed into GitHub."),
+            awaitState(service) { it is CopilotServerState.NotSignedIn },
+        )
+    }
+
+    @Test
+    fun `a normal status change does not recheck a server that is already ready`() {
+        val process = FakeServerProcess()
+        val service = serviceStarting(process)
+        serve(process, status("OK", "falleng0d"))
+
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.Ready }
+        process.peer.notify(CopilotLanguageServer.DID_CHANGE_STATUS, statusChange("Normal", null))
+        process.peer.notify(
+            CopilotLanguageServer.DID_CHANGE_STATUS,
+            statusChange("Error", "You are not signed into GitHub."),
+        )
+        awaitState(service) { it is CopilotServerState.NotSignedIn }
+
+        assertEquals(1, process.methods.count { it == "checkStatus" })
     }
 
     @Test
@@ -123,6 +199,35 @@ class CopilotLanguageServerServiceTest {
         assertTrue(process.methods.contains("exit"))
         assertTrue(process.isTerminated)
         assertNull(service.server())
+    }
+
+    @Test
+    fun `cancelling the scope tears down an idle session instead of waiting for the read loop`() {
+        val process = FakeServerProcess()
+        val service = serviceStarting(process)
+        serve(process, status("OK", "falleng0d"))
+
+        service.ensureStarted()
+        awaitState(service) { it is CopilotServerState.Ready }
+        scope.cancel()
+
+        awaitScopeCompletion()
+        assertTrue(process.isTerminated)
+    }
+
+    @Test
+    fun `cancelling the scope tears down a session whose handshake is still pending`() {
+        val process = FakeServerProcess()
+        startedProcesses += process
+        val service = service(processFactory = { process }, handshakeTimeoutMs = UNREACHABLE_TIMEOUT_MS)
+
+        service.ensureStarted()
+        assertEquals("initialize", process.peer.read()["method"].asString)
+        awaitState(service) { it is CopilotServerState.Starting }
+        scope.cancel()
+
+        awaitScopeCompletion()
+        assertTrue(process.isTerminated)
     }
 
     @Test
@@ -270,8 +375,31 @@ class CopilotLanguageServerServiceTest {
         if (user != null) addProperty("user", user)
     }
 
-    private fun serve(process: FakeServerProcess, status: JsonObject): Job = scope.launch(Dispatchers.IO) {
+    private fun statusChange(kind: String, message: String?) = JsonObject().apply {
+        addProperty("kind", kind)
+        addProperty("busy", false)
+        if (message != null) addProperty("message", message)
+    }
+
+    private fun stateAnsweredFor(serverStatus: String): CopilotServerState {
+        val process = FakeServerProcess()
+        val service = serviceStarting(process)
+        serve(process, status(serverStatus, "falleng0d"))
+
+        service.ensureStarted()
+
+        return awaitState(service) { it is CopilotServerState.NotSignedIn || it is CopilotServerState.Ready }
+    }
+
+    private fun checkStatusOptionsOf(process: FakeServerProcess): JsonObject =
+        process.requests
+            .last { it["method"]?.asString == "checkStatus" }
+            .getAsJsonObject("params")
+            .getAsJsonObject("options")
+
+    private fun serve(process: FakeServerProcess, vararg statuses: JsonObject): Job = scope.launch(Dispatchers.IO) {
         val peer = process.peer
+        var statusChecks = 0
         while (true) {
             val message = try {
                 peer.read()
@@ -280,10 +408,12 @@ class CopilotLanguageServerServiceTest {
             }
             val method = message["method"]?.asString ?: continue
             process.methods += method
+            process.requests += message
             val id = message["id"]?.takeUnless { it.isJsonNull }?.asInt
             when {
                 method == "initialize" && id != null -> peer.respond(id, JsonParser.parseString(INITIALIZE_RESULT))
-                method == "checkStatus" && id != null -> peer.respond(id, status)
+                method == "checkStatus" && id != null ->
+                    peer.respond(id, statuses[minOf(statusChecks++, statuses.lastIndex)])
                 method == "shutdown" && id != null -> peer.respondNull(id)
                 method == "exit" -> {
                     process.terminate()
@@ -292,6 +422,10 @@ class CopilotLanguageServerServiceTest {
                 id != null -> peer.respondError(id, -32601, "Method not found: $method")
             }
         }
+    }
+
+    private fun awaitScopeCompletion() = runBlocking {
+        withTimeout(SCOPE_COMPLETION_TIMEOUT_MS) { scope.coroutineContext.job.join() }
     }
 
     private fun awaitState(
@@ -307,6 +441,7 @@ class CopilotLanguageServerServiceTest {
 
         val peer: CopilotTestPeer get() = streams.peer
         val methods = CopyOnWriteArrayList<String>()
+        val requests = CopyOnWriteArrayList<JsonObject>()
 
         @Volatile
         override var isTerminated: Boolean = false
@@ -334,6 +469,8 @@ class CopilotLanguageServerServiceTest {
     private companion object {
         const val AWAIT_TIMEOUT_MS = 15_000L
         const val HANDSHAKE_TIMEOUT_MS = 5_000L
+        const val SCOPE_COMPLETION_TIMEOUT_MS = 3_000L
+        const val UNREACHABLE_TIMEOUT_MS = 600_000L
 
         const val INITIALIZE_RESULT = """
             {"capabilities":{"inlineCompletionProvider":{}},

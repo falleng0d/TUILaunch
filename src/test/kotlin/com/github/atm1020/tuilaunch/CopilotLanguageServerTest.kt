@@ -2,6 +2,7 @@ package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.copilot.CopilotEditorInfo
 import com.github.atm1020.tuilaunch.copilot.CopilotLanguageServer
+import com.github.atm1020.tuilaunch.copilot.CopilotStatus
 import com.github.atm1020.tuilaunch.copilot.InlineCompletionTriggerKind
 import com.github.atm1020.tuilaunch.copilot.JsonRpcConnection
 import com.github.atm1020.tuilaunch.copilot.LspPosition
@@ -148,6 +149,19 @@ class CopilotLanguageServerTest {
         assertEquals("NotSignedIn", status.status)
         assertNull(status.user)
         assertFalse(status.isSignedIn)
+    }
+
+    @Test
+    fun `only the statuses that mean a verified session count as signed in`() {
+        assertTrue(CopilotStatus("OK", "falleng0d").isSignedIn)
+        assertTrue(CopilotStatus("ok", "falleng0d").isSignedIn)
+        assertTrue(CopilotStatus("AlreadySignedIn", "falleng0d").isSignedIn)
+        assertTrue(CopilotStatus("alreadysignedin", "falleng0d").isSignedIn)
+        assertFalse(CopilotStatus("MaybeOK", "falleng0d").isSignedIn)
+        assertFalse(CopilotStatus("MaybeOk", "falleng0d").isSignedIn)
+        assertFalse(CopilotStatus("NotSignedIn", null).isSignedIn)
+        assertFalse(CopilotStatus("NotAuthorized", "falleng0d").isSignedIn)
+        assertFalse(CopilotStatus("FailedToGetToken", null).isSignedIn)
     }
 
     @Test

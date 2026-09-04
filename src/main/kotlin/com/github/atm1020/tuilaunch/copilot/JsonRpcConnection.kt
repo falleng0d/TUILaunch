@@ -86,7 +86,7 @@ class JsonRpcConnection(
         pendingRequests.keys.toList().forEach { id ->
             pendingRequests.remove(id)?.completeExceptionally(failure)
         }
-        runCatching { input.close() }
+        runCatching { incoming.close() }
         runCatching { output.close() }
     }
 

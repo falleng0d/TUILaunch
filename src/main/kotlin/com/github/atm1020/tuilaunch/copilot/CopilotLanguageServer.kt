@@ -20,10 +20,10 @@ data class CopilotEditorInfo(val name: String, val version: String)
 
 data class CopilotStatus(val status: String, val user: String?) {
     val isSignedIn: Boolean
-        get() = status in SIGNED_IN_STATUSES
+        get() = SIGNED_IN_STATUSES.any { it.equals(status, ignoreCase = true) }
 
     companion object {
-        private val SIGNED_IN_STATUSES = setOf("OK", "MaybeOk", "AlreadySignedIn")
+        private val SIGNED_IN_STATUSES = setOf("OK", "AlreadySignedIn")
     }
 }
 

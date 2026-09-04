@@ -74,8 +74,9 @@ class CopilotSettingsTextTest {
     }
 
     @Test
-    fun `a server without credentials reports that nobody is signed in`() {
-        assertEquals("Not signed in", copilotStatusText(CopilotServerState.NotSignedIn))
+    fun `a server without credentials reports the status it answered`() {
+        assertEquals("Not signed in: NotSignedIn", copilotStatusText(CopilotServerState.NotSignedIn("NotSignedIn")))
+        assertEquals("Not signed in: MaybeOK", copilotStatusText(CopilotServerState.NotSignedIn("MaybeOK")))
     }
 
     @Test

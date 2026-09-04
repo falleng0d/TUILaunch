@@ -126,8 +126,10 @@ characters. With it off only the draft is sent. Either way the text is a Markdow
 file of the project is opened for it.
 
 While Copilot is not ready — no binary found, no signed-in client, or a server that failed to start — the box quietly
-falls back to JetBrains AI Assistant, and a balloon names the reason once per IDE session. The server is started when
-a prompt box first becomes visible with Copilot selected, so the first suggestion of a session takes a second or two
+falls back to JetBrains AI Assistant, and a balloon names the reason once per IDE session, quoting the status the
+server answered rather than guessing at it. A sign-in that happens after the server started is picked up from the
+server's own status notifications, so the box begins completing without a restart. The server is started when a
+prompt box first becomes visible with Copilot selected, so the first suggestion of a session takes a second or two
 longer than the ones after it.
 
 ### Reopen TUI tabs when the project is opened
@@ -314,6 +316,8 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `EscapeInlineCompletionHandler` dismisses ghost text through the `EditorEscape` action, which the keymap reaches only after the actions registered on the focused component chain, so any Escape action of ours on an editor panel has to report itself disabled while a completion is showing or the first press skips the dismissal.
 - `copilot-language-server` speaks LSP only with the `--stdio` flag, which is required rather than a default; the native binary can be probed with `--version` but crashes on `--help`, so availability checks must use `--version`.
 - The Copilot server refuses to work until `initialize` carries `initializationOptions.editorInfo` and `initializationOptions.editorPluginInfo`, and it derives the identity of its credential store entry from `editorPluginInfo.name`: the store is the shared `~/.config/github-copilot` database, and a new editor name adopts a token that any other Copilot client on the machine already holds, while signing out only affects that one name.
+- `checkStatus` with `{"options":{"localChecksOnly":true}}` answers in about a millisecond with `MaybeOK` plus a user name as soon as any token is cached on the machine, while `localChecksOnly:false` costs a round trip and is the only form that returns the verified `OK`; the answers that mean a usable session are `OK` and `AlreadySignedIn`, and the rest of the set is `MaybeOK`, `NotSignedIn`, `NotAuthorized` and `FailedToGetToken`.
+- `didChangeStatus` carries only `{kind, busy, message}`, with the `category: "auth"` detail and the status itself on `didChangeStatus/v2`; `checkStatus` emits no status change of its own, but every inline completion toggles `busy` around its request, so a `Normal` change is no more than a hint to run `checkStatus` again.
 - Every capability or `copilotCapabilities` entry declared at `initialize` obliges the client to answer a matching server request, and the server blocks its own startup on `workspace/configuration` (an array of one object per entry in `params.items`), so declaring nothing but `workspace.configuration`, `textDocument.inlineCompletion` and `window.showDocument` keeps the handler table down to what is actually implemented.
 - `-32802` (superseded), `-32800` (cancelled), `-32801` (`Document Version Mismatch`) and `1000` (not authenticated) are ordinary control flow from the Copilot server rather than faults: it auto-cancels the previous inline completion for a document, and it rejects a request whose `textDocument.version` does not match the last `didChange`, so the text, the version and the position have to be snapshotted together.
 - Gson's default configuration drops a null-valued field, which would strip the `"result": null` that a JSON-RPC response to `window/showMessageRequest` or `shutdown` must carry, so the serializer needs `serializeNulls()`.
@@ -326,6 +330,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - Copilot positions and `acceptedLength` count UTF-16 code units, which is exactly what IntelliJ `Document` offsets and Kotlin `String.length` already are, so no conversion is needed even for astral characters.
 - `InlineCompletionHandler.insert` asserts write access, so a test that accepts ghost text has to call it inside a write action even though the platform's own `InsertInlineCompletionAction` looks like it does not.
 - `EditorFactoryListener.editorCreated` runs before the owner of a light editor can attach its own user data, but `editorReleased` still sees that data, which makes the release hook the only listener able to recognise a plugin's own editor without holding a reference to it.
+- Coroutine cancellation cannot interrupt a thread parked in `InputStream.read` on a child process's stdout, so a scope that owns such a read loop never completes and its `Job.invokeOnCompletion` never runs, which stalls IDE exit for the shutdown timeout; teardown has to start when cancellation starts instead, from a child coroutine whose `finally` after `awaitCancellation` closes the stream and destroys the process.
 - `BaseOSProcessHandler.startNotify` attaches a `BaseOutputReader` that consumes the child's stdout and decodes it into lines, which destroys `Content-Length` framing, and `ProcessHandler.destroyProcess` queues its work behind `startNotify`, so a handler for a stdio LSP server has to call `startNotify` and override `createProcessOutReader` to hand the base class an empty reader while the JSON-RPC loop reads `handler.process.inputStream` itself.
 
 ---

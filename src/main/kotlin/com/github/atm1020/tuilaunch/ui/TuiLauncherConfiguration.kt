@@ -75,7 +75,7 @@ internal fun copilotServerHintText(location: CopilotServerLocation): String = wh
 internal fun copilotStatusText(state: CopilotServerState): String = when (state) {
     is CopilotServerState.Ready ->
         if (state.user.isNullOrBlank()) "Signed in" else "Signed in as ${state.user}"
-    CopilotServerState.NotSignedIn -> "Not signed in"
+    is CopilotServerState.NotSignedIn -> "Not signed in: ${state.serverStatus}"
     is CopilotServerState.NotConfigured -> "Not configured: ${state.reason}"
     is CopilotServerState.Failed -> "Failed: ${state.reason}"
     CopilotServerState.Starting, CopilotServerState.Stopped -> CHECKING_COPILOT_STATUS_TEXT

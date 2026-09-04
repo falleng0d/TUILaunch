@@ -1082,7 +1082,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
         findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.doClick()
         configurable.reset()
-        copilotServer.answerStatus(CopilotServerState.NotSignedIn)
+        copilotServer.answerStatus(CopilotServerState.NotSignedIn("NotSignedIn"))
 
         assertEquals("", findLabel(component, COPILOT_STATUS_NAME)!!.text)
     }
