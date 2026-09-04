@@ -25,6 +25,7 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
             TuiLauncherSettings.getInstance().state.apply {
                 tuiApps.clear()
                 restoreOpenTabs = false
+                promptBoxVisible = false
             }
             TuiOpenTabsService.getInstance(project).replaceTabs(emptyList())
         } finally {
@@ -83,6 +84,17 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
             ),
             savedTabs(),
         )
+    }
+
+    fun testReleasingThePromptBoxEditorsOnProjectCloseKeepsTheRecordsForTheNextOpen() {
+        configureApps("first")
+        TuiLauncherSettings.getInstance().state.promptBoxVisible = true
+        val (service, _) = newService(FakeFactory(FakeSession()))
+        service.toggle("TUILauncher.first", "first", "first")
+
+        service.releasePromptBoxEditors()
+
+        assertEquals(listOf(TuiSessionRecord("first", "first", true)), savedTabs())
     }
 
     fun testTheFirstTabIsRecordedEvenThoughItIsSelectedByTheAddItself() {

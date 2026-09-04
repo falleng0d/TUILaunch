@@ -20,6 +20,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
@@ -228,6 +229,10 @@ class TuiAppLaunchService(private val project: Project) {
         restoringTabs = false
         if (tabToSelect != null) host.selectTab(tabToSelect.handle)
         recordOpenTabs()
+    }
+
+    fun releasePromptBoxEditors() {
+        tabsBySessionId.values.forEach { it.promptBox.releaseEditor() }
     }
 
     fun renameTab(handle: Any, newTitle: String) {
@@ -609,5 +614,12 @@ class TuiAppLaunchService(private val project: Project) {
         tabsBySessionId.remove(sessionId)
         closingSessions.remove(sessionId)
         sessionIdsRemovedForDrag.remove(sessionId)
+    }
+}
+
+class ReleasePromptBoxEditorsOnProjectClose : ProjectCloseListener {
+
+    override fun projectClosing(project: Project) {
+        project.getServiceIfCreated(TuiAppLaunchService::class.java)?.releasePromptBoxEditors()
     }
 }

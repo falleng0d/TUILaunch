@@ -133,6 +133,10 @@ internal class PromptBox(
         return editor
     }
 
+    fun releaseEditor() {
+        editorIfInstalled?.let { uninstallEditor(it) }
+    }
+
     fun send() {
         sender?.send(this)
     }

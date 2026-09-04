@@ -49,6 +49,14 @@
                     factoryClass="com.github.atm1020.tuilaunch.toolwindow.TuiLaunchToolWindowFactory"/>
     </extensions>
 
+    <applicationListeners>
+        <!-- projectClosing rather than a Disposable parented to the tool window content: the content
+             manager is torn down after the project services, so LineStatusTrackerManager reports the
+             prompt box editor as still held on dispose (TSK-9081). -->
+        <listener class="com.github.atm1020.tuilaunch.services.ReleasePromptBoxEditorsOnProjectClose"
+                  topic="com.intellij.openapi.project.ProjectCloseListener"/>
+    </applicationListeners>
+
     <actions>
         <action id="TUILauncher.FocusTui"
                 class="com.github.atm1020.tuilaunch.action.FocusTuiAction"

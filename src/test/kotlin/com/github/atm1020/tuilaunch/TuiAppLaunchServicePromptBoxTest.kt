@@ -7,11 +7,15 @@ import com.github.atm1020.tuilaunch.prompt.PromptBoxPanel
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.promptBoxFocusRequest
 import com.github.atm1020.tuilaunch.prompt.promptBoxHoldsFocus
+import com.github.atm1020.tuilaunch.services.ReleasePromptBoxEditorsOnProjectClose
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.openapi.ui.Splitter
+import com.intellij.openapi.util.JDOMUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+
+private const val PROJECT_CLOSE_TOPIC = "com.intellij.openapi.project.ProjectCloseListener"
 
 class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
 
@@ -270,6 +274,39 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
         service.setPromptBoxVisible(true)
 
         assertEquals(0, backend.startRequests)
+    }
+
+    fun testTheProjectCloseReleasesEveryOpenPromptBoxEditorWhileTheTabsStayOpen() {
+        val (service, host, tabs) = launchTwoApps()
+        service.setPromptBoxVisible(true)
+        val editors = tabs.map { promptBoxPanelOf(host, it).promptBox.editor }
+
+        service.releasePromptBoxEditors()
+
+        assertTrue(editors.all { it.isDisposed })
+        assertTrue(tabs.all { promptBoxPanelOf(host, it).promptBox.installedEditor == null })
+        assertEquals(2, host.tabs.size)
+    }
+
+    fun testReleasingThePromptBoxEditorsTwiceIsHarmless() {
+        val (service, host) = newService(listOf(FakeSession()))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        val editor = promptBoxPanelOf(host, host.tabs.single()).promptBox.editor
+
+        service.releasePromptBoxEditors()
+        service.releasePromptBoxEditors()
+
+        assertTrue(editor.isDisposed)
+    }
+
+    fun testTheDescriptorReleasesThePromptBoxEditorsWhenTheProjectCloses() {
+        val listener = JDOMUtil.load(PromptBox::class.java, "/META-INF/plugin.xml")
+            .getChild("applicationListeners")
+            .getChildren("listener")
+            .single { it.getAttributeValue("topic") == PROJECT_CLOSE_TOPIC }
+
+        assertEquals(ReleasePromptBoxEditorsOnProjectClose::class.java.name, listener.getAttributeValue("class"))
     }
 
     fun testClosingATabHidesThePromptBoxBeforeItsEditorIsReleased() {
