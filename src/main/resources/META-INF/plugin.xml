@@ -10,6 +10,8 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
     <extensions defaultExtensionNs="com.intellij">
         <applicationService serviceImplementation="com.github.atm1020.tuilaunch.services.TuiLauncherSettings"/>
+        <applicationService
+                serviceImplementation="com.github.atm1020.tuilaunch.copilot.CopilotLanguageServerService"/>
         <applicationConfigurable parentId="tools" instance="com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration"
                                  id="com.example.tuilauncher.TuiLauncherConfigurable"
                                  displayName="TUI Launcher"/>
