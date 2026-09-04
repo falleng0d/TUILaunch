@@ -46,6 +46,7 @@ import com.intellij.ui.components.JBLayeredPane
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.update.MergingUpdateQueue
 import com.intellij.util.ui.update.Update
+import java.awt.Component
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
 import javax.swing.JComponent
@@ -115,7 +116,7 @@ internal class PromptBox(
         editorIfInstalled?.let { return it }
         val editor = createEditor()
         editorIfInstalled = editor
-        panel.add(editor.component, JLayeredPane.DEFAULT_LAYER)
+        panel.addInLayer(editor.component, JLayeredPane.DEFAULT_LAYER)
         installSendButton(editor)
         registerTheSendShortcutOnThePanel()
         registerTheHistoryShortcutsOnThePanel()
@@ -234,7 +235,7 @@ internal class PromptBox(
             ActionToolbar.DEFAULT_MINIMUM_BUTTON_SIZE,
         )
         sendButtonIfInstalled = PromptBoxSendButton(button, editor, parentDisposable, promptBoxSendButtonQuietMillis)
-        panel.add(button, JLayeredPane.PALETTE_LAYER)
+        panel.addInLayer(button, JLayeredPane.PALETTE_LAYER)
     }
 
     private fun registerTheSendShortcutOnThePanel() {
@@ -346,6 +347,11 @@ internal class PromptBoxPanel(val promptBox: PromptBox) : JBLayeredPane(), UiDat
         sink.lazy(PlatformCoreDataKeys.FILE_EDITOR) {
             TextEditorProvider.getInstance().getTextEditor(editor)
         }
+    }
+
+    fun addInLayer(component: Component, layer: Int) {
+        setLayer(component, layer)
+        add(component)
     }
 
     override fun doLayout() {

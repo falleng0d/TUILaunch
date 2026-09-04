@@ -274,6 +274,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `ConsoleHistoryController` shares one console's Up and Down between history browsing and caret movement by registering per-console actions on the console component carrying `ActionManager.getActionOrStub("EditorUp"/"EditorDown").shortcutSet`, and enabling them only when the keystroke came from one of those keys *and* the caret sits on the first or last line; every other Up and Down falls through to the keymap's own caret movement.
 - `Console.History.Previous` and `Console.History.Next` ship with no default keystroke at all, so the arrow keys reach them only through the shortcut sets borrowed from `EditorUp` and `EditorDown`, which is what keeps them out of every other editor.
 - The macOS keymaps bind `control P` and `control N` to `EditorUp` and `EditorDown` on top of the arrow keys, so borrowing those shortcut sets brings the Emacs-style pair along with them.
+- `JLayeredPane`'s layer constants are `Integer`, and Kotlin unboxes them, so `add(component, JLayeredPane.PALETTE_LAYER)` binds to `Container.add(Component, int index)` instead of the constraint overload: the layer is never assigned and the component lands behind everything already in the default layer. `setLayer(component, layer)` followed by a plain `add(component)` is the unambiguous way to place it.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

@@ -25,6 +25,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.awt.Rectangle
+import javax.swing.JLayeredPane
 
 private const val TEST_QUIET_MILLIS = 100
 private const val REAPPEAR_TIMEOUT_MILLIS = 30_000L
@@ -242,6 +243,28 @@ class PromptBoxTest : BasePlatformTestCase() {
         assertTrue(sendButton.height > 0)
         assertTrue(sendButton.x + sendButton.width <= 400)
         assertTrue(sendButton.y + sendButton.height <= 300)
+        assertTrue(sendButton.x > 200)
+        assertTrue(sendButton.y > 150)
+    }
+
+    fun testTheSendButtonSitsInThePaletteLayerAndPaintsOverTheEditor() {
+        val box = newPromptBox()
+        box.installEditor()
+        val panel = box.component as JLayeredPane
+        val sendButton = box.installedSendButton!!.component
+        val editorComponent = box.editor.component
+
+        assertEquals(JLayeredPane.PALETTE_LAYER, panel.getLayer(sendButton))
+        assertEquals(JLayeredPane.DEFAULT_LAYER, panel.getLayer(editorComponent))
+        assertTrue(panel.getComponentZOrder(sendButton) < panel.getComponentZOrder(editorComponent))
+
+        panel.setBounds(0, 0, 400, 300)
+        panel.validate()
+        panel.doLayout()
+
+        assertTrue(sendButton.width > 0)
+        assertTrue(sendButton.height > 0)
+        assertTrue(Rectangle(0, 0, 400, 300).contains(sendButton.bounds))
         assertTrue(sendButton.x > 200)
         assertTrue(sendButton.y > 150)
     }
