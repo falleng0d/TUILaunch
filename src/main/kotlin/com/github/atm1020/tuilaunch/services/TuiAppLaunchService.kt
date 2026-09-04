@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch.services
 
+import com.github.atm1020.tuilaunch.copilot.PromptBoxCopilotStarter
 import com.github.atm1020.tuilaunch.model.ACTION_ID_PREFIX
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
@@ -52,6 +53,7 @@ class TuiAppLaunchService(private val project: Project) {
         val component = FileEditorManager.getInstance(project).selectedTextEditor?.contentComponent
         if (component != null) IdeFocusManager.getInstance(project).requestFocus(component, true)
     }
+    var promptBoxCompletions: PromptBoxCopilotStarter = PromptBoxCopilotStarter()
     private var hostListenersInstalled = false
     private var windowRevealedByLaunch = false
     private var applyingSize = false
@@ -435,7 +437,7 @@ class TuiAppLaunchService(private val project: Project) {
         promptBox: PromptBox,
     ): TuiTabLayout {
         val promptBoxVisible = promptBoxPreferences.visibilityFor(appName)
-        if (promptBoxVisible) promptBox.installEditor()
+        if (promptBoxVisible) showPromptBoxEditor(promptBox)
         return TuiTabLayout(
             terminal = session.component,
             promptBox = promptBox.component,
@@ -451,8 +453,13 @@ class TuiAppLaunchService(private val project: Project) {
     }
 
     private fun showPromptBox(tab: OpenTab, visible: Boolean) {
-        if (visible) tab.promptBox.installEditor()
+        if (visible) showPromptBoxEditor(tab.promptBox)
         tab.layout.promptBoxVisible = visible
+    }
+
+    private fun showPromptBoxEditor(promptBox: PromptBox) {
+        promptBox.installEditor()
+        promptBoxCompletions.promptBoxShown()
     }
 
     private fun onPromptBoxPercentChanged(tab: OpenTab, percent: Int) {

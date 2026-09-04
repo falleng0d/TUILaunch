@@ -46,7 +46,7 @@ class CopilotLanguageServer(
     private val editorInfo: CopilotEditorInfo = ideEditorInfo(),
     private val editorPluginInfo: CopilotEditorInfo = pluginEditorInfo(),
     private val openDocument: (String) -> Unit = { BrowserUtil.browse(it) },
-) {
+) : CopilotCompletionServer {
     private val statusFlow = MutableSharedFlow<CopilotStatusChange>(
         replay = 1,
         extraBufferCapacity = STATUS_BUFFER,
@@ -75,7 +75,7 @@ class CopilotLanguageServer(
         return CopilotStatus(status, result?.string("user"))
     }
 
-    fun didOpen(uri: String, languageId: String, version: Int, text: String) {
+    override fun didOpen(uri: String, languageId: String, version: Int, text: String) {
         val document = JsonObject().apply {
             addProperty("uri", uri)
             addProperty("languageId", languageId)
@@ -85,7 +85,7 @@ class CopilotLanguageServer(
         connection.notify("textDocument/didOpen", JsonObject().apply { add("textDocument", document) })
     }
 
-    fun didChange(uri: String, version: Int, text: String) {
+    override fun didChange(uri: String, version: Int, text: String) {
         val params = JsonObject().apply {
             add(
                 "textDocument",
@@ -99,14 +99,14 @@ class CopilotLanguageServer(
         connection.notify("textDocument/didChange", params)
     }
 
-    fun didClose(uri: String) {
+    override fun didClose(uri: String) {
         val params = JsonObject().apply {
             add("textDocument", JsonObject().apply { addProperty("uri", uri) })
         }
         connection.notify("textDocument/didClose", params)
     }
 
-    suspend fun inlineCompletion(
+    override suspend fun inlineCompletion(
         uri: String,
         version: Int,
         position: LspPosition,
@@ -133,14 +133,14 @@ class CopilotLanguageServer(
         return parseItems(connection.request("textDocument/inlineCompletion", params))
     }
 
-    fun didShowCompletion(item: InlineCompletionItem) {
+    override fun didShowCompletion(item: InlineCompletionItem) {
         connection.notify(
             "textDocument/didShowCompletion",
             JsonObject().apply { add("item", item.toJson()) },
         )
     }
 
-    suspend fun executeCommand(command: String, arguments: List<String>): JsonElement {
+    override suspend fun executeCommand(command: String, arguments: List<String>): JsonElement {
         val params = JsonObject().apply {
             addProperty("command", command)
             add("arguments", JsonArray().apply { arguments.forEach { add(it) } })

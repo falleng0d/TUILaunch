@@ -137,8 +137,13 @@ internal class PromptBox(
         sender?.send(this)
     }
 
+    fun promptHistoryBlocks(): List<String> {
+        val document = promptDocument() ?: return emptyList()
+        return parsePromptBlocks(document.text).map { it.text }
+    }
+
     fun historyPrevious() {
-        val history = browsedHistory ?: PromptBoxHistory(recordedPrompts()).also { browsedHistory = it }
+        val history = browsedHistory ?: PromptBoxHistory(promptHistoryBlocks()).also { browsedHistory = it }
         showHistoryEntry(history.previous(text), PromptHistoryDirection.PREVIOUS)
         if (!history.isBrowsing) browsedHistory = null
     }
@@ -272,11 +277,6 @@ internal class PromptBox(
 
     private fun registerTheEscapeShortcutOnThePanel() {
         PromptBoxEscapeAction().registerCustomShortcutSet(ESCAPE_SHORTCUT_SET, panel, parentDisposable)
-    }
-
-    private fun recordedPrompts(): List<String> {
-        val document = promptDocument() ?: return emptyList()
-        return parsePromptBlocks(document.text).map { it.text }
     }
 
     private fun showHistoryEntry(entry: String?, direction: PromptHistoryDirection) {

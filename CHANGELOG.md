@@ -47,16 +47,25 @@
   completions from JetBrains AI Assistant appear in it as grey ghost text while you type, exactly as
   they do in a file. Tab accepts the suggestion and Escape dismisses it; a second Escape then hands the
   keyboard to the terminal, and Up and Down move the cursor instead of browsing the history while a
-  suggestion is showing. GitHub Copilot cannot complete here, because its agent only ever learns about
-  files opened as editor tabs.
-- A "Prompt box completions" group in the TUILaunch settings holds the settings to choose GitHub
-  Copilot as the prompt box completion source instead of JetBrains AI Assistant, which stays the
-  default. Copilot is reached through the standalone Copilot Language Server, so it needs a Copilot
-  subscription and a Copilot client already signed in on this machine. "Copilot Language Server" takes
-  a binary of your own; left empty, the one that ships with the GitHub Copilot plugin or the one on
-  `PATH` is used, and the line under the field names what was found. "Include the PROMPT.md history as
-  completion context" decides whether the prompts already in the file travel with the draft, and
-  "Check Copilot status" reports who is signed in, for the path currently in the field.
+  suggestion is showing.
+- GitHub Copilot can complete the prompt box too. A "Prompt box completions" group in the TUILaunch
+  settings offers it under "Completion source" next to JetBrains AI Assistant, which stays the default;
+  pick Copilot and the ghost text in the box comes from Copilot instead, while every other editor keeps
+  whatever completes it today. Copilot is reached through the standalone Copilot Language Server rather
+  than through the JetBrains Copilot plugin, so it needs a Copilot subscription and a Copilot client
+  already signed in on this machine, whose credentials TUILaunch reuses without ever asking for a login
+  of its own. "Copilot Language Server" takes a binary of your own; left empty, the one that ships with
+  the GitHub Copilot plugin or the one on `PATH` is used, and the line under the field names what was
+  found. "Check Copilot status" reports who is signed in, for the path currently in the field.
+- "Include the PROMPT.md history as completion context" decides what Copilot sees. While it is on, which
+  is the default, the prompts already recorded in `PROMPT.md` are sent ahead of the draft as one Markdown
+  document, so a suggestion can pick up the wording and the subject of earlier prompts; the newest
+  prompts win once the history grows past 48 000 characters. While it is off only the draft is sent.
+  No file of the project is opened for any of this.
+- The prompt box falls back to JetBrains AI Assistant whenever Copilot is not ready, whether no binary
+  was found, no Copilot client on the machine is signed in, or the server failed to start, and a balloon
+  names the reason once per IDE session. The server starts as soon as a prompt box becomes visible with
+  Copilot selected, so only the first suggestion of a session waits for it.
 
 ## [0.7.0] - 2026-09-03
 

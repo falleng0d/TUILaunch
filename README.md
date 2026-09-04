@@ -90,16 +90,10 @@ appended to the file verbatim and comes back as several separate history entries
 <kbd>Escape</kbd> in the box hands the keyboard to that tab's terminal, after dropping a text selection or closing a
 completion popup first, as <kbd>Escape</kbd> does in any editor.
 
-A **Prompt box completions** group in the TUILaunch settings decides where the box asks for its inline completions.
-**Completion source** offers **JetBrains AI Assistant**, which is the default, and **GitHub Copilot**. Copilot is
-reached through the standalone Copilot Language Server rather than through the JetBrains Copilot plugin, so it needs a
-Copilot subscription and a Copilot client already signed in on this machine; TUILaunch reuses the credentials that
-client stored and never asks for a login of its own. Leave **Copilot Language Server** empty and the binary is looked
-up in the installed GitHub Copilot plugin first and on `PATH` (`copilot-language-server`) second, and the line under
-the field names what was found; fill it in to use a binary of your own, such as one installed with
-`npm i -g @github/copilot-language-server`. **Include the PROMPT.md history as completion context** decides whether
-the prompts already recorded in `PROMPT.md` travel with the draft as context. **Check Copilot status** asks the server
-who is signed in, using the path currently in the field, so a path can be tried before the settings are applied.
+Inline completions appear in the box as grey ghost text while you type, exactly as they do in a file: <kbd>Tab</kbd>
+accepts the suggestion, <kbd>Escape</kbd> dismisses it, a second <kbd>Escape</kbd> then hands the keyboard to the
+terminal, and <kbd>Up</kbd> and <kbd>Down</kbd> move the cursor instead of browsing the history while a suggestion is
+showing. They come from JetBrains AI Assistant unless you pick GitHub Copilot instead.
 
 Three more actions ship with no shortcut and can be given one in <kbd>Settings/Preferences</kbd> > <kbd>Keymap</kbd>:
 
@@ -108,6 +102,33 @@ Three more actions ship with no shortcut and can be given one in <kbd>Settings/P
 - `TUILauncher.PromptHistoryPrevious` / `TUILauncher.PromptHistoryNext` — the same history walk as <kbd>Up</kbd> and
   <kbd>Down</kbd>, from keys of your own. On macOS <kbd>Ctrl</kbd> + <kbd>P</kbd> and <kbd>Ctrl</kbd> + <kbd>N</kbd>
   already browse the history, because the box borrows the caret movement keys those are bound to.
+
+### Copilot in the prompt box
+
+A **Prompt box completions** group in the TUILaunch settings decides where the box asks for its inline completions.
+**Completion source** offers **JetBrains AI Assistant**, which is the default, and **GitHub Copilot**. Pick Copilot
+and the ghost text in the box comes from Copilot instead; nothing changes for any other editor, which keeps whatever
+completes it today.
+
+Copilot is reached through the standalone Copilot Language Server rather than through the JetBrains Copilot plugin, so
+it needs a Copilot subscription and a Copilot client already signed in on this machine. TUILaunch reuses the
+credentials that client stored under `~/.config/github-copilot` and never asks for a login of its own. Leave
+**Copilot Language Server** empty and the binary is looked up in the installed GitHub Copilot plugin first and on
+`PATH` (`copilot-language-server`) second, and the line under the field names what was found; fill it in to use a
+binary of your own, such as one installed with `npm i -g @github/copilot-language-server`. **Check Copilot status**
+asks the server who is signed in, using the path currently in the field, so a path can be tried before the settings
+are applied.
+
+**Include the PROMPT.md history as completion context** decides what Copilot sees. With it on, which is the default,
+the prompts already recorded in `PROMPT.md` are sent ahead of the draft, separated by `---` lines, so a suggestion can
+pick up the wording and the subject of earlier prompts; the newest prompts win when the history grows past 48 000
+characters. With it off only the draft is sent. Either way the text is a Markdown document of TUILaunch's own and no
+file of the project is opened for it.
+
+While Copilot is not ready — no binary found, no signed-in client, or a server that failed to start — the box quietly
+falls back to JetBrains AI Assistant, and a balloon names the reason once per IDE session. The server is started when
+a prompt box first becomes visible with Copilot selected, so the first suggestion of a session takes a second or two
+longer than the ones after it.
 
 ### Reopen TUI tabs when the project is opened
 
@@ -298,6 +319,13 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - Gson's default configuration drops a null-valued field, which would strip the `"result": null` that a JSON-RPC response to `window/showMessageRequest` or `shutdown` must carry, so the serializer needs `serializeNulls()`.
 - `XmlSerializer` leaves a field at its default when the stored value names no constant of that enum, so persisted enum settings survive a renamed or removed constant without any fallback of their own.
 - A settings dialog is modal, so a result computed off the EDT reaches its label only through `invokeLater(runnable, ModalityState.any())`; with the default modality the runnable waits until the dialog is closed.
+- Exactly one inline completion provider serves an event: `InlineCompletionHandler.getProvider` takes the first provider in loading order whose `isEnabled` is true, and AI Assistant's own cloud provider registers as `order="first, before ...Copilot..."`, so a provider that wants to answer before it needs `order="first"` too. Returning false is then the whole fallback mechanism, because the next provider in order gets the event.
+- The `inline.completion.provider` extension point is declared in `EditorExtensionPoints.xml`, which reaches a plugin only through `com.intellij.modules.lang`; `com.intellij.modules.platform` alone does not bring it.
+- `isEnabled` runs on the EDT and its exceptions are logged and read as false, so a provider that depends on an out-of-process backend has to answer false while the backend is still starting rather than wait for it.
+- Copilot's `textDocument/inlineCompletion` answers with the whole line as `insertText` and a `range` that starts at character 0, which means it replaces the current line: the ghost text is `insertText` minus the text already on the line inside the range, an item whose `insertText` does not start with that text has to be skipped, and a range that ends past the cursor cannot be rendered as ghost text at all.
+- Copilot positions and `acceptedLength` count UTF-16 code units, which is exactly what IntelliJ `Document` offsets and Kotlin `String.length` already are, so no conversion is needed even for astral characters.
+- `InlineCompletionHandler.insert` asserts write access, so a test that accepts ghost text has to call it inside a write action even though the platform's own `InsertInlineCompletionAction` looks like it does not.
+- `EditorFactoryListener.editorCreated` runs before the owner of a light editor can attach its own user data, but `editorReleased` still sees that data, which makes the release hook the only listener able to recognise a plugin's own editor without holding a reference to it.
 - `BaseOSProcessHandler.startNotify` attaches a `BaseOutputReader` that consumes the child's stdout and decodes it into lines, which destroys `Content-Length` framing, and `ProcessHandler.destroyProcess` queues its work behind `startNotify`, so a handler for a stdio LSP server has to call `startNotify` and override `createProcessOutReader` to hand the base class an empty reader while the JSON-RPC loop reads `handler.process.inputStream` itself.
 
 ---

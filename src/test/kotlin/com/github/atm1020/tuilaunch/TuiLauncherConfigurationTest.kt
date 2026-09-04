@@ -75,6 +75,15 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         }
     }
 
+    override fun tearDown() {
+        try {
+            TuiLauncherSettings.getInstance().state.promptBoxCompletionSource =
+                PromptBoxCompletionSource.JETBRAINS_AI
+        } finally {
+            super.tearDown()
+        }
+    }
+
     fun testKeySelectionPanelUsesKeymapLikeShortcutTable() {
         val component = configuration().createComponent() as JPanel
         val table = findShortcutTable(component)!!

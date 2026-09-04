@@ -5,6 +5,9 @@
     <vendor>atm1020</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <!-- com.intellij.modules.lang owns the inline.completion.provider extension point; the platform
+         module alone does not declare it. -->
+    <depends>com.intellij.modules.lang</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
@@ -15,11 +18,24 @@
         <applicationConfigurable parentId="tools" instance="com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration"
                                  id="com.example.tuilauncher.TuiLauncherConfigurable"
                                  displayName="TUI Launcher"/>
+        <notificationGroup id="TUILaunch" displayType="BALLOON"/>
+        <!-- order="first": InlineCompletionHandler.getProvider serves an event with the first provider in
+             loading order whose isEnabled says yes, and AI Assistant's own provider registers as
+             "first, before ...Copilot...", so anything later never sees a prompt box event. Returning
+             false here is what hands the event on to AI Assistant. -->
+        <inline.completion.provider
+                id="com.github.atm1020.tuilaunch.CopilotInlineCompletionProvider"
+                implementation="com.github.atm1020.tuilaunch.copilot.CopilotInlineCompletionProvider"
+                order="first"/>
         <postStartupActivity implementation="com.github.atm1020.tuilaunch.LoadDynamicActions"/>
         <!-- editorFactoryListener rather than lineMarkerProvider: MarkdownLanguage and PlainTextLanguage are
              siblings, so a lineMarkerProvider registered on "TEXT" never fires for a .md file, and registering
              on Language.ANY would hand us a PsiElement we cannot type without the Markdown plugin (TSK-9057). -->
         <editorFactoryListener implementation="com.github.atm1020.tuilaunch.prompt.PromptGutterInstaller"/>
+        <!-- editorReleased is the only hook that still sees the prompt box user data on a box editor the
+             platform is tearing down, which is where the Copilot virtual document has to be closed. -->
+        <editorFactoryListener
+                implementation="com.github.atm1020.tuilaunch.copilot.PromptBoxCopilotEditorListener"/>
         <!-- canCloseContents: without it the shared tab context menu's Close Tab / Close Other Tabs /
              Close All Tabs stay disabled and no X appears on a tab, no matter what
              Content.isCloseable says (TSK-9016). -->

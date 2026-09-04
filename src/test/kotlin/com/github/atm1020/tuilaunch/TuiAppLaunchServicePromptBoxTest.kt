@@ -1,5 +1,7 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.copilot.PromptBoxCopilotStarter
+import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.prompt.PromptBoxPanel
 import com.github.atm1020.tuilaunch.prompt.PromptBox
@@ -245,6 +247,29 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
         service.setPromptBoxVisible(false)
 
         assertEquals(sessionFocusCountBeforeHiding, session.focusCount)
+    }
+
+    fun testShowingTheBoxStartsTheCopilotServerWhileCopilotIsTheCompletionSource() {
+        val (service, _) = newService(listOf(FakeSession()))
+        val backend = FakeCopilotCompletionBackend()
+        service.promptBoxCompletions = PromptBoxCopilotStarter(FakePromptBoxCompletionSettings()) { backend }
+        service.launchNew("claude", "claude")
+
+        service.setPromptBoxVisible(true)
+
+        assertEquals(1, backend.startRequests)
+    }
+
+    fun testShowingTheBoxLeavesCopilotAloneWhileJetBrainsAiIsTheCompletionSource() {
+        val (service, _) = newService(listOf(FakeSession()))
+        val backend = FakeCopilotCompletionBackend()
+        val settings = FakePromptBoxCompletionSettings(PromptBoxCompletionSource.JETBRAINS_AI)
+        service.promptBoxCompletions = PromptBoxCopilotStarter(settings) { backend }
+        service.launchNew("claude", "claude")
+
+        service.setPromptBoxVisible(true)
+
+        assertEquals(0, backend.startRequests)
     }
 
     fun testClosingATabHidesThePromptBoxBeforeItsEditorIsReleased() {

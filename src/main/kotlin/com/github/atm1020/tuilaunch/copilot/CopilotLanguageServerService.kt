@@ -89,7 +89,7 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
     private val serverFactory: (JsonRpcConnection) -> CopilotLanguageServer,
     private val retryDelaysMs: List<Long>,
     private val handshakeTimeoutMs: Long,
-) : CopilotServerControl {
+) : CopilotServerControl, CopilotCompletionBackend {
     constructor(scope: CoroutineScope) : this(
         scope,
         PersistentCopilotServerSettings,
@@ -118,6 +118,9 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
 
     val state: StateFlow<CopilotServerState> = stateFlow.asStateFlow()
 
+    override val serverState: CopilotServerState
+        get() = stateFlow.value
+
     init {
         scope.coroutineContext.job.invokeOnCompletion { session?.process?.destroy() }
     }
@@ -125,7 +128,13 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
     fun server(): CopilotLanguageServer? =
         if (stateFlow.value is CopilotServerState.Ready) session?.server else null
 
-    fun ensureStarted() {
+    override fun completionServer(): CopilotCompletionServer? = server()
+
+    override fun launchFollowUp(work: suspend (CopilotCompletionServer) -> Unit) {
+        scope.launch { server()?.let { work(it) } }
+    }
+
+    override fun ensureStarted() {
         scope.launch {
             transitions.withLock {
                 if (isTerminalFailure(stateFlow.value)) return@withLock

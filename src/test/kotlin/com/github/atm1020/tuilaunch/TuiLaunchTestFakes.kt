@@ -1,6 +1,14 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.action.SendPromptBoxAction
+import com.github.atm1020.tuilaunch.copilot.CopilotCompletionBackend
+import com.github.atm1020.tuilaunch.copilot.CopilotCompletionServer
+import com.github.atm1020.tuilaunch.copilot.CopilotServerState
+import com.github.atm1020.tuilaunch.copilot.InlineCompletionItem
+import com.github.atm1020.tuilaunch.copilot.InlineCompletionTriggerKind
+import com.github.atm1020.tuilaunch.copilot.LspPosition
+import com.github.atm1020.tuilaunch.copilot.PromptBoxCompletionSettings
+import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
@@ -9,6 +17,8 @@ import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
+import com.google.gson.JsonElement
+import com.google.gson.JsonNull
 import com.intellij.codeInsight.inline.completion.InlineCompletion
 import com.intellij.codeInsight.inline.completion.InlineCompletionEvent
 import com.intellij.codeInsight.inline.completion.InlineCompletionHandler
@@ -23,10 +33,15 @@ import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSug
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.KeyboardShortcut
+import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.testFramework.PlatformTestUtil
+import kotlinx.coroutines.runBlocking
+import java.util.Collections
+import java.util.concurrent.CompletableFuture
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.KeyStroke
@@ -50,18 +65,116 @@ private class GhostTextProvider : InlineCompletionProvider {
 }
 
 internal fun showGhostTextIn(box: PromptBox, parentDisposable: Disposable) {
-    InlineCompletionHandler.registerTestHandler(GhostTextProvider(), parentDisposable)
-    val handler = requireNotNull(InlineCompletion.getHandlerOrNull(box.editor)) {
-        "No inline completion handler was installed on the prompt box editor"
-    }
-    @Suppress("DEPRECATION")
-    handler.invoke(InlineCompletionEvent.DirectCall(box.editor, box.editor.caretModel.currentCaret, null))
+    val provider = GhostTextProvider()
+    InlineCompletionHandler.registerTestHandler(provider, parentDisposable)
+    askForAnInlineCompletionIn(box.editor, provider.id)
     PlatformTestUtil.waitWithEventsDispatching(
         "The test provider never rendered ghost text in the prompt box",
         { InlineCompletionContext.getOrNull(box.editor)?.isCurrentlyDisplaying() == true },
         GHOST_TEXT_TIMEOUT_SECONDS,
     )
 }
+
+internal fun askForAnInlineCompletionIn(editor: Editor, providerId: InlineCompletionProviderID) {
+    val handler = requireNotNull(InlineCompletion.getHandlerOrNull(editor)) {
+        "No inline completion handler was installed on the editor"
+    }
+    handler.invokeEvent(InlineCompletionEvent.ManualCall(editor, providerId, UserDataHolderBase()))
+    val execution = CompletableFuture.runAsync { runBlocking { handler.awaitExecution() } }
+    PlatformTestUtil.waitWithEventsDispatching(
+        "The inline completion request never finished",
+        { execution.isDone },
+        GHOST_TEXT_TIMEOUT_SECONDS,
+    )
+    execution.join()
+}
+
+internal sealed interface CopilotServerCall {
+
+    data class Opened(val uri: String, val languageId: String, val version: Int, val text: String) : CopilotServerCall
+
+    data class Changed(val uri: String, val version: Int, val text: String) : CopilotServerCall
+
+    data class Closed(val uri: String) : CopilotServerCall
+
+    data class Asked(
+        val uri: String,
+        val version: Int,
+        val position: LspPosition,
+        val triggerKind: InlineCompletionTriggerKind,
+    ) : CopilotServerCall
+
+    data class Shown(val item: InlineCompletionItem) : CopilotServerCall
+
+    data class Executed(val command: String, val arguments: List<String>) : CopilotServerCall
+}
+
+internal class FakeCopilotCompletionServer(
+    private val items: List<InlineCompletionItem> = emptyList(),
+    private val failure: Throwable? = null,
+) : CopilotCompletionServer {
+
+    private val recorded = Collections.synchronizedList(mutableListOf<CopilotServerCall>())
+
+    val calls: List<CopilotServerCall> get() = synchronized(recorded) { recorded.toList() }
+
+    override fun didOpen(uri: String, languageId: String, version: Int, text: String) {
+        recorded.add(CopilotServerCall.Opened(uri, languageId, version, text))
+    }
+
+    override fun didChange(uri: String, version: Int, text: String) {
+        recorded.add(CopilotServerCall.Changed(uri, version, text))
+    }
+
+    override fun didClose(uri: String) {
+        recorded.add(CopilotServerCall.Closed(uri))
+    }
+
+    override suspend fun inlineCompletion(
+        uri: String,
+        version: Int,
+        position: LspPosition,
+        triggerKind: InlineCompletionTriggerKind,
+    ): List<InlineCompletionItem> {
+        recorded.add(CopilotServerCall.Asked(uri, version, position, triggerKind))
+        failure?.let { throw it }
+        return items
+    }
+
+    override fun didShowCompletion(item: InlineCompletionItem) {
+        recorded.add(CopilotServerCall.Shown(item))
+    }
+
+    override suspend fun executeCommand(command: String, arguments: List<String>): JsonElement {
+        recorded.add(CopilotServerCall.Executed(command, arguments))
+        return JsonNull.INSTANCE
+    }
+}
+
+internal class FakeCopilotCompletionBackend(
+    override var serverState: CopilotServerState = CopilotServerState.Ready("octocat"),
+    private val server: CopilotCompletionServer? = null,
+) : CopilotCompletionBackend {
+
+    var startRequests = 0
+        private set
+
+    override fun ensureStarted() {
+        startRequests++
+    }
+
+    override fun completionServer(): CopilotCompletionServer? = server
+
+    override fun launchFollowUp(work: suspend (CopilotCompletionServer) -> Unit) {
+        val target = server ?: return
+        runBlocking { work(target) }
+    }
+}
+
+internal class FakePromptBoxCompletionSettings(
+    override var completionSource: PromptBoxCompletionSource = PromptBoxCompletionSource.COPILOT,
+    override var includePromptHistory: Boolean = false,
+) : PromptBoxCompletionSettings
 
 internal fun registerTheSendPromptBoxAction(parentDisposable: Disposable) {
     val actionManager = ActionManager.getInstance()
