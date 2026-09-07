@@ -171,19 +171,21 @@ VCS. What TUILaunch adds to the configured command depends on the CLI:
   from its first message. A reopened tab is resumed with `--resume <tab id>` once that transcript exists.
 - **codex** — no flag can choose the id, so the launch installs a `SessionStart` hook that writes codex's own
   session id into TUILaunch's state directory. A reopened tab starts as `codex resume <session id>`.
-- **opencode** — the launch starts opencode's embedded server on a free port with
-  `--port <port> --hostname 127.0.0.1`, and a reopened tab is resumed with `--session <session id>`. Creating and
-  remembering that id needs an HTTP call that arrives with the next change; until then an opencode tab comes back
-  fresh.
+- **opencode** — the launch starts opencode's embedded server on a loopback port TUILaunch picks with
+  `--port <port> --hostname 127.0.0.1`. As soon as that server answers, the plugin creates the tab's session
+  through it and tells the TUI to show it, and a reopened tab comes back with `--session <session id>`. When you
+  close such a tab and nobody ever prompted in its session, TUILaunch asks the server to delete it again; if the
+  server is already gone the empty session simply stays.
 - **omp** — the launch points omp at a session directory of the tab's own with `--session-dir`, and a reopened tab
   resumes the newest session file found there with `--resume <file>`.
 
 Arguments TUILaunch adds are appended after ` -- ` when the command goes through `headroom wrap`, so headroom
 forwards them to the CLI instead of claiming them for itself.
 
-A tab you never typed in comes back fresh. All four CLIs write their session lazily, with the first message, so
-there is nothing to resume and the tab just starts a new conversation. If a reopened tab does end within 15
-seconds of starting — a session deleted in the CLI, a transcript that is gone — TUILaunch starts it once more
+A tab you never typed in comes back fresh: claude, codex and omp write their session with the first message, so
+there is nothing to resume and the tab just starts a new conversation. An opencode tab comes back to the session
+the plugin created for it, which is an empty conversation when you never prompted in it. If a reopened tab does
+end within 15 seconds of starting — a session deleted in the CLI, a transcript that is gone — TUILaunch starts it once more
 without the resume arguments, keeping its name and its place in the tab strip, and notes that in the log. A tab
 that ends a second time is left closed, and a tab you launched yourself is never restarted.
 
@@ -390,6 +392,8 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - A codex `SessionStart` hook added per invocation with `-c 'hooks.SessionStart=[…]'` makes the TUI block on a trust review unless `--dangerously-bypass-hook-trust` is also passed, and the hook fires when the first turn starts rather than at process launch, so the session id is only on disk once the user has sent a prompt.
 - The codex hook command runs through `$SHELL -lc`, so a path inside it needs its own double quotes (`cat > "<path>"`, escaped as `\"` inside the TOML string); a path containing a double quote or a backslash cannot be expressed this way and the tab is left unmanaged instead.
 - `omp --resume <path>` silently creates an empty session at that path when the file does not exist, so a resume argument must only ever be a file that was found on disk.
+- A bare `opencode` opens no TCP port at all, and its embedded server needs a moment after the process starts, so `GET /global/health` answering `{"healthy":true}` on the port passed as `--port <port> --hostname 127.0.0.1` is the only signal that it is ready to be asked anything.
+- opencode writes its session row only with the first prompt and no flag can pick the id, so a tab's session has to be created through `POST /session?directory=<cwd>` and handed to the running TUI with `POST /tui/select-session`; `GET /session/<id>/message` is what tells a session nobody prompted in apart from one worth keeping.
 - `ContentManager.addContent(Content, int)` inserts at that index and reads -1 as "append", which is the only supported way to put a tab back at the strip position it had.
 - A tab the plugin closes itself and a tab the user closes from the strip both arrive as one `contentRemoved` carrying no reason, so the only way to tell them apart is bookkeeping done before calling `removeContent`; project close fires no event at all and a drag is marked with `Content.TEMPORARY_REMOVED_KEY`.
 

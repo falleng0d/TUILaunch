@@ -63,7 +63,7 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
     private fun appConfig(name: String): TuiAppConfig = state().tuiApps.first { it.name == name }
 
     private fun newService(sessions: List<FakeSession>): Pair<TuiAppLaunchService, FakeHost> {
-        val service = TuiAppLaunchService(project)
+        val service = TuiAppLaunchService(project, testCoroutineScope(testRootDisposable))
         val host = FakeHost()
         service.host = host
         service.sessionFactory = FakeFactory(sessions)

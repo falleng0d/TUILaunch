@@ -16,7 +16,9 @@ interface AgentSessionStrategy {
 
     fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String>
 
-    fun cleanUp(tab: TabIdentity) {
+    suspend fun afterLaunch(tab: TabIdentity, remembered: RememberedSession): String? = null
+
+    suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
     }
 }
 
@@ -53,10 +55,11 @@ object AgentSessionStrategies {
         kind: AgentCliKind,
         environment: AgentSessionEnvironment,
         freePort: () -> Int = ::allocateFreePort,
+        openCodeApi: (Int) -> OpenCodeApi = { port -> HttpOpenCodeApi(port) },
     ): AgentSessionStrategy = when (kind) {
         AgentCliKind.CLAUDE -> ClaudeSessionStrategy(environment.claudeHome)
         AgentCliKind.CODEX -> CodexSessionStrategy(environment.stateDirectory)
-        AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(freePort)
+        AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(freePort, openCodeApi)
         AgentCliKind.OMP -> OmpSessionStrategy(environment.ompRoot)
     }
 

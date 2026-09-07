@@ -4,6 +4,8 @@ import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.ClaudeProjectPath
+import com.github.atm1020.tuilaunch.resume.OpenCodeApi
+import com.github.atm1020.tuilaunch.resume.OpenCodeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
@@ -19,6 +21,10 @@ private const val TAB_UUID = "b7c1e0d4-3a52-4f19-8c7d-2e6f5a9b1c30"
 private const val CODEX_SESSION_ID = "019a4f3c-7b21-7cd0-9e55-3f1b2a6d8c47"
 private const val OLDER_OMP_SESSION = "2026-09-07T21-15-03-123Z_019a4f3c7b217cd09e553f1b2a6d8c47.jsonl"
 private const val NEWEST_OMP_SESSION = "2026-09-08T09-02-11-000Z_019a52118c334de1af664e2c3b7e9d58.jsonl"
+private const val OPENCODE_PORT = 45123
+private const val AGENT_SESSION_TIMEOUT_SECONDS = 30
+private const val QUIET_MILLIS = 200L
+private const val QUIET_POLL_MILLIS = 5L
 
 class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
@@ -291,7 +297,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         host.removeTab(host.tabs.single())
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
-        assertFalse(Files.exists(stateFile))
+        awaitDeletedFile(stateFile)
     }
 
     fun testTheCloseActionDeletesTheHookStateOfACodexTab() {
@@ -304,7 +310,119 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         service.closeActiveTui()
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
-        assertFalse(Files.exists(stateFile))
+        awaitDeletedFile(stateFile)
+    }
+
+    fun testAFreshOpenCodeTabRecordsTheSessionItsServerCreated() {
+        configureApp("opencode", "opencode")
+        val api = RecordingOpenCodeApi(healthyFromCall = 3)
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory, api)
+
+        service.launchNew("opencode", "opencode")
+
+        assertEquals(CREATED_OPENCODE_SESSION, awaitRecordedAgentSessionId())
+        assertEquals(listOf("opencode --port $OPENCODE_PORT --hostname 127.0.0.1"), factory.commands)
+        assertEquals(
+            listOf(CreatedSession(projectPath(), savedTabs().single().tabUuid!!)),
+            api.creations,
+        )
+        assertEquals(listOf(CREATED_OPENCODE_SESSION), api.selections)
+    }
+
+    fun testAWrappedOpenCodeTabRecordsTheSessionItsServerCreated() {
+        configureApp("opencode", "headroom wrap opencode --no-serena")
+        val api = RecordingOpenCodeApi()
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory, api)
+
+        service.launchNew("opencode", "headroom wrap opencode --no-serena")
+
+        assertEquals(CREATED_OPENCODE_SESSION, awaitRecordedAgentSessionId())
+        assertEquals(
+            listOf("headroom wrap opencode --no-serena -- --port $OPENCODE_PORT --hostname 127.0.0.1"),
+            factory.commands,
+        )
+    }
+
+    fun testAnOpenCodeTabComesBackToTheSessionItRecorded() {
+        configureApp("opencode", "opencode")
+        saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, CREATED_OPENCODE_SESSION))
+        val api = RecordingOpenCodeApi()
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory, api)
+
+        service.restoreSavedTabs()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(
+            listOf(
+                "opencode --port $OPENCODE_PORT --hostname 127.0.0.1 --session $CREATED_OPENCODE_SESSION"
+            ),
+            factory.commands,
+        )
+        assertEquals(CREATED_OPENCODE_SESSION, savedTabs().single().agentSessionId)
+        assertStaysFalse("A reopened opencode tab asked its server for another session") {
+            api.healthCalls > 0 || api.creations.isNotEmpty()
+        }
+    }
+
+    fun testTheSettingOffLeavesAnOpenCodeTabWithoutAnyServerWork() {
+        TuiLauncherSettings.getInstance().state.restoreAgentSessions = false
+        configureApp("opencode", "opencode")
+        val api = RecordingOpenCodeApi()
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory, api)
+
+        service.launchNew("opencode", "opencode")
+
+        assertEquals(listOf("opencode"), factory.commands)
+        assertStaysFalse("An unmanaged opencode tab talked to its server") {
+            api.healthCalls > 0 || api.creations.isNotEmpty()
+        }
+        assertNull(savedTabs().single().agentSessionId)
+    }
+
+    fun testAnOpenCodeTabClosedBeforeItsServerAnsweredCreatesNoSession() {
+        configureApp("opencode", "opencode")
+        val api = RecordingOpenCodeApi(healthyFromCall = RecordingOpenCodeApi.NEVER_HEALTHY)
+        val (service, _) = newService(FakeFactory(FakeSession()), api)
+        service.launchNew("opencode", "opencode")
+
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertStaysFalse("A closed opencode tab still created a session") { api.creations.isNotEmpty() }
+        assertTrue(savedTabs().isEmpty())
+    }
+
+    fun testClosingAnOpenCodeTabDiscardsASessionNobodyPromptedIn() {
+        configureApp("opencode", "opencode")
+        val api = RecordingOpenCodeApi(messages = 0)
+        val (service, _) = newService(FakeFactory(FakeSession()), api)
+        service.launchNew("opencode", "opencode")
+        awaitRecordedAgentSessionId()
+
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(listOf(CREATED_OPENCODE_SESSION), awaitDiscardedSessions(api))
+    }
+
+    fun testAnOpenCodeTabWhoseProcessEndsKeepsItsSession() {
+        configureApp("opencode", "opencode")
+        val api = RecordingOpenCodeApi(messages = 0)
+        val session = FakeSession()
+        val (service, _) = newService(FakeFactory(session), api)
+        service.launchNew("opencode", "opencode")
+        awaitRecordedAgentSessionId()
+
+        session.terminate()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertStaysFalse("An opencode session was discarded without the user closing its tab") {
+            api.deletions.isNotEmpty()
+        }
     }
 
     fun testACodexTabWhoseProcessEndsKeepsItsHookState() {
@@ -321,13 +439,61 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertTrue(Files.exists(stateFile))
     }
 
-    private fun newService(sessionFactory: TerminalSessionFactory): Pair<TuiAppLaunchService, FakeHost> {
-        val service = TuiAppLaunchService(project)
+    private fun newService(
+        sessionFactory: TerminalSessionFactory,
+        openCodeApi: OpenCodeApi? = null,
+    ): Pair<TuiAppLaunchService, FakeHost> {
+        val service = TuiAppLaunchService(project, testCoroutineScope(testRootDisposable))
         val host = FakeHost()
         service.host = host
         service.sessionFactory = sessionFactory
         service.agentSessionEnvironment = { environment }
+        if (openCodeApi != null) {
+            service.agentSessionStrategies = { _, _ -> openCodeStrategyFor(openCodeApi) }
+        }
         return service to host
+    }
+
+    private fun openCodeStrategyFor(api: OpenCodeApi): OpenCodeSessionStrategy = OpenCodeSessionStrategy(
+        freePort = { OPENCODE_PORT },
+        apiFactory = { api },
+        pollIntervalMillis = 5,
+        startupTimeoutMillis = 5_000,
+    )
+
+    private fun awaitRecordedAgentSessionId(): String {
+        PlatformTestUtil.waitWithEventsDispatching(
+            "The tab never recorded the session its agent server created",
+            { savedTabs().singleOrNull()?.agentSessionId != null },
+            AGENT_SESSION_TIMEOUT_SECONDS,
+        )
+        return requireNotNull(savedTabs().single().agentSessionId)
+    }
+
+    private fun awaitDiscardedSessions(api: RecordingOpenCodeApi): List<String> {
+        PlatformTestUtil.waitWithEventsDispatching(
+            "The empty agent session was never discarded",
+            { api.deletions.isNotEmpty() },
+            AGENT_SESSION_TIMEOUT_SECONDS,
+        )
+        return api.deletions
+    }
+
+    private fun awaitDeletedFile(file: Path) {
+        PlatformTestUtil.waitWithEventsDispatching(
+            "The agent state file $file was never deleted",
+            { !Files.exists(file) },
+            AGENT_SESSION_TIMEOUT_SECONDS,
+        )
+    }
+
+    private fun assertStaysFalse(message: String, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + QUIET_MILLIS
+        while (System.currentTimeMillis() < deadline) {
+            assertFalse(message, condition())
+            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+            Thread.sleep(QUIET_POLL_MILLIS)
+        }
     }
 
     private fun configureApp(name: String, command: String) {

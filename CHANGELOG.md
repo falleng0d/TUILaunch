@@ -10,12 +10,14 @@
   back to the conversation it had when the project is reopened instead of starting an empty one. Every tab
   carries an identifier of its own from its first launch, and the plugin adds the resume argument each CLI
   understands: `--session-id`/`--resume` for claude, a `SessionStart` hook plus `codex resume` for codex, a
-  per-tab session directory plus `--resume` for omp, and the local server for opencode, whose session id
-  arrives with the next change. Any other command, and any command that already picks a session itself, is
+  per-tab session directory plus `--resume` for omp, and `--session` for opencode, whose tab starts its
+  embedded server on a loopback port so the plugin can create the session there as soon as the server answers
+  and point the TUI at it. Any other command, and any command that already picks a session itself, is
   launched exactly as configured. The new "Resume the agent session when a TUI tab is reopened" setting sits
   under "Reopen TUI tabs when the project is opened", is on by default and only applies while that one is on.
   A tab you never typed in comes back fresh, and a reopened tab whose session cannot be resumed is started
-  once more without the resume arguments, keeping its name and its place in the tab strip.
+  once more without the resume arguments, keeping its name and its place in the tab strip. Closing an opencode
+  tab whose session nobody ever prompted in asks its server to delete that session again.
 
 ## [0.9.0] - 2026-09-07
 

@@ -61,7 +61,7 @@ class PromptBoxEscapeTest : BasePlatformTestCase() {
     }
 
     private fun boxOfALaunchedTab(session: FakeSession): PromptBox {
-        val service = TuiAppLaunchService(project)
+        val service = TuiAppLaunchService(project, testCoroutineScope(testRootDisposable))
         val host = FakeHost()
         service.host = host
         service.sessionFactory = FakeFactory(session)

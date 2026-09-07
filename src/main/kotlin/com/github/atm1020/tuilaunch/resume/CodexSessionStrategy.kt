@@ -1,6 +1,8 @@
 package com.github.atm1020.tuilaunch.resume
 
 import com.google.gson.JsonParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -16,10 +18,12 @@ class CodexSessionStrategy(private val stateDirectory: Path) : AgentSessionStrat
         return listOf(RESUME_SUBCOMMAND, sessionId) + hookArguments
     }
 
-    override fun cleanUp(tab: TabIdentity) {
-        try {
-            Files.deleteIfExists(stateFile(tab))
-        } catch (_: IOException) {
+    override suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
+        withContext(Dispatchers.IO) {
+            try {
+                Files.deleteIfExists(stateFile(tab))
+            } catch (_: IOException) {
+            }
         }
     }
 

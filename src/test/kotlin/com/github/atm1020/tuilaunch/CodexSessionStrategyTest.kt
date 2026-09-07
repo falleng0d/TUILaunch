@@ -4,6 +4,7 @@ import com.github.atm1020.tuilaunch.resume.AgentCommand
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
 import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.TabIdentity
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -135,8 +136,10 @@ class CodexSessionStrategyTest {
         val strategy = CodexSessionStrategy(stateDirectory())
         writeState(strategy.stateFile(tab), """{"session_id":"$sessionId"}""")
 
-        strategy.cleanUp(tab)
-        strategy.cleanUp(tab)
+        runBlocking {
+            strategy.cleanUp(tab, RememberedSession(sessionId))
+            strategy.cleanUp(tab, RememberedSession(sessionId))
+        }
 
         assertFalse(Files.exists(strategy.stateFile(tab)))
     }

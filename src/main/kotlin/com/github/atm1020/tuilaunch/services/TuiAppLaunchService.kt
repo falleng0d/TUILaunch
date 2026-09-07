@@ -35,6 +35,8 @@ import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import java.awt.event.KeyEvent
 import java.nio.file.Path
 import java.util.UUID
@@ -54,7 +56,7 @@ internal fun uniqueSessionTitle(base: String, taken: Set<String>): String {
 }
 
 @Service(Service.Level.PROJECT)
-class TuiAppLaunchService(private val project: Project) {
+class TuiAppLaunchService(private val project: Project, private val scope: CoroutineScope) {
 
     var sessionFactory: TerminalSessionFactory = JediTermSessionFactory(
         project = project,
@@ -105,7 +107,7 @@ class TuiAppLaunchService(private val project: Project) {
         val launchedAt: Long,
         val restoredFromRecord: Boolean,
         val agentArgumentsWereAdded: Boolean,
-        val agentKind: AgentCliKind?,
+        val agentStrategy: AgentSessionStrategy?,
     )
 
     private data class PendingLaunch(val appName: String, val disposable: Disposable)
@@ -120,9 +122,9 @@ class TuiAppLaunchService(private val project: Project) {
 
     private data class AgentLaunch(
         val command: String,
-        val kind: AgentCliKind?,
         val argumentsWereAdded: Boolean,
         val agentSessionId: String?,
+        val strategy: AgentSessionStrategy?,
     )
 
     private val tabsBySessionId = mutableMapOf<String, OpenTab>()
@@ -495,12 +497,13 @@ class TuiAppLaunchService(private val project: Project) {
                     launchedAt = launchedAt,
                     restoredFromRecord = intent is LaunchIntent.Restore,
                     agentArgumentsWereAdded = agentLaunch.argumentsWereAdded,
-                    agentKind = agentLaunch.kind,
+                    agentStrategy = agentLaunch.strategy,
                 )
                 tabsBySessionId[sessionId] = tab
                 layout.onPromptBoxPercentChanged = { percent -> onPromptBoxPercentChanged(tab, percent) }
                 session.onTerminated { onSessionTerminated(host, tab) }
                 recordOpenTabs()
+                startTheAgentSession(tab)
                 if (onOpened != null) onOpened(tab) else selectTuiTab(host, tab)
             },
             onFailed = { throwable ->
@@ -513,7 +516,12 @@ class TuiAppLaunchService(private val project: Project) {
     }
 
     private fun agentLaunchFor(command: String, intent: LaunchIntent): AgentLaunch {
-        val plainLaunch = AgentLaunch(command, kind = null, argumentsWereAdded = false, agentSessionId = null)
+        val plainLaunch = AgentLaunch(
+            command = command,
+            argumentsWereAdded = false,
+            agentSessionId = null,
+            strategy = null,
+        )
         if (!agentSessionsAreResumed()) return plainLaunch
         val projectPath = project.basePath ?: return plainLaunch
         val parsed = AgentCommand.parse(command)
@@ -528,9 +536,9 @@ class TuiAppLaunchService(private val project: Project) {
         if (arguments.isEmpty()) return plainLaunch
         return AgentLaunch(
             command = parsed.withArguments(arguments),
-            kind = kind,
             argumentsWereAdded = true,
             agentSessionId = agentSessionIdFor(kind, strategy, tab, intent),
+            strategy = strategy,
         )
     }
 
@@ -601,12 +609,36 @@ class TuiAppLaunchService(private val project: Project) {
         )
     }
 
+    private fun startTheAgentSession(tab: OpenTab) {
+        if (!tab.agentArgumentsWereAdded) return
+        val strategy = tab.agentStrategy ?: return
+        val identity = identityOf(tab) ?: return
+        val remembered = RememberedSession(tab.agentSessionId)
+        val work = scope.launch {
+            val sessionId = strategy.afterLaunch(identity, remembered) ?: return@launch
+            invokeLater { rememberTheAgentSession(tab, sessionId) }
+        }
+        Disposer.register(tab.disposable) { work.cancel() }
+    }
+
+    private fun rememberTheAgentSession(tab: OpenTab, sessionId: String) {
+        if (tabsBySessionId[tab.sessionId] !== tab) return
+        if (tab.sessionId in closingSessions) return
+        tab.agentSessionId = sessionId
+        recordOpenTabs()
+    }
+
     private fun cleanUpAgentSession(tab: OpenTab) {
         if (!tab.agentArgumentsWereAdded) return
-        val kind = tab.agentKind ?: return
-        val projectPath = project.basePath ?: return
-        agentSessionStrategies(kind, agentSessionEnvironment())
-            .cleanUp(TabIdentity(tab.tabUuid, projectPath, project.locationHash))
+        val strategy = tab.agentStrategy ?: return
+        val identity = identityOf(tab) ?: return
+        val remembered = RememberedSession(tab.agentSessionId)
+        scope.launch { strategy.cleanUp(identity, remembered) }
+    }
+
+    private fun identityOf(tab: OpenTab): TabIdentity? {
+        val projectPath = project.basePath ?: return null
+        return TabIdentity(tab.tabUuid, projectPath, project.locationHash)
     }
 
     private fun promptBoxSenderFor(session: TerminalSession): PromptBoxSender = PromptBoxSender(

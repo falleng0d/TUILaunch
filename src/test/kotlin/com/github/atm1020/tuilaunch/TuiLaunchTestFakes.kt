@@ -12,6 +12,7 @@ import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
+import com.github.atm1020.tuilaunch.resume.OpenCodeApi
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
@@ -41,9 +42,14 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.testFramework.PlatformTestUtil
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import java.util.Collections
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.KeyStroke
@@ -211,6 +217,69 @@ private fun aSessionIsStillOpen(service: TuiAppLaunchService): Boolean {
     service.host = probeHost
     service.focusTui()
     return probeHost.showCount > 0
+}
+
+internal const val CREATED_OPENCODE_SESSION = "ses_7d1e4a9c"
+
+internal class RecordingOpenCodeApi(
+    private val createdSessionId: String = CREATED_OPENCODE_SESSION,
+    private val healthyFromCall: Int = 1,
+    private val messages: Int = 0,
+    private val failure: Throwable? = null,
+) : OpenCodeApi {
+
+    private val healthAsks = AtomicInteger()
+    private val recordedCreations = Collections.synchronizedList(mutableListOf<CreatedSession>())
+    private val recordedSelections = Collections.synchronizedList(mutableListOf<String>())
+    private val recordedCounts = Collections.synchronizedList(mutableListOf<String>())
+    private val recordedDeletions = Collections.synchronizedList(mutableListOf<String>())
+
+    val healthCalls: Int get() = healthAsks.get()
+    val creations: List<CreatedSession> get() = snapshotOf(recordedCreations)
+    val selections: List<String> get() = snapshotOf(recordedSelections)
+    val messageCounts: List<String> get() = snapshotOf(recordedCounts)
+    val deletions: List<String> get() = snapshotOf(recordedDeletions)
+
+    override suspend fun health(): Boolean {
+        val ask = healthAsks.incrementAndGet()
+        return healthyFromCall in 1..ask
+    }
+
+    override suspend fun createSession(directory: String, tabUuid: String): String {
+        recordedCreations.add(CreatedSession(directory, tabUuid))
+        failure?.let { throw it }
+        return createdSessionId
+    }
+
+    override suspend fun selectSession(id: String) {
+        recordedSelections.add(id)
+        failure?.let { throw it }
+    }
+
+    override suspend fun messageCount(id: String): Int {
+        recordedCounts.add(id)
+        failure?.let { throw it }
+        return messages
+    }
+
+    override suspend fun deleteSession(id: String) {
+        recordedDeletions.add(id)
+        failure?.let { throw it }
+    }
+
+    private fun <T> snapshotOf(recorded: MutableList<T>): List<T> = synchronized(recorded) { recorded.toList() }
+
+    companion object {
+        const val NEVER_HEALTHY = 0
+    }
+}
+
+internal data class CreatedSession(val directory: String, val tabUuid: String)
+
+internal fun testCoroutineScope(parentDisposable: Disposable): CoroutineScope {
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    Disposer.register(parentDisposable) { scope.cancel() }
+    return scope
 }
 
 internal fun temporaryAgentSessionEnvironment(): AgentSessionEnvironment {

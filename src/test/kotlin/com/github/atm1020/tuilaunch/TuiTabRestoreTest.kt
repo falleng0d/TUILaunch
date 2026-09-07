@@ -41,7 +41,7 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
     private fun newService(
         sessionFactory: TerminalSessionFactory = FakeFactory(emptyList()),
     ): Pair<TuiAppLaunchService, FakeHost> {
-        val service = TuiAppLaunchService(project)
+        val service = TuiAppLaunchService(project, testCoroutineScope(testRootDisposable))
         val host = FakeHost()
         service.host = host
         service.sessionFactory = sessionFactory

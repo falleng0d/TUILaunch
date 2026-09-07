@@ -60,7 +60,7 @@ class FocusPromptBoxActionTest : BasePlatformTestCase() {
     private fun state(): TuiLauncherSettings.State = TuiLauncherSettings.getInstance().state
 
     private fun newService(sessions: List<FakeSession>): Pair<TuiAppLaunchService, FakeHost> {
-        val service = TuiAppLaunchService(project)
+        val service = TuiAppLaunchService(project, testCoroutineScope(testRootDisposable))
         val host = FakeHost()
         service.host = host
         service.sessionFactory = FakeFactory(sessions)
