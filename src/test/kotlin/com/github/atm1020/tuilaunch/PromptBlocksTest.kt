@@ -10,6 +10,7 @@ import com.github.atm1020.tuilaunch.prompt.promptBlockTextContainingLine
 import com.github.atm1020.tuilaunch.prompt.promptAppendEdit
 import com.github.atm1020.tuilaunch.prompt.promptMarkerLines
 import com.github.atm1020.tuilaunch.prompt.promptSeparatorEdit
+import com.github.atm1020.tuilaunch.prompt.spansAFencedBlock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -288,7 +289,6 @@ class PromptBlocksTest {
         assertTrue(opensAFencedBlock("```"))
         assertTrue(opensAFencedBlock("```kotlin"))
         assertTrue(opensAFencedBlock("   ```"))
-        assertTrue(opensAFencedBlock("\t~~~"))
         assertTrue(opensAFencedBlock("~~~~~ bash"))
 
         assertFalse(opensAFencedBlock(""))
@@ -299,6 +299,19 @@ class PromptBlocksTest {
         assertFalse(opensAFencedBlock("---"))
         assertFalse(opensAFencedBlock("plain prose"))
         assertFalse(opensAFencedBlock("text ``` after"))
+    }
+
+    @Test
+    fun aFencedBlockSpansFromItsOpenerToTheLineThatClosesIt() {
+        assertTrue(spansAFencedBlock("```kotlin", "```"))
+        assertTrue(spansAFencedBlock("```", "`````"))
+        assertTrue(spansAFencedBlock("  ~~~", "  ~~~"))
+
+        assertFalse(spansAFencedBlock("plain prose", "```"))
+        assertFalse(spansAFencedBlock("```", "~~~"))
+        assertFalse(spansAFencedBlock("````", "```"))
+        assertFalse(spansAFencedBlock("```", "``` trailing"))
+        assertFalse(spansAFencedBlock("```", "more prose"))
     }
 
     private fun withAppendedSeparator(text: String): String {

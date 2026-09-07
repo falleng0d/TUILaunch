@@ -1,85 +1,15 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.prompt.PromptBox
-import com.intellij.lang.ASTNode
-import com.intellij.lang.folding.FoldingBuilder
-import com.intellij.lang.folding.FoldingDescriptor
-import com.intellij.lang.folding.LanguageFolding
+import com.intellij.codeInsight.folding.CodeFoldingManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
-import com.intellij.openapi.fileTypes.PlainTextLanguage
-import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.TextRange
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 
-private const val FOLD_PLACEHOLDER = "..."
-private const val HEADING_MARKER = "#"
-private const val MINIMUM_FENCE_RUN = 3
-
-private class HeadingAndFenceFoldingBuilder : FoldingBuilder, DumbAware {
-
-    override fun buildFoldRegions(node: ASTNode, document: Document): Array<FoldingDescriptor> {
-        val regions = mutableListOf<FoldingDescriptor>()
-        var line = 0
-        while (line < document.lineCount) {
-            val fenceClosingLine = closingFenceLineFor(document, line)
-            if (fenceClosingLine != null) {
-                regions.add(descriptorOver(node, document, line, fenceClosingLine))
-                line = fenceClosingLine + 1
-                continue
-            }
-            if (lineTextOf(document, line).trim().startsWith(HEADING_MARKER)) {
-                val headingEnd = headingEndLineFrom(document, line)
-                regions.add(descriptorOver(node, document, line, headingEnd))
-                line = headingEnd + 1
-                continue
-            }
-            line++
-        }
-        return regions.toTypedArray()
-    }
-
-    override fun getPlaceholderText(node: ASTNode): String = FOLD_PLACEHOLDER
-
-    override fun isCollapsedByDefault(node: ASTNode): Boolean = false
-
-    private fun descriptorOver(node: ASTNode, document: Document, firstLine: Int, lastLine: Int) =
-        FoldingDescriptor(
-            node,
-            TextRange(document.getLineStartOffset(firstLine), document.getLineEndOffset(lastLine)),
-        )
-
-    private fun closingFenceLineFor(document: Document, openingLine: Int): Int? {
-        val marker = fenceRunOf(lineTextOf(document, openingLine)) ?: return null
-        var line = openingLine + 1
-        while (line < document.lineCount) {
-            val closing = fenceRunOf(lineTextOf(document, line))
-            if (closing != null && closing.first == marker.first && closing.second >= marker.second) return line
-            line++
-        }
-        return null
-    }
-
-    private fun fenceRunOf(line: String): Pair<Char, Int>? {
-        val content = line.trim()
-        val marker = content.firstOrNull() ?: return null
-        if (marker != '`' && marker != '~') return null
-        val run = content.takeWhile { it == marker }.length
-        return if (run >= MINIMUM_FENCE_RUN) marker to run else null
-    }
-
-    private fun headingEndLineFrom(document: Document, headingLine: Int): Int {
-        var line = headingLine
-        while (line + 1 < document.lineCount) {
-            val next = lineTextOf(document, line + 1)
-            if (next.isBlank() || fenceRunOf(next) != null) break
-            line++
-        }
-        return line
-    }
-}
+private const val MARKDOWN_FILE_TYPE_NAME = "Markdown"
 
 private fun lineTextOf(document: Document, line: Int): String =
     document.getText(TextRange(document.getLineStartOffset(line), document.getLineEndOffset(line)))
@@ -97,15 +27,6 @@ class PromptBoxHistoryFoldingTest : BasePlatformTestCase() {
         ```
         after the fence
     """.trimIndent()
-
-    override fun setUp() {
-        super.setUp()
-        LanguageFolding.INSTANCE.addExplicitExtension(
-            PlainTextLanguage.INSTANCE,
-            HeadingAndFenceFoldingBuilder(),
-            testRootDisposable,
-        )
-    }
 
     override fun tearDown() {
         try {
@@ -136,6 +57,10 @@ class PromptBoxHistoryFoldingTest : BasePlatformTestCase() {
             .sortedBy { it.startOffset }
             .map { lineTextOf(box.editor.document, box.editor.document.getLineNumber(it.startOffset)) }
 
+    private fun buildTheFoldRegions(box: PromptBox) {
+        CodeFoldingManager.getInstance(project).updateFoldRegions(box.editor)
+    }
+
     private fun expandEveryRegion(box: PromptBox) {
         val foldingModel = box.editor.foldingModel
         foldingModel.runBatchFoldingOperation {
@@ -147,6 +72,12 @@ class PromptBoxHistoryFoldingTest : BasePlatformTestCase() {
         WriteCommandAction.writeCommandAction(project).run<RuntimeException> {
             box.editor.document.insertString(box.editor.document.textLength, text)
         }
+    }
+
+    fun testTheBoxEditorTakesTheMarkdownFileTypeSoTheMarkdownFoldingApplies() {
+        val box = boxOver("first prompt\n")
+
+        assertEquals(MARKDOWN_FILE_TYPE_NAME, box.editor.virtualFile?.fileType?.name)
     }
 
     fun testUpCollapsesTheCodeBlocksOfTheEntryAndNothingElse() {
@@ -177,6 +108,63 @@ class PromptBoxHistoryFoldingTest : BasePlatformTestCase() {
         box.historyPrevious()
 
         assertEquals(listOf("```", "  ~~~~"), collapsedRegionFirstLines(box))
+    }
+
+    fun testAFencedBlockInsideAListItemArrivesCollapsed() {
+        val entry = """
+            steps:
+
+            - first step
+
+              ```kotlin
+              val x = 1
+              ```
+
+            - second step
+        """.trimIndent()
+        val box = boxOver("$entry\n")
+
+        box.historyPrevious()
+
+        assertEquals(listOf("- first step", "  ```kotlin"), regionFirstLines(box))
+        assertEquals(listOf("  ```kotlin"), collapsedRegionFirstLines(box))
+    }
+
+    fun testAFencedBlockInsideABlockQuoteArrivesCollapsed() {
+        val entry = """
+            quoted:
+
+            > intro
+            >
+            > ```kotlin
+            > val x = 1
+            > ```
+
+            tail
+        """.trimIndent()
+        val box = boxOver("$entry\n")
+
+        box.historyPrevious()
+
+        assertEquals(listOf("> intro", "> ```kotlin"), regionFirstLines(box))
+        assertEquals(listOf("> ```kotlin"), collapsedRegionFirstLines(box))
+    }
+
+    fun testAnUnclosedFenceLeavesTheRestOfTheEntryVisible() {
+        val entry = """
+            intro
+
+            ```kotlin
+            val x = 1
+            still code
+            more prose
+        """.trimIndent()
+        val box = boxOver("$entry\n")
+
+        box.historyPrevious()
+
+        assertEquals(listOf("```kotlin"), regionFirstLines(box))
+        assertEmpty(collapsedRegionFirstLines(box))
     }
 
     fun testDownRecomputesTheFoldingForTheEntryItShows() {
@@ -216,6 +204,27 @@ class PromptBoxHistoryFoldingTest : BasePlatformTestCase() {
         assertEquals(box.text.length, box.editor.caretModel.offset)
     }
 
+    fun testDownBackIntoTheDraftLeavesTheFencesTheUserTypedExpanded() {
+        val draft = "my own prompt\n\n```kotlin\nval mine = 2\n```\ntail"
+        val box = boxOver("$entryWithAHeadingAndAFence\n")
+        box.text = draft
+
+        box.historyPrevious()
+
+        assertEquals(entryWithAHeadingAndAFence, box.text)
+        assertEquals(listOf("```kotlin"), collapsedRegionFirstLines(box))
+
+        box.historyNext()
+
+        assertEquals(draft, box.text)
+        assertEmpty(collapsedRegionFirstLines(box))
+
+        buildTheFoldRegions(box)
+
+        assertEquals(listOf("```kotlin"), regionFirstLines(box))
+        assertEmpty(collapsedRegionFirstLines(box))
+    }
+
     fun testTypingAfterAHistoryEntryLeavesTheFoldingAsTheUserLeftIt() {
         val box = boxOver("$entryWithAHeadingAndAFence\n")
         box.historyPrevious()
@@ -230,16 +239,9 @@ class PromptBoxHistoryFoldingTest : BasePlatformTestCase() {
         val box = boxOver("first prompt\n")
 
         box.text = entryWithAHeadingAndAFence
+        buildTheFoldRegions(box)
 
+        assertEquals(listOf("# Heading", "```kotlin"), regionFirstLines(box))
         assertEmpty(collapsedRegionFirstLines(box))
-    }
-
-    fun testTheBoxShowsTheFoldingOutlineWithoutTheRestOfTheGutter() {
-        val settings = boxOver("first prompt\n").editor.settings
-
-        assertTrue(settings.isFoldingOutlineShown)
-        assertFalse(settings.isLineNumbersShown)
-        assertFalse(settings.isLineMarkerAreaShown)
-        assertFalse(settings.areGutterIconsShown())
     }
 }

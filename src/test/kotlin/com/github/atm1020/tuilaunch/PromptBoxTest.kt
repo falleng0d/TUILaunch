@@ -19,6 +19,7 @@ import com.intellij.openapi.actionSystem.DataSnapshotProvider
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
 import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.ex.EditorMarkupModel
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.util.Disposer
@@ -175,16 +176,23 @@ class PromptBoxTest : BasePlatformTestCase() {
         assertEquals("", box.editor.document.text)
     }
 
-    fun testTheEditorShowsProseWithoutAGutter() {
-        val settings = newPromptBox().editor.settings
+    fun testTheEditorShowsProseWithoutAGutterAndKeepsThoseSettingsAfterLoading() {
+        val box = newPromptBox()
+        box.installEditor()
+        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+        val settings = box.editor.settings
 
         assertTrue(settings.isUseSoftWraps)
         assertFalse(settings.isLineNumbersShown)
         assertFalse(settings.isLineMarkerAreaShown)
+        assertFalse(settings.areGutterIconsShown())
         assertTrue(settings.isFoldingOutlineShown)
         assertFalse(settings.isRightMarginShown)
         assertFalse(settings.isIndentGuidesShown)
+        assertFalse(settings.isCaretRowShown)
         assertEquals(0, settings.additionalLinesCount)
+        assertFalse((box.editor.markupModel as EditorMarkupModel).isErrorStripeVisible)
     }
 
     fun testTheBoxCarriesAFloatingSendButtonAsSoonAsItHasAnEditor() {

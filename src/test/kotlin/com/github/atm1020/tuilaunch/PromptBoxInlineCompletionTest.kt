@@ -6,12 +6,10 @@ import com.intellij.codeInsight.inline.completion.InlineCompletion
 import com.intellij.codeInsight.inline.completion.session.InlineCompletionContext
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.EditorKind
-import com.intellij.openapi.editor.ex.EditorMarkupModel
 import com.intellij.openapi.editor.ex.util.EditorUtil
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider
 import com.intellij.openapi.util.Disposer
 import com.intellij.psi.PsiDocumentManager
-import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 
 class PromptBoxInlineCompletionTest : BasePlatformTestCase() {
@@ -55,23 +53,6 @@ class PromptBoxInlineCompletionTest : BasePlatformTestCase() {
         val box = newInstalledBox()
 
         assertNotNull(InlineCompletion.getHandlerOrNull(box.editor))
-    }
-
-    fun testTheBoxSettingsSurviveTheEditorLoading() {
-        val box = newInstalledBox()
-        PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
-
-        val settings = box.editor.settings
-
-        assertTrue(settings.isUseSoftWraps)
-        assertFalse(settings.isLineNumbersShown)
-        assertFalse(settings.isLineMarkerAreaShown)
-        assertTrue(settings.isFoldingOutlineShown)
-        assertFalse(settings.isRightMarginShown)
-        assertFalse(settings.isIndentGuidesShown)
-        assertFalse(settings.isCaretRowShown)
-        assertEquals(0, settings.additionalLinesCount)
-        assertFalse((box.editor.markupModel as EditorMarkupModel).isErrorStripeVisible)
     }
 
     fun testAnEmptyBoxHasNoCompletionShowing() {
