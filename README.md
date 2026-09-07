@@ -152,6 +152,47 @@ The tab list lives in the project's `.idea/workspace.xml`, so it is per develope
 While the setting is off nothing is recorded and nothing is reopened; the list from before you turned it off stays on
 disk and is used again if you turn the setting back on before opening any TUI tab.
 
+### Resuming agent sessions
+
+A reopened tab that runs a coding agent can come back to the *same conversation* instead of an empty one. It works
+for `claude`, `codex`, `opencode` and `omp`, whether they are launched directly or through
+`headroom wrap <cli> <flags>`. Every other command is launched untouched, and so is any command that already
+selects a session itself (`--resume`, `--continue`, `--session-id`, `codex resume`, …).
+
+Turn it on with **Resume the agent session when a TUI tab is reopened**, directly under **Reopen TUI tabs when the
+project is opened**. It is on by default and only has an effect while reopening tabs is on; with it off every tab
+is launched with your command unchanged and no session state is written.
+
+Each tab gets its own identifier the first time it is launched, and that identifier survives every reopen. It is
+stored next to the tab in the project's `.idea/workspace.xml`, so it is per developer rather than shared through
+VCS. What TUILaunch adds to the configured command depends on the CLI:
+
+- **claude** — the launch pins the tab's identifier with `--session-id`, so the conversation belongs to the tab
+  from its first message. A reopened tab is resumed with `--resume <tab id>` once that transcript exists.
+- **codex** — no flag can choose the id, so the launch installs a `SessionStart` hook that writes codex's own
+  session id into TUILaunch's state directory. A reopened tab starts as `codex resume <session id>`.
+- **opencode** — the launch starts opencode's embedded server on a free port with
+  `--port <port> --hostname 127.0.0.1`, and a reopened tab is resumed with `--session <session id>`. Creating and
+  remembering that id needs an HTTP call that arrives with the next change; until then an opencode tab comes back
+  fresh.
+- **omp** — the launch points omp at a session directory of the tab's own with `--session-dir`, and a reopened tab
+  resumes the newest session file found there with `--resume <file>`.
+
+Arguments TUILaunch adds are appended after ` -- ` when the command goes through `headroom wrap`, so headroom
+forwards them to the CLI instead of claiming them for itself.
+
+A tab you never typed in comes back fresh. All four CLIs write their session lazily, with the first message, so
+there is nothing to resume and the tab just starts a new conversation. If a reopened tab does end within 15
+seconds of starting — a session deleted in the CLI, a transcript that is gone — TUILaunch starts it once more
+without the resume arguments, keeping its name and its place in the tab strip, and notes that in the log. A tab
+that ends a second time is left closed, and a tab you launched yourself is never restarted.
+
+The codex hook is added per invocation, which codex accepts only together with
+`--dangerously-bypass-hook-trust`; without that flag its TUI stops on a trust review at every launch. The hook
+command writes nothing but codex's session id, into
+`<IDE system directory>/TUILaunch/agent-sessions/<project>/codex/<tab id>.json`, and that file is deleted when you
+close the tab.
+
 ### Focus and tab actions
 
 TUILaunch registers global actions that can be bound in the IDE keymap or called from IdeaVim:
@@ -349,6 +390,8 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - A codex `SessionStart` hook added per invocation with `-c 'hooks.SessionStart=[…]'` makes the TUI block on a trust review unless `--dangerously-bypass-hook-trust` is also passed, and the hook fires when the first turn starts rather than at process launch, so the session id is only on disk once the user has sent a prompt.
 - The codex hook command runs through `$SHELL -lc`, so a path inside it needs its own double quotes (`cat > "<path>"`, escaped as `\"` inside the TOML string); a path containing a double quote or a backslash cannot be expressed this way and the tab is left unmanaged instead.
 - `omp --resume <path>` silently creates an empty session at that path when the file does not exist, so a resume argument must only ever be a file that was found on disk.
+- `ContentManager.addContent(Content, int)` inserts at that index and reads -1 as "append", which is the only supported way to put a tab back at the strip position it had.
+- A tab the plugin closes itself and a tab the user closes from the strip both arrive as one `contentRemoved` carrying no reason, so the only way to tell them apart is bookkeeping done before calling `removeContent`; project close fires no event at all and a drag is marked with `Content.TEMPORARY_REMOVED_KEY`.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

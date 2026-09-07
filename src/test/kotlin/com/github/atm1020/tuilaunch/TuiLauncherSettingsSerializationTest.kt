@@ -71,6 +71,23 @@ class TuiLauncherSettingsSerializationTest {
     }
 
     @Test
+    fun `reopened tabs resume their agent session by default`() {
+        val state = TuiLauncherSettings.State()
+
+        assertTrue(state.restoreOpenTabs)
+        assertTrue(state.restoreAgentSessions)
+        assertFalse(optionNames(state).contains("restoreAgentSessions"))
+    }
+
+    @Test
+    fun `turning the agent session resume off survives serialization`() {
+        val restored = roundTrip(TuiLauncherSettings.State(restoreAgentSessions = false))
+
+        assertFalse(restored.restoreAgentSessions)
+        assertTrue(restored.restoreOpenTabs)
+    }
+
+    @Test
     fun `the prompt box starts hidden at three tenths of the tab and shared by every app`() {
         val state = TuiLauncherSettings.State()
 

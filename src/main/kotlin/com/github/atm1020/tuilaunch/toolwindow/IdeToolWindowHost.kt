@@ -36,6 +36,8 @@ private const val MIN_TOOL_WINDOW_WIDTH = 400
 private const val MIN_TOOL_WINDOW_HEIGHT = 250
 private const val SCREEN_MARGIN = 80
 
+const val APPEND_TAB = -1
+
 open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
 
     open fun isVisible(): Boolean = requireToolWindow().isVisible
@@ -45,12 +47,12 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
     open fun show() = requireToolWindow().show(null)
     open fun hide() = requireToolWindow().hide(null)
 
-    open fun addTab(component: JComponent, title: String, disposable: Disposable): Any {
+    open fun addTab(component: JComponent, title: String, disposable: Disposable, index: Int = APPEND_TAB): Any {
         val toolWindow = requireToolWindow()
         val content = ContentFactory.getInstance().createContent(component, title, false)
         content.isCloseable = true
         Disposer.register(content, disposable)
-        toolWindow.contentManager.addContent(content)
+        toolWindow.contentManager.addContent(content, index)
         return ContentTabHandle(content)
     }
 

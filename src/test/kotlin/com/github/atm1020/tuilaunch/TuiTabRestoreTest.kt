@@ -2,6 +2,7 @@ package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
+import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.github.atm1020.tuilaunch.services.TuiOpenTabsService
@@ -11,11 +12,15 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 
 class TuiTabRestoreTest : BasePlatformTestCase() {
 
+    private lateinit var agentSessionEnvironment: AgentSessionEnvironment
+
     override fun setUp() {
         super.setUp()
+        agentSessionEnvironment = temporaryAgentSessionEnvironment()
         TuiLauncherSettings.getInstance().state.apply {
             tuiApps.clear()
             restoreOpenTabs = true
+            restoreAgentSessions = true
         }
         TuiOpenTabsService.getInstance(project).replaceTabs(emptyList())
     }
@@ -40,6 +45,7 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
         val host = FakeHost()
         service.host = host
         service.sessionFactory = sessionFactory
+        service.agentSessionEnvironment = { agentSessionEnvironment }
         return service to host
     }
 
@@ -53,6 +59,9 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
     }
 
     private fun savedTabs(): List<TuiSessionRecord> = TuiOpenTabsService.getInstance(project).state.tabs
+
+    private fun savedTabsWithoutTheirIdentity(): List<TuiSessionRecord> =
+        savedTabs().map { it.copy(tabUuid = null, agentSessionId = null) }
 
     private fun saveTabs(vararg records: TuiSessionRecord) {
         TuiOpenTabsService.getInstance(project).replaceTabs(records.toList())
@@ -82,7 +91,7 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
                 TuiSessionRecord("first", "first", false),
                 TuiSessionRecord("second", "second", true),
             ),
-            savedTabs(),
+            savedTabsWithoutTheirIdentity(),
         )
     }
 
@@ -94,7 +103,7 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
 
         service.releasePromptBoxEditors()
 
-        assertEquals(listOf(TuiSessionRecord("first", "first", true)), savedTabs())
+        assertEquals(listOf(TuiSessionRecord("first", "first", true)), savedTabsWithoutTheirIdentity())
     }
 
     fun testTheFirstTabIsRecordedEvenThoughItIsSelectedByTheAddItself() {
@@ -103,7 +112,7 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
 
         service.toggle("TUILauncher.first", "first", "first")
 
-        assertEquals(listOf(TuiSessionRecord("first", "first", true)), savedTabs())
+        assertEquals(listOf(TuiSessionRecord("first", "first", true)), savedTabsWithoutTheirIdentity())
     }
 
     fun testNothingIsRecordedWhileTheFeatureIsOff() {

@@ -11,6 +11,7 @@ import com.github.atm1020.tuilaunch.copilot.PromptBoxCompletionSettings
 import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
+import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
@@ -37,6 +38,7 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.testFramework.PlatformTestUtil
 import kotlinx.coroutines.runBlocking
@@ -211,6 +213,16 @@ private fun aSessionIsStillOpen(service: TuiAppLaunchService): Boolean {
     return probeHost.showCount > 0
 }
 
+internal fun temporaryAgentSessionEnvironment(): AgentSessionEnvironment {
+    val root = FileUtil.createTempDirectory("tuilaunch-agent-sessions", null, true).toPath()
+    return AgentSessionEnvironment(
+        homeDirectory = root.resolve("home"),
+        stateDirectory = root.resolve("state"),
+        claudeConfigDir = root.resolve("claude").toString(),
+        piCodingAgentDir = root.resolve("omp").toString(),
+    )
+}
+
 internal data class SentKey(val keyCode: Int, val modifiers: Int, val keyChar: Char)
 
 internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
@@ -218,14 +230,20 @@ internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
     var focusCount = 0
     val sentText = mutableListOf<String>()
     val sentKeys = mutableListOf<SentKey>()
+    private var terminationCallback: (() -> Unit)? = null
+
     fun requestFocus() {
         focusCount++
+    }
+
+    fun terminate() {
+        terminationCallback?.invoke()
     }
 
     fun asTerminalSession(): TerminalSession = TerminalSession(
         component = component,
         requestFocus = { requestFocus() },
-        registerTerminationCallback = {},
+        registerTerminationCallback = { callback -> terminationCallback = callback },
         sendKey = { keyCode, modifiers, keyChar -> sentKeys.add(SentKey(keyCode, modifiers, keyChar)) },
         sendText = { text ->
             sentText.add(text)
@@ -236,10 +254,14 @@ internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
 
 internal class FakeFactory(private val sessions: List<FakeSession>) : TerminalSessionFactory {
     private var index = 0
+    val commands = mutableListOf<String>()
 
     constructor(session: FakeSession) : this(listOf(session))
 
-    override fun create(parent: Disposable, command: String): TerminalSession = sessions[index++].asTerminalSession()
+    override fun create(parent: Disposable, command: String): TerminalSession {
+        commands.add(command)
+        return sessions[index++].asTerminalSession()
+    }
 }
 
 internal class DeferredFactory(private val sessions: List<FakeSession>) : TerminalSessionFactory {
@@ -247,6 +269,7 @@ internal class DeferredFactory(private val sessions: List<FakeSession>) : Termin
     private var onFailed: ((Throwable) -> Unit)? = null
     private var index = 0
     var createCount = 0
+    val commands = mutableListOf<String>()
 
     constructor(session: FakeSession) : this(listOf(session))
 
@@ -259,6 +282,7 @@ internal class DeferredFactory(private val sessions: List<FakeSession>) : Termin
         onFailed: (Throwable) -> Unit,
     ) {
         createCount++
+        commands.add(command)
         this.onCreated = onCreated
         this.onFailed = onFailed
     }
@@ -316,9 +340,9 @@ internal class FakeHost : IdeToolWindowHost(null) {
         visible = false
     }
 
-    override fun addTab(component: JComponent, title: String, disposable: Disposable): Any {
+    override fun addTab(component: JComponent, title: String, disposable: Disposable, index: Int): Any {
         val handle = Any()
-        tabs.add(handle)
+        tabs.add(if (index in tabs.indices) index else tabs.size, handle)
         titles.add(title)
         componentByTab[handle] = component
         (disposable as? CheckedDisposable)?.let {

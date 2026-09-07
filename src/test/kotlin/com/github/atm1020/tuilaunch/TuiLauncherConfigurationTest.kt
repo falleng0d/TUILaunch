@@ -22,6 +22,7 @@ import com.github.atm1020.tuilaunch.ui.FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.JETBRAINS_AI_COMPLETION_SOURCE_ITEM
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_SIZE_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_VISIBILITY_PER_APP_LABEL
+import com.github.atm1020.tuilaunch.ui.RESTORE_AGENT_SESSIONS_LABEL
 import com.github.atm1020.tuilaunch.ui.RESTORE_OPEN_TABS_LABEL
 import com.github.atm1020.tuilaunch.ui.SUBMIT_PROMPT_ON_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
@@ -55,6 +56,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             tuiApps.clear()
             tmuxKeybindingsEnabled = true
             restoreOpenTabs = false
+            restoreAgentSessions = true
             submitPromptOnSend = true
             appendPromptSeparatorOnSend = true
             focusPromptFileAfterSend = true
@@ -565,6 +567,73 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         configurable.reset()
 
         assertFalse(checkbox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testTheAgentSessionCheckBoxSitsUnderTheReopenTabsCheckBoxAndFollowsIt() {
+        val component = configuration().createComponent() as JPanel
+        val reopenTabs = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
+        val resumeSessions = findCheckBox(component, RESTORE_AGENT_SESSIONS_LABEL)!!
+
+        assertSame(reopenTabs.parent, resumeSessions.parent)
+        assertEquals(positionInItsPanel(reopenTabs) + 1, positionInItsPanel(resumeSessions))
+        assertTrue(resumeSessions.isSelected)
+        assertFalse(resumeSessions.isEnabled)
+
+        reopenTabs.doClick()
+
+        assertTrue(resumeSessions.isEnabled)
+    }
+
+    fun testTurningTheAgentSessionResumeOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, RESTORE_AGENT_SESSIONS_LABEL)!!.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.restoreAgentSessions)
+        assertFalse(settings.state.restoreOpenTabs)
+    }
+
+    fun testTurningTheAgentSessionResumeBackOnIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.restoreAgentSessions = false
+
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, RESTORE_AGENT_SESSIONS_LABEL)!!
+        assertFalse(checkbox.isSelected)
+
+        checkbox.isSelected = true
+        configurable.apply()
+
+        assertTrue(settings.state.restoreAgentSessions)
+    }
+
+    fun testTogglingTheAgentSessionResumeMarksThePanelModified() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, RESTORE_AGENT_SESSIONS_LABEL)!!.isSelected = false
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresTheAgentSessionCheckBoxAndItsEnabledState() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        val reopenTabs = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
+        val resumeSessions = findCheckBox(component, RESTORE_AGENT_SESSIONS_LABEL)!!
+
+        reopenTabs.doClick()
+        resumeSessions.isSelected = false
+        configurable.reset()
+
+        assertTrue(resumeSessions.isSelected)
+        assertFalse(resumeSessions.isEnabled)
         assertFalse(configurable.isModified())
     }
 
@@ -1217,6 +1286,9 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     private fun findCheckBox(container: Container, text: String): JCheckBox? =
         findComponent<JCheckBox>(container) { it.text == text }
+
+    private fun positionInItsPanel(component: Component): Int =
+        component.parent?.components?.indexOf(component) ?: -1
 
     private fun findButton(container: Container, text: String): JButton? =
         findComponent<JButton>(container) { it.text == text }

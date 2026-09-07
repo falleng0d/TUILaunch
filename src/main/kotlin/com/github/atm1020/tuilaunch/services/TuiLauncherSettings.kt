@@ -21,6 +21,7 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         var tuiApps: MutableList<TuiAppConfig> = mutableListOf(),
         var tmuxKeybindingsEnabled: Boolean = true,
         var restoreOpenTabs: Boolean = true,
+        var restoreAgentSessions: Boolean = true,
         var submitPromptOnSend: Boolean = true,
         var appendPromptSeparatorOnSend: Boolean = true,
         var focusPromptFileAfterSend: Boolean = true,

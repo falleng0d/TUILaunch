@@ -7,8 +7,13 @@ import com.intellij.util.xmlb.SkipDefaultsSerializationFilter
 import com.intellij.util.xmlb.XmlSerializer
 import org.jdom.Element
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+private const val RECORD_TAB_UUID = "b7c1e0d4-3a52-4f19-8c7d-2e6f5a9b1c30"
+private const val RECORD_OTHER_TAB_UUID = "6a1f0c22-9b74-4a0e-8d3f-2b5c7e91a004"
+private const val RECORD_CODEX_SESSION_ID = "019a4f3c-7b21-7cd0-9e55-3f1b2a6d8c47"
 
 class TuiOpenTabsSerializationTest {
 
@@ -58,6 +63,58 @@ class TuiOpenTabsSerializationTest {
 
         assertEquals(1, xml.split("selected").size - 1)
         assertTrue(xml.contains("""name="selected" value="true""""))
+    }
+
+    @Test
+    fun `a tab uuid and its agent session id round trip`() {
+        val original = TuiOpenTabsService.State(
+            mutableListOf(
+                TuiSessionRecord("claude", "claude", true, RECORD_TAB_UUID, RECORD_TAB_UUID),
+                TuiSessionRecord("codex", "codex", false, RECORD_OTHER_TAB_UUID, RECORD_CODEX_SESSION_ID),
+            )
+        )
+
+        val restored = XmlSerializer.deserialize(serialize(original), TuiOpenTabsService.State::class.java)
+
+        assertEquals(original, restored)
+    }
+
+    @Test
+    fun `a record without a session identity writes neither option`() {
+        val xml = JDOMUtil.write(serialize(stateWithThreeTabs()))
+
+        assertFalse(xml.contains("tabUuid"))
+        assertFalse(xml.contains("agentSessionId"))
+    }
+
+    @Test
+    fun `a workspace file written before tabs carried an identity loads with nulls`() {
+        val restored = XmlSerializer.deserialize(
+            JDOMUtil.load(
+                """
+                <State>
+                  <option name="tabs">
+                    <list>
+                      <TuiSessionRecord>
+                        <option name="appName" value="claude" />
+                        <option name="title" value="claude" />
+                      </TuiSessionRecord>
+                      <TuiSessionRecord>
+                        <option name="appName" value="lazygit" />
+                        <option name="title" value="git" />
+                        <option name="selected" value="true" />
+                      </TuiSessionRecord>
+                    </list>
+                  </option>
+                </State>
+                """.trimIndent()
+            ),
+            TuiOpenTabsService.State::class.java,
+        )
+
+        assertEquals(listOf("claude", "git"), restored.tabs.map { it.title })
+        assertEquals(listOf("git"), restored.tabs.filter { it.selected }.map { it.title })
+        assertTrue(restored.tabs.all { it.tabUuid == null && it.agentSessionId == null })
     }
 
     @Test

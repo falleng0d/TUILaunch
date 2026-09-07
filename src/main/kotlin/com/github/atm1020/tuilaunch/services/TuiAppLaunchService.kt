@@ -8,14 +8,24 @@ import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.PromptBoxSender
 import com.github.atm1020.tuilaunch.prompt.existingPromptFileDocumentSupplier
 import com.github.atm1020.tuilaunch.prompt.promptFileDocumentSupplier
+import com.github.atm1020.tuilaunch.resume.AgentCliKind
+import com.github.atm1020.tuilaunch.resume.AgentCommand
+import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
+import com.github.atm1020.tuilaunch.resume.AgentSessionStrategies
+import com.github.atm1020.tuilaunch.resume.AgentSessionStrategy
+import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
+import com.github.atm1020.tuilaunch.resume.RememberedSession
+import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
+import com.github.atm1020.tuilaunch.toolwindow.APPEND_TAB
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
 import com.github.atm1020.tuilaunch.toolwindow.TuiTabLayout
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
@@ -26,10 +36,15 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
 import java.awt.event.KeyEvent
+import java.nio.file.Path
+import java.util.UUID
 
 const val TUI_TOOL_WINDOW_ID = "TUILaunch"
 
 private const val SUBMIT_KEY_CHAR = '\r'
+private const val PLUGIN_STATE_DIRECTORY = "TUILaunch"
+private const val AGENT_SESSION_STATE_DIRECTORY = "agent-sessions"
+private const val EARLY_EXIT_RELAUNCH_WINDOW_MILLIS = 15_000L
 
 internal fun uniqueSessionTitle(base: String, taken: Set<String>): String {
     if (base !in taken) return base
@@ -56,6 +71,19 @@ class TuiAppLaunchService(private val project: Project) {
         if (component != null) IdeFocusManager.getInstance(project).requestFocus(component, true)
     }
     var promptBoxCompletions: PromptBoxCopilotStarter = PromptBoxCopilotStarter()
+    var agentSessionEnvironment: () -> AgentSessionEnvironment = {
+        AgentSessionEnvironment.fromSystem(
+            Path.of(
+                PathManager.getSystemPath(),
+                PLUGIN_STATE_DIRECTORY,
+                AGENT_SESSION_STATE_DIRECTORY,
+                project.locationHash,
+            )
+        )
+    }
+    var agentSessionStrategies: (AgentCliKind, AgentSessionEnvironment) -> AgentSessionStrategy =
+        { kind, environment -> AgentSessionStrategies.forKind(kind, environment) }
+    var clock: () -> Long = { System.currentTimeMillis() }
     private var hostListenersInstalled = false
     private var windowRevealedByLaunch = false
     private var applyingSize = false
@@ -72,9 +100,30 @@ class TuiAppLaunchService(private val project: Project) {
         val handle: Any,
         val disposable: Disposable,
         var openedFromTui: Boolean,
+        val tabUuid: String,
+        var agentSessionId: String?,
+        val launchedAt: Long,
+        val restoredFromRecord: Boolean,
+        val agentArgumentsWereAdded: Boolean,
+        val agentKind: AgentCliKind?,
     )
 
     private data class PendingLaunch(val appName: String, val disposable: Disposable)
+
+    private sealed interface LaunchIntent {
+        val tabUuid: String
+
+        data class Fresh(override val tabUuid: String) : LaunchIntent
+
+        data class Restore(override val tabUuid: String, val record: TuiSessionRecord) : LaunchIntent
+    }
+
+    private data class AgentLaunch(
+        val command: String,
+        val kind: AgentCliKind?,
+        val argumentsWereAdded: Boolean,
+        val agentSessionId: String?,
+    )
 
     private val tabsBySessionId = mutableMapOf<String, OpenTab>()
     private val pendingLaunchesBySessionId = mutableMapOf<String, PendingLaunch>()
@@ -143,7 +192,7 @@ class TuiAppLaunchService(private val project: Project) {
         val records = host.orderedHandles().mapNotNull { handle ->
             val tab = tabFor(handle) ?: return@mapNotNull null
             if (tab.sessionId in closingSessions) return@mapNotNull null
-            TuiSessionRecord(tab.appName, tab.title, handle == activeHandle)
+            TuiSessionRecord(tab.appName, tab.title, handle == activeHandle, tab.tabUuid, tab.agentSessionId)
         }
         TuiOpenTabsService.getInstance(project).replaceTabs(records)
     }
@@ -169,17 +218,33 @@ class TuiAppLaunchService(private val project: Project) {
         if (pendingLaunchesBySessionId.values.any { it.appName == appName }) return
 
         windowRevealedByLaunch = !host.isVisible()
-        openNewTab(host, sessionId = newSessionId(appName), appName = appName, command = command, title = title)
+        openNewTab(
+            host = host,
+            sessionId = newSessionId(appName),
+            appName = appName,
+            command = command,
+            title = title,
+            intent = LaunchIntent.Fresh(newTabUuid()),
+        )
     }
 
     fun launchNew(appName: String, command: String) {
         val host = hostWithListeners() ?: return
         val title = uniqueSessionTitle(appName, tabsBySessionId.values.mapTo(mutableSetOf()) { it.title })
         windowRevealedByLaunch = !host.isVisible()
-        openNewTab(host, sessionId = newSessionId(appName), appName = appName, command = command, title = title)
+        openNewTab(
+            host = host,
+            sessionId = newSessionId(appName),
+            appName = appName,
+            command = command,
+            title = title,
+            intent = LaunchIntent.Fresh(newTabUuid()),
+        )
     }
 
     private fun newSessionId(appName: String): String = "$appName#${sessionSequence++}"
+
+    private fun newTabUuid(): String = UUID.randomUUID().toString()
 
     fun restoreSavedTabs() {
         if (!TuiLauncherSettings.getInstance().state.restoreOpenTabs) return
@@ -220,6 +285,7 @@ class TuiAppLaunchService(private val project: Project) {
             appName = record.appName,
             command = config.command,
             title = title,
+            intent = LaunchIntent.Restore(record.tabUuid ?: newTabUuid(), record),
             onOpened = { tab ->
                 restoreTabAt(host, saved, index + 1, if (record.selected) tab else tabToSelect, tab)
             },
@@ -318,7 +384,7 @@ class TuiAppLaunchService(private val project: Project) {
     fun closeActiveTui() {
         val host = hostWithListeners() ?: return
         val tab = activeOrLastOpenTab(host) ?: return
-        closeTab(tab.sessionId)
+        closeTab(tab.sessionId, theUserClosedTheTab = true)
     }
 
     fun nextTuiTab() {
@@ -389,14 +455,18 @@ class TuiAppLaunchService(private val project: Project) {
         appName: String,
         command: String,
         title: String,
+        intent: LaunchIntent,
+        index: Int = APPEND_TAB,
         onOpened: ((OpenTab) -> Unit)? = null,
         onFailed: (() -> Unit)? = null,
     ) {
+        val agentLaunch = agentLaunchFor(command, intent)
+        val launchedAt = clock()
         val disposable = Disposer.newCheckedDisposable("TUILaunch-$sessionId")
         pendingLaunchesBySessionId[sessionId] = PendingLaunch(appName, disposable)
         sessionFactory.createAsync(
             parent = disposable,
-            command = command,
+            command = agentLaunch.command,
             onCreated = { session ->
                 if (pendingLaunchesBySessionId.remove(sessionId)?.disposable !== disposable || disposable.isDisposed) {
                     return@createAsync
@@ -409,7 +479,7 @@ class TuiAppLaunchService(private val project: Project) {
                     existingPromptDocument = existingPromptDocument,
                 )
                 val layout = newTabLayout(host, appName, session, promptBox)
-                val handle = host.addTab(layout.component, title, disposable)
+                val handle = host.addTab(layout.component, title, disposable, index)
                 val tab = OpenTab(
                     sessionId = sessionId,
                     appName = appName,
@@ -420,20 +490,123 @@ class TuiAppLaunchService(private val project: Project) {
                     handle = handle,
                     disposable = disposable,
                     openedFromTui = isTuiFocused(),
+                    tabUuid = intent.tabUuid,
+                    agentSessionId = agentLaunch.agentSessionId,
+                    launchedAt = launchedAt,
+                    restoredFromRecord = intent is LaunchIntent.Restore,
+                    agentArgumentsWereAdded = agentLaunch.argumentsWereAdded,
+                    agentKind = agentLaunch.kind,
                 )
                 tabsBySessionId[sessionId] = tab
                 layout.onPromptBoxPercentChanged = { percent -> onPromptBoxPercentChanged(tab, percent) }
-                session.onTerminated { closeTab(sessionId) }
+                session.onTerminated { onSessionTerminated(host, tab) }
                 recordOpenTabs()
                 if (onOpened != null) onOpened(tab) else selectTuiTab(host, tab)
             },
             onFailed = { throwable ->
                 pendingLaunchesBySessionId.remove(sessionId)
                 Disposer.dispose(disposable)
-                thisLogger().warn("Failed to launch TUI app: $command", throwable)
+                thisLogger().warn("Failed to launch TUI app: ${agentLaunch.command}", throwable)
                 onFailed?.invoke()
             },
         )
+    }
+
+    private fun agentLaunchFor(command: String, intent: LaunchIntent): AgentLaunch {
+        val plainLaunch = AgentLaunch(command, kind = null, argumentsWereAdded = false, agentSessionId = null)
+        if (!agentSessionsAreResumed()) return plainLaunch
+        val projectPath = project.basePath ?: return plainLaunch
+        val parsed = AgentCommand.parse(command)
+        val kind = parsed.kind
+        if (kind == null || !parsed.isManageable) return plainLaunch
+        val tab = TabIdentity(intent.tabUuid, projectPath, project.locationHash)
+        val strategy = agentSessionStrategies(kind, agentSessionEnvironment())
+        val arguments = when (intent) {
+            is LaunchIntent.Fresh -> strategy.launchArguments(tab)
+            is LaunchIntent.Restore -> strategy.restoreArguments(tab, RememberedSession(intent.record.agentSessionId))
+        }
+        if (arguments.isEmpty()) return plainLaunch
+        return AgentLaunch(
+            command = parsed.withArguments(arguments),
+            kind = kind,
+            argumentsWereAdded = true,
+            agentSessionId = agentSessionIdFor(kind, strategy, tab, intent),
+        )
+    }
+
+    private fun agentSessionsAreResumed(): Boolean {
+        val state = TuiLauncherSettings.getInstance().state
+        return state.restoreOpenTabs && state.restoreAgentSessions
+    }
+
+    private fun agentSessionIdFor(
+        kind: AgentCliKind,
+        strategy: AgentSessionStrategy,
+        tab: TabIdentity,
+        intent: LaunchIntent,
+    ): String? = when (kind) {
+        AgentCliKind.CLAUDE -> tab.tabUuid
+        AgentCliKind.CODEX -> codexSessionIdOnRestore(strategy, tab, intent)
+        AgentCliKind.OPENCODE -> rememberedSessionId(intent)
+        AgentCliKind.OMP -> null
+    }
+
+    private fun codexSessionIdOnRestore(
+        strategy: AgentSessionStrategy,
+        tab: TabIdentity,
+        intent: LaunchIntent,
+    ): String? {
+        if (intent !is LaunchIntent.Restore) return null
+        val codex = strategy as? CodexSessionStrategy ?: return null
+        return codex.readSessionId(codex.stateFile(tab))
+    }
+
+    private fun rememberedSessionId(intent: LaunchIntent): String? =
+        (intent as? LaunchIntent.Restore)?.record?.agentSessionId
+
+    private fun onSessionTerminated(host: IdeToolWindowHost, tab: OpenTab) {
+        if (aResumedAgentSessionDiedOnStartup(tab)) {
+            relaunchWithoutTheAgentSession(host, tab)
+        } else {
+            closeTab(tab.sessionId)
+        }
+    }
+
+    private fun aResumedAgentSessionDiedOnStartup(tab: OpenTab): Boolean =
+        tab.restoredFromRecord &&
+            tab.agentArgumentsWereAdded &&
+            clock() - tab.launchedAt < EARLY_EXIT_RELAUNCH_WINDOW_MILLIS
+
+    private fun relaunchWithoutTheAgentSession(host: IdeToolWindowHost, tab: OpenTab) {
+        val config = configFor(tab.appName)
+        if (config == null) {
+            closeTab(tab.sessionId)
+            return
+        }
+        val position = host.orderedHandles().indexOf(tab.handle)
+        val theTabWasSelected = host.activeTab() == tab.handle
+        thisLogger().info(
+            "Reopened TUI tab '${tab.title}' ended right after launch; starting it again without its agent session",
+        )
+        closeTab(tab.sessionId)
+        openNewTab(
+            host = host,
+            sessionId = newSessionId(tab.appName),
+            appName = tab.appName,
+            command = config.command,
+            title = tab.title,
+            intent = LaunchIntent.Fresh(tab.tabUuid),
+            index = position,
+            onOpened = { relaunched -> if (theTabWasSelected) host.selectTab(relaunched.handle) },
+        )
+    }
+
+    private fun cleanUpAgentSession(tab: OpenTab) {
+        if (!tab.agentArgumentsWereAdded) return
+        val kind = tab.agentKind ?: return
+        val projectPath = project.basePath ?: return
+        agentSessionStrategies(kind, agentSessionEnvironment())
+            .cleanUp(TabIdentity(tab.tabUuid, projectPath, project.locationHash))
     }
 
     private fun promptBoxSenderFor(session: TerminalSession): PromptBoxSender = PromptBoxSender(
@@ -550,9 +723,10 @@ class TuiAppLaunchService(private val project: Project) {
     private fun configFor(appName: String): TuiAppConfig? =
         TuiLauncherSettings.getInstance().state.tuiApps.firstOrNull { it.name == appName }
 
-    private fun closeTab(sessionId: String) {
+    private fun closeTab(sessionId: String, theUserClosedTheTab: Boolean = false) {
         val tab = tabsBySessionId[sessionId] ?: return
         if (!closingSessions.add(sessionId)) return
+        if (theUserClosedTheTab) cleanUpAgentSession(tab)
 
         val host = resolveHost()
         if (host == null) {
@@ -620,6 +794,7 @@ class TuiAppLaunchService(private val project: Project) {
         val tab = tabFor(handle) ?: return
         val removedTabWasActive = activeSessionIdBeingRemoved == tab.sessionId
         activeSessionIdBeingRemoved = null
+        cleanUpAgentSession(tab)
         forgetTab(tab.sessionId)
         Disposer.dispose(tab.disposable)
         val lastTuiClosedAfterComingFromEditor =
