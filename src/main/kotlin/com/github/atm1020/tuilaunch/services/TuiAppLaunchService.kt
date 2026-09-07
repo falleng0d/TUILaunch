@@ -364,11 +364,11 @@ class TuiAppLaunchService(private val project: Project) {
         invokeLater {
             val stripHandles = host.orderedHandles()
             if (stripHandles.size < 2) return@invokeLater
-            val activeHandle = host.activeTab()
+            val activeHandle = host.activeTab() ?: return@invokeLater
             val originIndex = stripHandles.indexOfFirst { it == activeHandle }
             if (originIndex < 0) return@invokeLater
             val selectableTabs = tabsNotClosing().values
-            val promptBoxHadFocus = tabFor(stripHandles[originIndex])?.let { promptBoxHoldsTheFocus(it) } == true
+            val promptBoxHadFocus = tabFor(activeHandle)?.let { promptBoxHoldsTheFocus(it) } == true
             val tab = (1 until stripHandles.size)
                 .asSequence()
                 .map { stripHandles[Math.floorMod(originIndex + offset * it, stripHandles.size)] }

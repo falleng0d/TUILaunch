@@ -81,6 +81,11 @@ internal fun canChangeBlockStructure(line: CharSequence): Boolean =
 
 internal fun opensAFencedBlock(line: CharSequence): Boolean = fenceOpenerAt(line, 0, line.length) != null
 
+internal fun spansAFencedBlock(firstLine: CharSequence, lastLine: CharSequence): Boolean {
+    val opener = fenceOpenerAt(firstLine, 0, firstLine.length) ?: return false
+    return closesFence(lastLine, 0, lastLine.length, opener)
+}
+
 private fun blockLinesIn(lines: LineOffsets): List<BlockLines> {
     val blocks = mutableListOf<BlockLines>()
     var segmentStart = 0

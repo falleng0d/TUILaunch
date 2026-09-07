@@ -67,6 +67,7 @@ private const val PROMPT_BOX_EDIT_NAME = "Prompt Box"
 private const val SEND_BUTTON_TEXT = "Send"
 private const val SEND_BUTTON_MARGIN = 8
 private const val SEND_BUTTON_QUIET_MILLIS = 1000
+private const val BLOCK_QUOTE_MARKER = '>'
 
 internal val PROMPT_BOX_DATA_KEY: DataKey<PromptBox> = DataKey.create("TUILaunch.PromptBox")
 internal val PROMPT_BOX_KEY: Key<PromptBox> = Key.create("TUILaunch.PromptBox")
@@ -84,6 +85,19 @@ internal fun promptBoxPlaceholder(): String {
 }
 
 private fun sendPromptBoxAction(): AnAction? = ActionManager.getInstance().getAction(SEND_PROMPT_BOX_ACTION_ID)
+
+private fun withoutBlockQuoteMarkers(line: CharSequence): CharSequence {
+    var contentStart = 0
+    while (true) {
+        var marker = contentStart
+        while (marker < line.length && line[marker].isWhitespace()) marker++
+        if (marker >= line.length || line[marker] != BLOCK_QUOTE_MARKER) {
+            return line.subSequence(contentStart, line.length)
+        }
+        contentStart = marker + 1
+        if (contentStart < line.length && line[contentStart] == ' ') contentStart++
+    }
+}
 
 internal class PromptBox(
     private val project: Project,
@@ -150,13 +164,15 @@ internal class PromptBox(
 
     fun historyPrevious() {
         val history = browsedHistory ?: PromptBoxHistory(promptHistoryBlocks()).also { browsedHistory = it }
-        showHistoryEntry(history.previous(text), PromptHistoryDirection.PREVIOUS)
+        val shown = history.previous(text)
+        showHistoryEntry(shown, PromptHistoryDirection.PREVIOUS, isARecordedPrompt = history.isBrowsing)
         if (!history.isBrowsing) browsedHistory = null
     }
 
     fun historyNext() {
         val history = browsedHistory ?: return
-        showHistoryEntry(history.next(text), PromptHistoryDirection.NEXT)
+        val shown = history.next(text)
+        showHistoryEntry(shown, PromptHistoryDirection.NEXT, isARecordedPrompt = history.isBrowsing)
         if (!history.isBrowsing) browsedHistory = null
     }
 
@@ -285,11 +301,11 @@ internal class PromptBox(
         PromptBoxEscapeAction().registerCustomShortcutSet(ESCAPE_SHORTCUT_SET, panel, parentDisposable)
     }
 
-    private fun showHistoryEntry(entry: String?, direction: PromptHistoryDirection) {
+    private fun showHistoryEntry(entry: String?, direction: PromptHistoryDirection, isARecordedPrompt: Boolean) {
         if (entry == null) return
         text = entry
         val editor = installEditor()
-        collapseCodeBlocks(editor)
+        if (isARecordedPrompt) collapseCodeBlocks(editor)
         val caretOffset = when (direction) {
             PromptHistoryDirection.PREVIOUS -> 0
             PromptHistoryDirection.NEXT -> editor.document.textLength
@@ -299,25 +315,31 @@ internal class PromptBox(
     }
 
     private fun collapseCodeBlocks(editor: EditorEx) {
-        PsiDocumentManager.getInstance(project).commitDocument(editor.document)
         CodeFoldingManager.getInstance(project).updateFoldRegions(editor)
         val foldingModel = editor.foldingModel
-        val codeBlocks = foldingModel.allFoldRegions.filter { startsOnAFenceOpener(editor.document, it) }
+        val codeBlocks = foldingModel.allFoldRegions.filter { holdsAFencedBlock(editor.document, it) }
         if (codeBlocks.isEmpty()) return
         foldingModel.runBatchFoldingOperation {
             codeBlocks.forEach { it.isExpanded = false }
         }
     }
 
-    private fun startsOnAFenceOpener(document: Document, region: FoldRegion): Boolean {
-        if (!region.isValid || region.startOffset > document.textLength) return false
-        val line = document.getLineNumber(region.startOffset)
-        val lineText = document.immutableCharSequence.subSequence(
+    private fun holdsAFencedBlock(document: Document, region: FoldRegion): Boolean {
+        if (!region.isValid || region.endOffset > document.textLength) return false
+        val firstLine = document.getLineNumber(region.startOffset)
+        val lastLine = document.getLineNumber(region.endOffset)
+        if (lastLine <= firstLine) return false
+        return spansAFencedBlock(
+            withoutBlockQuoteMarkers(lineTextOf(document, firstLine)),
+            withoutBlockQuoteMarkers(lineTextOf(document, lastLine)),
+        )
+    }
+
+    private fun lineTextOf(document: Document, line: Int): CharSequence =
+        document.immutableCharSequence.subSequence(
             document.getLineStartOffset(line),
             document.getLineEndOffset(line),
         )
-        return opensAFencedBlock(lineText)
-    }
 
     private fun uninstallEditor(editor: EditorEx) {
         if (editorIfInstalled === editor) editorIfInstalled = null
