@@ -7,8 +7,13 @@ import com.github.atm1020.tuilaunch.resume.AgentSessionStrategies
 import com.github.atm1020.tuilaunch.resume.ClaudeProjectPath
 import com.github.atm1020.tuilaunch.resume.ClaudeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.RememberedSession
+import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.resume.TabIdentity
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -21,6 +26,7 @@ class ClaudeSessionStrategyTest {
     val temporaryFolder = TemporaryFolder()
 
     private val tabUuid = "0f9d3b1e-1c3a-4f2b-9a1d-7c5e6b8a0d41"
+    private val reportedSessionId = "5c2a7f88-40b6-4d19-b3e7-9a1c0d6f4e22"
 
     private val tab = TabIdentity(
         tabUuid = tabUuid,
@@ -55,58 +61,217 @@ class ClaudeSessionStrategyTest {
     }
 
     @Test
-    fun launchArgumentsPinTheTabUuidAsTheSessionId() {
-        val strategy = ClaudeSessionStrategy(claudeHome())
+    fun theStateFileLivesUnderAClaudeSubdirectoryNamedAfterTheTab() {
+        val strategy = newStrategy()
 
-        assertEquals(listOf("--session-id", tabUuid), strategy.launchArguments(tab))
+        assertEquals(stateDirectory().resolve("claude").resolve("$tabUuid.json"), strategy.stateFile(tab))
     }
 
     @Test
-    fun restoreResumesTheTabUuidWhenTheTranscriptExists() {
-        val strategy = ClaudeSessionStrategy(claudeHome())
-        writeTranscript(strategy.transcriptFile(tab))
-
-        assertEquals(listOf("--resume", tabUuid), strategy.restoreArguments(tab, RememberedSession(tabUuid)))
-    }
-
-    @Test
-    fun restoreFallsBackToTheLaunchArgumentsWithoutATranscript() {
-        val strategy = ClaudeSessionStrategy(claudeHome())
-
-        assertEquals(listOf("--session-id", tabUuid), strategy.restoreArguments(tab, RememberedSession(tabUuid)))
-    }
-
-    @Test
-    fun aTranscriptOfAnotherProjectDoesNotCount() {
-        val strategy = ClaudeSessionStrategy(claudeHome())
-        writeTranscript(strategy.transcriptFile(tab.copy(projectPath = "/Users/falleng0d/Projects/Other")))
-
-        assertEquals(listOf("--session-id", tabUuid), strategy.restoreArguments(tab, RememberedSession(tabUuid)))
-    }
-
-    @Test
-    fun theWrappedRestoreCommandPassesTheResumeThroughHeadroom() {
-        val strategy = ClaudeSessionStrategy(claudeHome())
-        writeTranscript(strategy.transcriptFile(tab))
-        val parsed = AgentCommand.parse("headroom wrap claude --no-serena --no-tokensave")
+    fun launchInstallsTheSessionStartHookAndPinsTheTabUuidAsTheSessionId() {
+        val strategy = newStrategy()
 
         assertEquals(
-            "headroom wrap claude --no-serena --no-tokensave -- --resume $tabUuid",
-            parsed.withArguments(strategy.restoreArguments(tab, RememberedSession(tabUuid))),
+            listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--session-id", tabUuid),
+            strategy.launchArguments(tab),
         )
     }
 
     @Test
-    fun theFactoryResolvesTheClaudeHomeFromTheEnvironment() {
+    fun theLaunchCommandQuotesTheHookJsonForTheShell() {
+        val strategy = newStrategy()
+        val settings = expectedSettings(strategy.stateFile(tab))
+
+        assertEquals(
+            "claude --settings '$settings' --session-id $tabUuid",
+            AgentCommand.parse("claude").withArguments(strategy.launchArguments(tab)),
+        )
+    }
+
+    @Test
+    fun theWrappedLaunchCommandPassesTheHookJsonThroughHeadroom() {
+        val strategy = newStrategy()
+        val settings = expectedSettings(strategy.stateFile(tab))
+
+        assertEquals(
+            "headroom wrap claude --no-serena --no-tokensave -- --settings '$settings' --session-id $tabUuid",
+            AgentCommand.parse("headroom wrap claude --no-serena --no-tokensave")
+                .withArguments(strategy.launchArguments(tab)),
+        )
+    }
+
+    @Test
+    fun theHookJsonSurvivesTheShellWordsRoundTrip() {
+        val strategy = newStrategy()
+        val arguments = strategy.launchArguments(tab)
+
+        val command = AgentCommand.parse("headroom wrap claude").withArguments(arguments)
+
+        assertEquals(listOf("headroom", "wrap", "claude", "--") + arguments, ShellWords.split(command))
+    }
+
+    @Test
+    fun restoreResumesTheSessionTheHookReported() {
+        val strategy = newStrategy()
+        val transcript = temporaryFolder.newFile("reported.jsonl").toPath()
+        writeState(strategy.stateFile(tab), reportedState(transcript.toString()))
+
+        assertEquals(
+            listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", reportedSessionId),
+            strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+        )
+    }
+
+    @Test
+    fun aReportedSessionWithoutATranscriptPathIsStillResumed() {
+        val strategy = newStrategy()
+        writeState(strategy.stateFile(tab), """{"session_id":"$reportedSessionId","source":"resume"}""")
+
+        assertEquals(
+            listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", reportedSessionId),
+            strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+        )
+    }
+
+    @Test
+    fun aReportedSessionWhoseTranscriptIsGoneFallsBackToTheTabsOwnTranscript() {
+        val strategy = newStrategy()
+        val missing = temporaryFolder.root.toPath().resolve("gone.jsonl")
+        writeState(strategy.stateFile(tab), reportedState(missing.toString()))
+        writeTranscript(strategy.transcriptFile(tab))
+
+        assertEquals(
+            listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", tabUuid),
+            strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+        )
+    }
+
+    @Test
+    fun aTornStateFileFallsBackToTheTabsOwnTranscript() {
+        val strategy = newStrategy()
+        writeTranscript(strategy.transcriptFile(tab))
+
+        for (content in listOf("", "{not json", """{"session_id":"  "}""", """["$reportedSessionId"]""")) {
+            writeState(strategy.stateFile(tab), content)
+
+            assertEquals(
+                content,
+                listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", tabUuid),
+                strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+            )
+        }
+    }
+
+    @Test
+    fun restoreResumesTheTabUuidWhenOnlyTheTranscriptExists() {
+        val strategy = newStrategy()
+        writeTranscript(strategy.transcriptFile(tab))
+
+        assertEquals(
+            listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", tabUuid),
+            strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+        )
+    }
+
+    @Test
+    fun restoreFallsBackToTheLaunchArgumentsWithoutAnyState() {
+        val strategy = newStrategy()
+
+        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+    }
+
+    @Test
+    fun aTranscriptOfAnotherProjectDoesNotCount() {
+        val strategy = newStrategy()
+        writeTranscript(strategy.transcriptFile(tab.copy(projectPath = "/Users/falleng0d/Projects/Other")))
+
+        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+    }
+
+    @Test
+    fun aResumeIsNeverCombinedWithASessionId() {
+        val strategy = newStrategy()
+        val transcript = temporaryFolder.newFile("combined.jsonl").toPath()
+
+        val everyForm = mutableListOf(strategy.launchArguments(tab))
+        everyForm.add(strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+        writeTranscript(strategy.transcriptFile(tab))
+        everyForm.add(strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+        writeState(strategy.stateFile(tab), reportedState(transcript.toString()))
+        everyForm.add(strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+
+        for (arguments in everyForm) {
+            assertFalse(
+                arguments.toString(),
+                arguments.contains("--resume") && arguments.contains("--session-id"),
+            )
+        }
+    }
+
+    @Test
+    fun prepareLaunchCreatesTheDirectoryTheHookWritesInto() {
+        val strategy = newStrategy()
+
+        strategy.prepareLaunch(tab)
+
+        assertTrue(Files.isDirectory(strategy.stateFile(tab).parent))
+    }
+
+    @Test
+    fun buildingTheArgumentsWritesNothing() {
+        val strategy = newStrategy()
+
+        strategy.launchArguments(tab)
+        strategy.restoreArguments(tab, RememberedSession(tabUuid))
+
+        assertFalse(Files.exists(stateDirectory()))
+    }
+
+    @Test
+    fun cleanUpDeletesTheStateFileAndToleratesAMissingOne() {
+        val strategy = newStrategy()
+        writeState(strategy.stateFile(tab), """{"session_id":"$reportedSessionId"}""")
+
+        runBlocking {
+            strategy.cleanUp(tab, RememberedSession(tabUuid))
+            strategy.cleanUp(tab, RememberedSession(tabUuid))
+        }
+
+        assertFalse(Files.exists(strategy.stateFile(tab)))
+    }
+
+    @Test
+    fun readSessionIdAcceptsOnlyANonBlankStringField() {
+        val strategy = newStrategy()
+        val stateFile = strategy.stateFile(tab)
+
+        assertNull(strategy.readSessionId(stateFile))
+
+        writeState(stateFile, """{"session_id":"$reportedSessionId","source":"clear"}""")
+        assertEquals(reportedSessionId, strategy.readSessionId(stateFile))
+
+        writeState(stateFile, """{"session_id":42}""")
+        assertNull(strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun theFactoryResolvesTheClaudeHomeAndTheStateDirectoryFromTheEnvironment() {
         val environment = AgentSessionEnvironment(
             homeDirectory = temporaryFolder.newFolder("home").toPath(),
             stateDirectory = temporaryFolder.newFolder("state").toPath(),
             claudeConfigDir = temporaryFolder.newFolder("claude-config").toString(),
         )
-        val strategy = AgentSessionStrategies.forKind(AgentCliKind.CLAUDE, environment)
+        val strategy = AgentSessionStrategies.forKind(AgentCliKind.CLAUDE, environment) as ClaudeSessionStrategy
 
         assertEquals(environment.claudeHome, Path.of(environment.claudeConfigDir!!))
-        assertEquals(listOf("--session-id", tabUuid), strategy.launchArguments(tab))
+        assertEquals(
+            environment.stateDirectory.resolve("claude").resolve("$tabUuid.json"),
+            strategy.stateFile(tab),
+        )
+        assertEquals(
+            listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--session-id", tabUuid),
+            strategy.launchArguments(tab),
+        )
     }
 
     @Test
@@ -121,10 +286,23 @@ class ClaudeSessionStrategyTest {
         assertEquals(home.resolve(".claude"), environment.claudeHome)
     }
 
+    private fun newStrategy(): ClaudeSessionStrategy = ClaudeSessionStrategy(claudeHome(), stateDirectory())
+
+    private fun expectedSettings(stateFile: Path): String = claudeHookSettings(stateFile)
+
+    private fun reportedState(transcriptPath: String): String =
+        """{"session_id":"$reportedSessionId","transcript_path":"$transcriptPath","source":"resume"}"""
+
     private fun claudeHome(): Path = temporaryFolder.root.toPath().resolve("claude-home")
 
+    private fun stateDirectory(): Path = temporaryFolder.root.toPath().resolve("agent-sessions")
+
     private fun writeTranscript(file: Path) {
+        writeState(file, "{}\n")
+    }
+
+    private fun writeState(file: Path, content: String) {
         Files.createDirectories(file.parent)
-        Files.writeString(file, "{}\n")
+        Files.writeString(file, content)
     }
 }

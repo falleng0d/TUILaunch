@@ -1,8 +1,10 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.resume.AgentCommand
+import com.github.atm1020.tuilaunch.resume.AgentStateFiles
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
 import com.github.atm1020.tuilaunch.resume.RememberedSession
+import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -22,6 +24,8 @@ class CodexSessionStrategyTest {
 
     private val tabUuid = "6a1f0c22-9b74-4a0e-8d3f-2b5c7e91a004"
     private val sessionId = "019a4f3c-7b21-7cd0-9e55-3f1b2a6d8c47"
+    private val laterSessionId = "019a52118c334de1af664e2c3b7e9d58"
+    private val transcriptPath = "/Users/falleng0d/.codex/sessions/2026/09/08/rollout.jsonl"
 
     private val tab = TabIdentity(
         tabUuid = tabUuid,
@@ -30,53 +34,59 @@ class CodexSessionStrategyTest {
     )
 
     @Test
-    fun theStateFileLivesUnderACodexSubdirectoryNamedAfterTheTab() {
+    fun theStateFileIsAJsonLinesFileNamedAfterTheTab() {
         val stateDirectory = stateDirectory()
         val strategy = CodexSessionStrategy(stateDirectory)
 
-        assertEquals(stateDirectory.resolve("codex").resolve("$tabUuid.json"), strategy.stateFile(tab))
+        assertEquals(stateDirectory.resolve("codex").resolve("$tabUuid.jsonl"), strategy.stateFile(tab))
     }
 
     @Test
-    fun launchArgumentsInstallTheSessionStartHookAndBypassTheTrustPrompt() {
+    fun launchAppendsToTheStateFileFromBothHooksAndBypassesTheTrustPrompt() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+
+        assertEquals(codexHookArguments(stateFile), strategy.launchArguments(tab))
+    }
+
+    @Test
+    fun theLaunchCommandQuotesBothHookOverrides() {
         val strategy = CodexSessionStrategy(stateDirectory())
         val stateFile = strategy.stateFile(tab)
 
         assertEquals(
-            listOf("--dangerously-bypass-hook-trust", "-c", expectedToml(stateFile)),
-            strategy.launchArguments(tab),
+            "codex -c '${expectedToml("SessionStart", stateFile)}' " +
+                "-c '${expectedToml("UserPromptSubmit", stateFile)}' --dangerously-bypass-hook-trust",
+            AgentCommand.parse("codex").withArguments(strategy.launchArguments(tab)),
         )
     }
 
     @Test
-    fun theHookCommandDoubleQuotesTheStateFilePath() {
-        val strategy = CodexSessionStrategy(stateDirectory())
-        val stateFile = strategy.stateFile(tab)
-        val commandField = "command=\"cat > \\\"" + stateFile + "\\\"\""
-
-        val toml = strategy.launchArguments(tab).last()
-
-        assertTrue(toml, toml.contains(commandField))
-        assertTrue(toml, toml.contains("async=true"))
-        assertTrue(toml, toml.contains("timeout=5"))
-    }
-
-    @Test
-    fun launchArgumentsCreateTheDirectoryTheHookWritesInto() {
+    fun prepareLaunchCreatesTheDirectoryTheHookWritesInto() {
         val strategy = CodexSessionStrategy(stateDirectory())
 
-        strategy.launchArguments(tab)
+        strategy.prepareLaunch(tab)
 
         assertTrue(Files.isDirectory(strategy.stateFile(tab).parent))
     }
 
     @Test
-    fun restoreResumesTheRecordedSessionAndKeepsTheHook() {
+    fun buildingTheArgumentsWritesNothing() {
         val strategy = CodexSessionStrategy(stateDirectory())
-        writeState(strategy.stateFile(tab), """{"session_id":"$sessionId","source":"startup"}""")
+
+        strategy.launchArguments(tab)
+        strategy.restoreArguments(tab, RememberedSession())
+
+        assertFalse(Files.exists(stateDirectory()))
+    }
+
+    @Test
+    fun restoreResumesTheRecordedSessionAndKeepsBothHooks() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        writeState(strategy.stateFile(tab), record(sessionId, transcriptPath))
 
         assertEquals(
-            listOf("resume", sessionId, "--dangerously-bypass-hook-trust", "-c", expectedToml(strategy.stateFile(tab))),
+            listOf("resume", sessionId) + strategy.launchArguments(tab),
             strategy.restoreArguments(tab, RememberedSession()),
         )
     }
@@ -85,17 +95,20 @@ class CodexSessionStrategyTest {
     fun theWrappedRestoreCommandMatchesTheVerifiedPassThroughForm() {
         val strategy = CodexSessionStrategy(stateDirectory())
         val stateFile = strategy.stateFile(tab)
-        writeState(stateFile, """{"session_id":"$sessionId"}""")
+        writeState(stateFile, record(sessionId, transcriptPath))
         val command = "headroom wrap codex --no-serena --no-tokensave --dangerously-bypass-approvals-and-sandbox"
 
         assertEquals(
-            "$command -- resume $sessionId --dangerously-bypass-hook-trust -c '${expectedToml(stateFile)}'",
+            "$command -- resume $sessionId " +
+                "-c ${ShellWords.quote(expectedToml("SessionStart", stateFile))} " +
+                "-c ${ShellWords.quote(expectedToml("UserPromptSubmit", stateFile))} " +
+                "--dangerously-bypass-hook-trust",
             AgentCommand.parse(command).withArguments(strategy.restoreArguments(tab, RememberedSession())),
         )
     }
 
     @Test
-    fun restoreFallsBackToTheLaunchArgumentsWithoutAUsableStateFile() {
+    fun restoreFallsBackToTheLaunchArgumentsWithoutAUsableRecord() {
         val strategy = CodexSessionStrategy(stateDirectory())
         val launch = strategy.launchArguments(tab)
 
@@ -109,32 +122,72 @@ class CodexSessionStrategyTest {
     }
 
     @Test
-    fun readSessionIdAcceptsOnlyANonBlankStringField() {
+    fun theNewestRecordOfTheStateFileWins() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+
+        writeState(
+            stateFile,
+            record(sessionId, transcriptPath) + "\n" + record(laterSessionId, transcriptPath) + "\n",
+        )
+
+        assertEquals(laterSessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun aTornLastLineDoesNotHideThePreviousRecord() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+
+        writeState(stateFile, record(sessionId, transcriptPath) + "\n" + """{"session_id":"01""")
+
+        assertEquals(sessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun anEphemeralSideConversationIsSkipped() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+
+        writeState(
+            stateFile,
+            record(sessionId, transcriptPath) + "\n" +
+                """{"session_id":"$laterSessionId","transcript_path":null,"source":"startup"}""" + "\n",
+        )
+
+        assertEquals(sessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun aRecordWithoutAUsableSessionIdIsSkipped() {
         val strategy = CodexSessionStrategy(stateDirectory())
         val stateFile = strategy.stateFile(tab)
 
         assertNull(strategy.readSessionId(stateFile))
 
-        writeState(stateFile, """{"session_id":"$sessionId","source":"resume"}""")
-        assertEquals(sessionId, strategy.readSessionId(stateFile))
-
-        writeState(stateFile, """{"session_id":42}""")
+        writeState(stateFile, "")
         assertNull(strategy.readSessionId(stateFile))
 
-        writeState(stateFile, """{"session_id":"  "}""")
+        writeState(stateFile, "\n\n")
+        assertNull(strategy.readSessionId(stateFile))
+
+        writeState(stateFile, """{"session_id":42,"transcript_path":"$transcriptPath"}""")
+        assertNull(strategy.readSessionId(stateFile))
+
+        writeState(stateFile, """{"session_id":"  ","transcript_path":"$transcriptPath"}""")
         assertNull(strategy.readSessionId(stateFile))
 
         writeState(stateFile, """["$sessionId"]""")
         assertNull(strategy.readSessionId(stateFile))
 
-        writeState(stateFile, "")
-        assertNull(strategy.readSessionId(stateFile))
+        writeState(stateFile, record(sessionId, transcriptPath))
+        assertEquals(sessionId, strategy.readSessionId(stateFile))
     }
 
     @Test
     fun cleanUpDeletesTheStateFileAndToleratesAMissingOne() {
         val strategy = CodexSessionStrategy(stateDirectory())
-        writeState(strategy.stateFile(tab), """{"session_id":"$sessionId"}""")
+        writeState(strategy.stateFile(tab), record(sessionId, transcriptPath))
 
         runBlocking {
             strategy.cleanUp(tab, RememberedSession(sessionId))
@@ -162,33 +215,43 @@ class CodexSessionStrategyTest {
     }
 
     @Test
-    fun sweepingKeepsTheStateOfTheTabsThatCameBack() {
-        val strategy = CodexSessionStrategy(stateDirectory())
-        val kept = strategy.stateFile(tab)
-        val orphan = strategy.stateFile(tab.copy(tabUuid = "2f8d1b60-77aa-4c31-9e02-5d3c8a1f4b77"))
-        val foreign = kept.resolveSibling("notes.txt")
-        writeState(kept, """{"session_id":"$sessionId"}""")
-        writeState(orphan, """{"session_id":"$sessionId"}""")
-        writeState(foreign, "keep me")
+    fun sweepingBothStateDirectoriesKeepsTheTabsThatCameBack() {
+        val orphanUuid = "2f8d1b60-77aa-4c31-9e02-5d3c8a1f4b77"
+        val directories = listOf(stateDirectory().resolve("claude"), stateDirectory().resolve("codex"))
+        for (directory in directories) {
+            writeState(directory.resolve("$tabUuid.jsonl"), record(sessionId, transcriptPath))
+            writeState(directory.resolve("$tabUuid.json"), record(sessionId, transcriptPath))
+            writeState(directory.resolve("$orphanUuid.jsonl"), record(sessionId, transcriptPath))
+            writeState(directory.resolve("$orphanUuid.json"), record(sessionId, transcriptPath))
+            writeState(directory.resolve("notes.txt"), "keep me")
+        }
 
-        runBlocking { strategy.deleteStateFilesExcept(setOf(tabUuid)) }
+        runBlocking {
+            directories.forEach { AgentStateFiles.deleteStateFilesExcept(it, setOf(tabUuid)) }
+        }
 
-        assertTrue(Files.exists(kept))
-        assertFalse(Files.exists(orphan))
-        assertTrue(Files.exists(foreign))
+        for (directory in directories) {
+            assertTrue(directory.toString(), Files.exists(directory.resolve("$tabUuid.jsonl")))
+            assertTrue(directory.toString(), Files.exists(directory.resolve("$tabUuid.json")))
+            assertFalse(directory.toString(), Files.exists(directory.resolve("$orphanUuid.jsonl")))
+            assertFalse(directory.toString(), Files.exists(directory.resolve("$orphanUuid.json")))
+            assertTrue(directory.toString(), Files.exists(directory.resolve("notes.txt")))
+        }
     }
 
     @Test
     fun sweepingAStateDirectoryThatDoesNotExistDoesNothing() {
         val strategy = CodexSessionStrategy(stateDirectory())
 
-        runBlocking { strategy.deleteStateFilesExcept(setOf(tabUuid)) }
+        runBlocking { AgentStateFiles.deleteStateFilesExcept(strategy.stateFile(tab).parent, setOf(tabUuid)) }
 
         assertFalse(Files.exists(strategy.stateFile(tab).parent))
     }
 
-    private fun expectedToml(stateFile: Path): String =
-        """hooks.SessionStart=[{hooks=[{type="command",command="cat > \"$stateFile\"",async=true,timeout=5}]}]"""
+    private fun expectedToml(event: String, stateFile: Path): String = codexHookToml(event, stateFile)
+
+    private fun record(sessionId: String, transcriptPath: String): String =
+        """{"session_id":"$sessionId","transcript_path":"$transcriptPath","source":"resume"}"""
 
     private fun stateDirectory(): Path = temporaryFolder.root.toPath().resolve("agent-sessions")
 

@@ -12,7 +12,10 @@ import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
+import com.github.atm1020.tuilaunch.resume.AgentSessionStrategy
 import com.github.atm1020.tuilaunch.resume.OpenCodeApi
+import com.github.atm1020.tuilaunch.resume.RememberedSession
+import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
@@ -47,6 +50,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Path
 import java.util.Collections
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicInteger
@@ -57,8 +61,26 @@ import javax.swing.KeyStroke
 private const val MAXIMUM_LEFTOVER_SESSIONS = 100
 private const val GHOST_TEXT = "a suggestion nobody typed"
 private const val GHOST_TEXT_TIMEOUT_SECONDS = 30
+private const val CLAUDE_STATE_FILE_ARGUMENT = "\$0"
 
 internal const val SEND_PROMPT_BOX_TEST_KEYSTROKE = "control ENTER"
+
+internal fun claudeHookSettings(stateFile: Path): String =
+    """{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/bin/sh","args":["-c",""" +
+        """"cat > \"$CLAUDE_STATE_FILE_ARGUMENT.tmp\" && mv \"$CLAUDE_STATE_FILE_ARGUMENT.tmp\" """ +
+        """\"$CLAUDE_STATE_FILE_ARGUMENT\"","$stateFile"],"timeout":5}]}]}}"""
+
+internal fun codexHookToml(event: String, stateFile: Path): String =
+    """hooks.$event=[{hooks=[{type="command",command="{ cat; echo; } >> \"$stateFile\"",""" +
+        "async=true,timeout=5}]}]"
+
+internal fun codexHookArguments(stateFile: Path): List<String> = listOf(
+    "-c",
+    codexHookToml("SessionStart", stateFile),
+    "-c",
+    codexHookToml("UserPromptSubmit", stateFile),
+    "--dangerously-bypass-hook-trust",
+)
 
 private class GhostTextProvider : InlineCompletionProvider {
 
@@ -281,6 +303,29 @@ internal class RecordingOpenCodeApi(
 }
 
 internal data class CreatedSession(val directory: String, val tabUuid: String)
+
+internal class RecordingSessionStrategy(
+    private val arguments: List<String> = listOf("--recorded"),
+) : AgentSessionStrategy {
+
+    private val recorded = Collections.synchronizedList(mutableListOf<String>())
+
+    val calls: List<String> get() = synchronized(recorded) { recorded.toList() }
+
+    override fun prepareLaunch(tab: TabIdentity) {
+        recorded.add("prepareLaunch")
+    }
+
+    override fun launchArguments(tab: TabIdentity): List<String> {
+        recorded.add("launchArguments")
+        return arguments
+    }
+
+    override fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String> {
+        recorded.add("restoreArguments")
+        return arguments
+    }
+}
 
 internal fun testCoroutineScope(parentDisposable: Disposable): CoroutineScope {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

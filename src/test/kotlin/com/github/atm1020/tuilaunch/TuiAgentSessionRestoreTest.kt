@@ -19,6 +19,8 @@ import java.util.UUID
 
 private const val TAB_UUID = "b7c1e0d4-3a52-4f19-8c7d-2e6f5a9b1c30"
 private const val CODEX_SESSION_ID = "019a4f3c-7b21-7cd0-9e55-3f1b2a6d8c47"
+private const val CLAUDE_REPORTED_SESSION = "5c2a7f88-40b6-4d19-b3e7-9a1c0d6f4e22"
+private const val CODEX_TRANSCRIPT_PATH = "/Users/falleng0d/.codex/sessions/2026/09/08/rollout.jsonl"
 private const val OLDER_OMP_SESSION = "2026-09-07T21-15-03-123Z_019a4f3c7b217cd09e553f1b2a6d8c47.jsonl"
 private const val NEWEST_OMP_SESSION = "2026-09-08T09-02-11-000Z_019a52118c334de1af664e2c3b7e9d58.jsonl"
 private const val OPENCODE_PORT = 45123
@@ -64,7 +66,10 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         service.restoreSavedTabs()
 
-        assertEquals(listOf("headroom wrap claude --no-serena -- --resume $TAB_UUID"), factory.commands)
+        assertEquals(
+            listOf("headroom wrap claude --no-serena -- ${claudeSettings(TAB_UUID)} --resume $TAB_UUID"),
+            factory.commands,
+        )
     }
 
     fun testAWrappedClaudeTabWithoutATranscriptComesBackWithItsOwnSessionId() {
@@ -75,7 +80,10 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         service.restoreSavedTabs()
 
-        assertEquals(listOf("headroom wrap claude --no-serena -- --session-id $TAB_UUID"), factory.commands)
+        assertEquals(
+            listOf("headroom wrap claude --no-serena -- ${claudeSettings(TAB_UUID)} --session-id $TAB_UUID"),
+            factory.commands,
+        )
     }
 
     fun testAnUnwrappedClaudeTabTakesTheResumeArgumentWithoutASeparator() {
@@ -87,7 +95,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         service.restoreSavedTabs()
 
-        assertEquals(listOf("claude --resume $TAB_UUID"), factory.commands)
+        assertEquals(listOf("claude ${claudeSettings(TAB_UUID)} --resume $TAB_UUID"), factory.commands)
     }
 
     fun testAFreshClaudeTabPinsItsTabUuidAsTheSessionId() {
@@ -98,15 +106,81 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         service.launchNew("claude", "claude")
 
         val record = savedTabs().single()
-        assertEquals(record.tabUuid, UUID.fromString(record.tabUuid).toString())
-        assertEquals(listOf("claude --session-id ${record.tabUuid}"), factory.commands)
-        assertEquals(record.tabUuid, record.agentSessionId)
+        val tabUuid = requireNotNull(record.tabUuid)
+        assertEquals(tabUuid, UUID.fromString(tabUuid).toString())
+        assertEquals(listOf("claude ${claudeSettings(tabUuid)} --session-id $tabUuid"), factory.commands)
+        assertEquals(tabUuid, record.agentSessionId)
+        assertTrue(Files.isDirectory(claudeStateFile(tabUuid).parent))
+    }
+
+    fun testAClaudeTabResumesTheSessionItsHookReported() {
+        configureApp("claude", "claude")
+        val transcript = environment.claudeHome.resolve("projects").resolve("elsewhere").resolve("moved.jsonl")
+        write(transcript, "{}\n")
+        write(
+            claudeStateFile(TAB_UUID),
+            """{"session_id":"$CLAUDE_REPORTED_SESSION","transcript_path":"$transcript"}""",
+        )
+        saveTab(TuiSessionRecord("claude", "claude", true, TAB_UUID, TAB_UUID, "CLAUDE"))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+
+        assertEquals(
+            listOf("claude ${claudeSettings(TAB_UUID)} --resume $CLAUDE_REPORTED_SESSION"),
+            factory.commands,
+        )
+        assertEquals(CLAUDE_REPORTED_SESSION, savedTabs().single().agentSessionId)
+    }
+
+    fun testAClaudeTabWhoseReportedTranscriptIsGoneFallsBackToItsOwnTab() {
+        configureApp("claude", "claude")
+        write(
+            claudeStateFile(TAB_UUID),
+            """{"session_id":"$CLAUDE_REPORTED_SESSION","transcript_path":"/nowhere/gone.jsonl"}""",
+        )
+        writeClaudeTranscript(TAB_UUID)
+        saveTab(TuiSessionRecord("claude", "claude", true, TAB_UUID, TAB_UUID, "CLAUDE"))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+
+        assertEquals(listOf("claude ${claudeSettings(TAB_UUID)} --resume $TAB_UUID"), factory.commands)
+        assertEquals(TAB_UUID, savedTabs().single().agentSessionId)
+    }
+
+    fun testTheStrategyPreparesItsStateBeforeTheArgumentsAreBuilt() {
+        configureApp("claude", "claude")
+        val strategy = RecordingSessionStrategy()
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+        service.agentSessionStrategies = { _, _ -> strategy }
+
+        service.launchNew("claude", "claude")
+
+        assertEquals(listOf("prepareLaunch", "launchArguments"), strategy.calls)
+        assertEquals(listOf("claude --recorded"), factory.commands)
+    }
+
+    fun testClosingAClaudeTabDeletesTheSessionItsHookReported() {
+        configureApp("claude", "claude")
+        val (service, _) = newService(FakeFactory(FakeSession()))
+        service.launchNew("claude", "claude")
+        val stateFile = claudeStateFile(savedTabs().single().tabUuid!!)
+        write(stateFile, """{"session_id":"$CLAUDE_REPORTED_SESSION"}""")
+
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        awaitDeletedFile(stateFile)
     }
 
     fun testACodexTabResumesTheSessionItsHookRecorded() {
         configureApp("codex", "codex")
         val stateFile = codexStateFile(TAB_UUID)
-        write(stateFile, """{"session_id":"$CODEX_SESSION_ID","source":"startup"}""")
+        write(stateFile, codexHookRecord())
         saveTab(TuiSessionRecord("codex", "codex", true, TAB_UUID))
         val factory = FakeFactory(FakeSession())
         val (service, _) = newService(factory)
@@ -114,10 +188,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         service.restoreSavedTabs()
 
         assertEquals(
-            listOf(
-                "codex resume $CODEX_SESSION_ID --dangerously-bypass-hook-trust " +
-                    "-c ${ShellWords.quote(codexHookToml(stateFile))}"
-            ),
+            listOf("codex resume $CODEX_SESSION_ID ${ShellWords.join(codexHookArguments(stateFile))}"),
             factory.commands,
         )
         assertEquals(CODEX_SESSION_ID, savedTabs().single().agentSessionId)
@@ -201,9 +272,9 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         service.restoreSavedTabs()
 
-        val record = savedTabs().single()
-        assertEquals(record.tabUuid, UUID.fromString(record.tabUuid).toString())
-        assertEquals(listOf("claude --session-id ${record.tabUuid}"), factory.commands)
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(tabUuid, UUID.fromString(tabUuid).toString())
+        assertEquals(listOf("claude ${claudeSettings(tabUuid)} --session-id $tabUuid"), factory.commands)
     }
 
     fun testAReopenedTabThatEndsRightAwayComesBackAsANewTabInTheSamePlace() {
@@ -225,13 +296,16 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
         assertEquals(
-            listOf("claude --resume $TAB_UUID", "second", "third"),
+            listOf("claude ${claudeSettings(TAB_UUID)} --resume $TAB_UUID", "second", "third"),
             factory.commands.take(3),
         )
         val relaunchedTabUuid = savedTabs().first().tabUuid!!
         assertEquals(relaunchedTabUuid, UUID.fromString(relaunchedTabUuid).toString())
         assertTrue(relaunchedTabUuid, relaunchedTabUuid != TAB_UUID)
-        assertEquals("claude --session-id $relaunchedTabUuid", factory.commands.last())
+        assertEquals(
+            "claude ${claudeSettings(relaunchedTabUuid)} --session-id $relaunchedTabUuid",
+            factory.commands.last(),
+        )
         assertEquals(4, factory.commands.size)
         assertEquals(listOf("claude", "second", "third"), savedTabs().map { it.title })
     }
@@ -239,7 +313,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
     fun testARelaunchedTabDropsTheHookStateOfTheSessionThatDied() {
         configureApp("codex", "codex")
         val stateFile = codexStateFile(TAB_UUID)
-        write(stateFile, """{"session_id":"$CODEX_SESSION_ID"}""")
+        write(stateFile, codexHookRecord())
         saveTab(TuiSessionRecord("codex", "codex", true, TAB_UUID, CODEX_SESSION_ID, "CODEX"))
         val sessions = List(2) { FakeSession() }
         val factory = FakeFactory(sessions)
@@ -270,7 +344,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         sessions[0].terminate()
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
-        assertEquals(listOf("claude --resume $TAB_UUID"), factory.commands)
+        assertEquals(listOf("claude ${claudeSettings(TAB_UUID)} --resume $TAB_UUID"), factory.commands)
         assertTrue(host.tabs.isEmpty())
         assertTrue(savedTabs().isEmpty())
     }
@@ -306,22 +380,26 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
     fun testReopeningTheProjectDropsTheHookStateOfTabsThatAreGone() {
         configureApp("codex", "codex")
+        val goneTabUuid = "41d9b7e2-5c08-4a6f-8b13-9e7c0a2f6d54"
         val kept = codexStateFile(TAB_UUID)
-        val orphan = codexStateFile("41d9b7e2-5c08-4a6f-8b13-9e7c0a2f6d54")
-        write(kept, """{"session_id":"$CODEX_SESSION_ID"}""")
-        write(orphan, """{"session_id":"$CODEX_SESSION_ID"}""")
+        val orphan = codexStateFile(goneTabUuid)
+        val claudeOrphan = claudeStateFile(goneTabUuid)
+        write(kept, codexHookRecord())
+        write(orphan, codexHookRecord())
+        write(claudeOrphan, """{"session_id":"$CLAUDE_REPORTED_SESSION"}""")
         saveTab(TuiSessionRecord("codex", "codex", true, TAB_UUID, CODEX_SESSION_ID, "CODEX"))
         val (service, _) = newService(FakeFactory(FakeSession()))
 
         service.restoreSavedTabs()
 
         awaitDeletedFile(orphan)
+        awaitDeletedFile(claudeOrphan)
         assertTrue(Files.exists(kept))
     }
 
     fun testACodexTabThatEndsTwiceAfterAReopenIsNotStartedAThirdTime() {
         configureApp("codex", "codex")
-        write(codexStateFile(TAB_UUID), """{"session_id":"$CODEX_SESSION_ID"}""")
+        write(codexStateFile(TAB_UUID), codexHookRecord())
         saveTab(TuiSessionRecord("codex", "codex", true, TAB_UUID, CODEX_SESSION_ID))
         val sessions = List(2) { FakeSession() }
         val factory = FakeFactory(sessions)
@@ -379,7 +457,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, host) = newService(FakeFactory(FakeSession()))
         service.launchNew("codex", "codex")
         val stateFile = codexStateFile(savedTabs().single().tabUuid!!)
-        write(stateFile, """{"session_id":"$CODEX_SESSION_ID"}""")
+        write(stateFile, codexHookRecord())
 
         host.removeTab(host.tabs.single())
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
@@ -392,7 +470,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, _) = newService(FakeFactory(FakeSession()))
         service.launchNew("codex", "codex")
         val stateFile = codexStateFile(savedTabs().single().tabUuid!!)
-        write(stateFile, """{"session_id":"$CODEX_SESSION_ID"}""")
+        write(stateFile, codexHookRecord())
 
         service.closeActiveTui()
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
@@ -518,7 +596,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, _) = newService(FakeFactory(session))
         service.launchNew("codex", "codex")
         val stateFile = codexStateFile(savedTabs().single().tabUuid!!)
-        write(stateFile, """{"session_id":"$CODEX_SESSION_ID"}""")
+        write(stateFile, codexHookRecord())
 
         session.terminate()
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
@@ -610,10 +688,16 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
     }
 
     private fun codexStateFile(tabUuid: String): Path =
-        environment.stateDirectory.resolve("codex").resolve("$tabUuid.json")
+        environment.stateDirectory.resolve("codex").resolve("$tabUuid.jsonl")
 
-    private fun codexHookToml(stateFile: Path): String =
-        """hooks.SessionStart=[{hooks=[{type="command",command="cat > \"$stateFile\"",async=true,timeout=5}]}]"""
+    private fun codexHookRecord(sessionId: String = CODEX_SESSION_ID): String =
+        """{"session_id":"$sessionId","transcript_path":"$CODEX_TRANSCRIPT_PATH","source":"startup"}""" + "\n"
+
+    private fun claudeStateFile(tabUuid: String): Path =
+        environment.stateDirectory.resolve("claude").resolve("$tabUuid.json")
+
+    private fun claudeSettings(tabUuid: String): String =
+        "--settings ${ShellWords.quote(claudeHookSettings(claudeStateFile(tabUuid)))}"
 
     private fun ompSessionDirectory(tabUuid: String): Path = environment.ompRoot
         .resolve("sessions")

@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- A reopened `claude` or `codex` tab now comes back to the session you were last in, not the one the tab was
+  launched with. Both CLIs report their active session to the plugin themselves: claude through a
+  `SessionStart` hook passed inline with `--settings`, codex through a `SessionStart` and a
+  `UserPromptSubmit` hook passed with `-c`. Switching conversations inside the TUI with `/resume`, `/clear`,
+  `/new` or `/fork` is therefore followed, for codex from the first message sent in the new session onwards,
+  and a codex `/side` or `/btw` excursion is ignored because those conversations cannot be resumed. A tab
+  whose CLI reported nothing yet still falls back to the conversation of its own tab identifier, so a tab you
+  never typed in comes back fresh.
+
 ## [0.10.0] - 2026-09-08
 
 ### Added

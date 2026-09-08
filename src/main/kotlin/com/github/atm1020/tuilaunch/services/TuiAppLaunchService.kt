@@ -13,6 +13,8 @@ import com.github.atm1020.tuilaunch.resume.AgentCommand
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategies
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategy
+import com.github.atm1020.tuilaunch.resume.AgentStateFiles
+import com.github.atm1020.tuilaunch.resume.ClaudeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
 import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.TabIdentity
@@ -271,10 +273,13 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 
     private fun deleteAgentStateOfTabsThatAreGone(saved: List<TuiSessionRecord>) {
         if (!agentSessionsAreResumed()) return
-        val codex = agentSessionStrategies(AgentCliKind.CODEX, agentSessionEnvironment()) as? CodexSessionStrategy
-            ?: return
+        val stateDirectory = agentSessionEnvironment().stateDirectory
+        val directories = listOf(ClaudeSessionStrategy.DIRECTORY_NAME, CodexSessionStrategy.DIRECTORY_NAME)
+            .map { stateDirectory.resolve(it) }
         val restoredTabUuids = saved.mapNotNullTo(mutableSetOf()) { it.tabUuid }
-        scope.launch { codex.deleteStateFilesExcept(restoredTabUuids) }
+        scope.launch {
+            directories.forEach { AgentStateFiles.deleteStateFilesExcept(it, restoredTabUuids) }
+        }
     }
 
     private fun restoreTabAt(
@@ -550,6 +555,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val tab = TabIdentity(intent.tabUuid, projectPath, project.locationHash)
         val strategy = agentSessionStrategies(kind, agentSessionEnvironment())
         val remembered = rememberedSessionOf(intent, kind)
+        strategy.prepareLaunch(tab)
         val arguments = when (intent) {
             is LaunchIntent.Fresh -> strategy.launchArguments(tab)
             is LaunchIntent.Restore -> strategy.restoreArguments(tab, remembered)
@@ -584,10 +590,20 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         intent: LaunchIntent,
         remembered: RememberedSession,
     ): String? = when (kind) {
-        AgentCliKind.CLAUDE -> tab.tabUuid
+        AgentCliKind.CLAUDE -> claudeSessionId(strategy, tab, intent)
         AgentCliKind.CODEX -> codexSessionIdOnRestore(strategy, tab, intent)
         AgentCliKind.OPENCODE -> remembered.agentSessionId
         AgentCliKind.OMP -> null
+    }
+
+    private fun claudeSessionId(
+        strategy: AgentSessionStrategy,
+        tab: TabIdentity,
+        intent: LaunchIntent,
+    ): String? {
+        if (intent !is LaunchIntent.Restore) return tab.tabUuid
+        val claude = strategy as? ClaudeSessionStrategy ?: return tab.tabUuid
+        return claude.readSessionId(claude.stateFile(tab)) ?: tab.tabUuid
     }
 
     private fun codexSessionIdOnRestore(

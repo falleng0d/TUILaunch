@@ -1,6 +1,11 @@
 package com.github.atm1020.tuilaunch.resume
 
+import com.google.gson.JsonObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.net.ServerSocket
+import java.nio.file.Files
 import java.nio.file.Path
 
 data class TabIdentity(
@@ -12,6 +17,9 @@ data class TabIdentity(
 data class RememberedSession(val agentSessionId: String? = null)
 
 interface AgentSessionStrategy {
+    fun prepareLaunch(tab: TabIdentity) {
+    }
+
     fun launchArguments(tab: TabIdentity): List<String>
 
     fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String>
@@ -19,6 +27,58 @@ interface AgentSessionStrategy {
     suspend fun afterLaunch(tab: TabIdentity, remembered: RememberedSession): String? = null
 
     suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
+    }
+}
+
+internal fun JsonObject.nonBlankString(field: String): String? {
+    val value = get(field) ?: return null
+    if (!value.isJsonPrimitive || !value.asJsonPrimitive.isString) return null
+    return value.asString.takeIf { it.isNotBlank() }
+}
+
+object AgentStateFiles {
+    private val STATE_FILE_SUFFIXES = listOf(".json", ".jsonl")
+
+    fun createDirectoryFor(stateFile: Path) {
+        val parent = stateFile.parent ?: return
+        try {
+            Files.createDirectories(parent)
+        } catch (_: IOException) {
+        }
+    }
+
+    suspend fun delete(stateFile: Path) {
+        withContext(Dispatchers.IO) {
+            try {
+                Files.deleteIfExists(stateFile)
+            } catch (_: IOException) {
+            }
+        }
+    }
+
+    suspend fun deleteStateFilesExcept(directory: Path, tabUuids: Set<String>) {
+        withContext(Dispatchers.IO) {
+            orphanedStateFiles(directory, tabUuids).forEach { file ->
+                try {
+                    Files.deleteIfExists(file)
+                } catch (_: IOException) {
+                }
+            }
+        }
+    }
+
+    private fun orphanedStateFiles(directory: Path, tabUuids: Set<String>): List<Path> = try {
+        Files.newDirectoryStream(directory).use { entries ->
+            entries.filter { belongsToATabThatIsGone(it, tabUuids) }
+        }
+    } catch (_: IOException) {
+        emptyList()
+    }
+
+    private fun belongsToATabThatIsGone(file: Path, tabUuids: Set<String>): Boolean {
+        val name = file.fileName.toString()
+        val suffix = STATE_FILE_SUFFIXES.firstOrNull { name.endsWith(it) } ?: return false
+        return name.removeSuffix(suffix) !in tabUuids
     }
 }
 
@@ -57,7 +117,7 @@ object AgentSessionStrategies {
         freePort: () -> Int = ::allocateFreePort,
         openCodeApi: (Int) -> OpenCodeApi = { port -> HttpOpenCodeApi(port) },
     ): AgentSessionStrategy = when (kind) {
-        AgentCliKind.CLAUDE -> ClaudeSessionStrategy(environment.claudeHome)
+        AgentCliKind.CLAUDE -> ClaudeSessionStrategy(environment.claudeHome, environment.stateDirectory)
         AgentCliKind.CODEX -> CodexSessionStrategy(environment.stateDirectory)
         AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(freePort, openCodeApi)
         AgentCliKind.OMP -> OmpSessionStrategy(environment.ompRoot)
