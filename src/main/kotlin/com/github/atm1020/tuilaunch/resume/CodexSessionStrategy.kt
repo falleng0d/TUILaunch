@@ -48,7 +48,6 @@ class CodexSessionStrategy(
             hookToml(SESSION_START_EVENT),
             CONFIG_OVERRIDE,
             hookToml(USER_PROMPT_SUBMIT_EVENT),
-            BYPASS_HOOK_TRUST,
         )
     }
 
@@ -123,7 +122,6 @@ class CodexSessionStrategy(
 
     companion object {
         const val DIRECTORY_NAME = "codex"
-        const val BYPASS_HOOK_TRUST = "--dangerously-bypass-hook-trust"
         const val CONFIG_OVERRIDE = "-c"
         const val RESUME_SUBCOMMAND = "resume"
         const val STATE_FILE_VARIABLE = "TUILAUNCH_CODEX_STATE"

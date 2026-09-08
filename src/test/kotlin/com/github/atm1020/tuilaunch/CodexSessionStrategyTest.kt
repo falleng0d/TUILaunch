@@ -84,7 +84,7 @@ class CodexSessionStrategyTest {
         assertEquals(
             "TUILAUNCH_CODEX_STATE=${ShellWords.quote(strategy.stateFile(tab).toString())} " +
                 "codex -c '${expectedToml("SessionStart")}' " +
-                "-c '${expectedToml("UserPromptSubmit")}' --dangerously-bypass-hook-trust",
+                "-c '${expectedToml("UserPromptSubmit")}'",
             AgentCommand.parse("codex")
                 .withEnvironment(strategy.launchEnvironment(tab))
                 .withArguments(strategy.launchArguments(tab)),
@@ -132,8 +132,7 @@ class CodexSessionStrategyTest {
         assertEquals(
             "TUILAUNCH_CODEX_STATE=${ShellWords.quote(stateFile.toString())} $command -- resume $sessionId " +
                 "-c ${ShellWords.quote(expectedToml("SessionStart"))} " +
-                "-c ${ShellWords.quote(expectedToml("UserPromptSubmit"))} " +
-                "--dangerously-bypass-hook-trust",
+                "-c ${ShellWords.quote(expectedToml("UserPromptSubmit"))}",
             AgentCommand.parse(command)
                 .withEnvironment(strategy.restoreEnvironment(tab))
                 .withArguments(strategy.restoreArguments(tab)),
@@ -347,8 +346,7 @@ class CodexSessionStrategyTest {
                 name,
                 "TUILAUNCH_CODEX_STATE=${ShellWords.quote(stateFile.toString())} codex " +
                     "-c ${ShellWords.quote(expectedToml("SessionStart"))} " +
-                    "-c ${ShellWords.quote(expectedToml("UserPromptSubmit"))} " +
-                    "--dangerously-bypass-hook-trust",
+                    "-c ${ShellWords.quote(expectedToml("UserPromptSubmit"))}",
                 AgentCommand.parse("codex")
                     .withEnvironment(strategy.launchEnvironment(tab))
                     .withArguments(strategy.launchArguments(tab)),

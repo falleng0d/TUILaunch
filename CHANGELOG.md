@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- codex is no longer launched with `--dangerously-bypass-hook-trust`. The hook text is the same for every tab, so
+  codex asks you to trust it once — answer **Trust all and continue** — and remembers that answer itself. Until
+  you answer, the hooks do not run and a reopened codex tab starts fresh.
+
 ### Fixed
 
 - A codex tab no longer asks you to trust its hook again for every new tab. The file the two hooks append to is

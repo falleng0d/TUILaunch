@@ -76,7 +76,6 @@ internal fun codexHookArguments(): List<String> = listOf(
     codexHookToml("SessionStart"),
     "-c",
     codexHookToml("UserPromptSubmit"),
-    "--dangerously-bypass-hook-trust",
 )
 
 private class GhostTextProvider : InlineCompletionProvider {
