@@ -146,7 +146,10 @@ object AgentSessionStrategies {
             hookAllowed = hookAllowed && environment.theShellIsPosix,
         )
 
-        AgentCliKind.CODEX -> CodexSessionStrategy(environment.stateDirectory)
+        AgentCliKind.CODEX -> CodexSessionStrategy(
+            stateDirectory = environment.stateDirectory,
+            theShellTakesAnEnvironmentPrefix = environment.theShellIsPosix,
+        )
 
         AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(
             stateDirectory = environment.stateDirectory,

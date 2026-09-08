@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- A codex tab no longer asks you to trust its hook again for every new tab. The file the two hooks append to is
+  named by a `TUILAUNCH_CODEX_STATE` prefix in front of the command instead of inside the hook command itself, so
+  the command is the same text for every tab and every launch and codex has one review to offer you — answer
+  **Trust all and continue** — which it then keeps itself under `hooks.state` in `~/.codex/config.toml`. A codex
+  command that sets `TUILAUNCH_CODEX_STATE` itself is launched exactly as configured, as is every codex command
+  on a shell that reads no environment prefix, which is `cmd` and PowerShell on Windows. A codex tab whose state
+  file path holds a space or a quote is now followed like any other.
+- A reopened codex tab whose two hooks wrote their records at the same moment now finds its session again. Both
+  hooks fire at the start of the first turn and append to one file, so their records can share a line; the plugin
+  reads the file as a stream of records rather than one record per line, and a record a killed hook left half
+  written hides neither the records before it nor the ones appended after it.
+
 ## [0.11.0] - 2026-09-08
 
 ### Changed

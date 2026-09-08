@@ -1,6 +1,9 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.resume.AgentCliKind
 import com.github.atm1020.tuilaunch.resume.AgentCommand
+import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
+import com.github.atm1020.tuilaunch.resume.AgentSessionStrategies
 import com.github.atm1020.tuilaunch.resume.AgentStateFiles
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
 import com.github.atm1020.tuilaunch.resume.ShellWords
@@ -22,6 +25,7 @@ class CodexSessionStrategyTest {
     val temporaryFolder = TemporaryFolder()
 
     private val tabUuid = "6a1f0c22-9b74-4a0e-8d3f-2b5c7e91a004"
+    private val otherTabUuid = "8c2e5d41-3f60-4b19-a7d8-1e4c6b0f2a55"
     private val sessionId = "019a4f3c-7b21-7cd0-9e55-3f1b2a6d8c47"
     private val laterSessionId = "019a52118c334de1af664e2c3b7e9d58"
     private val transcriptPath = "/Users/falleng0d/.codex/sessions/2026/09/08/rollout.jsonl"
@@ -43,20 +47,47 @@ class CodexSessionStrategyTest {
     @Test
     fun launchAppendsToTheStateFileFromBothHooksAndBypassesTheTrustPrompt() {
         val strategy = CodexSessionStrategy(stateDirectory())
-        val stateFile = strategy.stateFile(tab)
 
-        assertEquals(codexHookArguments(stateFile), strategy.launchArguments(tab))
+        assertEquals(codexHookArguments(), strategy.launchArguments(tab))
     }
 
     @Test
-    fun theLaunchCommandQuotesBothHookOverrides() {
+    fun theHookCommandReadsTheStateFileFromTheEnvironmentAndIsTheSameForEveryTab() {
         val strategy = CodexSessionStrategy(stateDirectory())
-        val stateFile = strategy.stateFile(tab)
+        val otherTab = tab.copy(tabUuid = otherTabUuid)
 
         assertEquals(
-            "codex -c '${expectedToml("SessionStart", stateFile)}' " +
-                "-c '${expectedToml("UserPromptSubmit", stateFile)}' --dangerously-bypass-hook-trust",
-            AgentCommand.parse("codex").withArguments(strategy.launchArguments(tab)),
+            """hooks.SessionStart=[{hooks=[{type="command",""" +
+                """command="{ cat; echo; } >> \"${'$'}TUILAUNCH_CODEX_STATE\"",async=true,timeout=5}]}]""",
+            strategy.launchArguments(tab)[1],
+        )
+        assertEquals(strategy.launchArguments(tab), strategy.launchArguments(otherTab))
+        assertEquals(
+            listOf(strategy.stateFile(otherTab).toString()),
+            strategy.launchEnvironment(otherTab).values.toList(),
+        )
+    }
+
+    @Test
+    fun theEnvironmentNamesTheStateFileOfTheTab() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+
+        assertEquals(listOf("TUILAUNCH_CODEX_STATE"), strategy.launchEnvironment(tab).keys.toList())
+        assertEquals(listOf(strategy.stateFile(tab).toString()), strategy.launchEnvironment(tab).values.toList())
+        assertEquals(strategy.launchEnvironment(tab), strategy.restoreEnvironment(tab))
+    }
+
+    @Test
+    fun theLaunchCommandCarriesTheStateFileInFrontAndQuotesBothHookOverrides() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+
+        assertEquals(
+            "TUILAUNCH_CODEX_STATE=${ShellWords.quote(strategy.stateFile(tab).toString())} " +
+                "codex -c '${expectedToml("SessionStart")}' " +
+                "-c '${expectedToml("UserPromptSubmit")}' --dangerously-bypass-hook-trust",
+            AgentCommand.parse("codex")
+                .withEnvironment(strategy.launchEnvironment(tab))
+                .withArguments(strategy.launchArguments(tab)),
         )
     }
 
@@ -75,6 +106,7 @@ class CodexSessionStrategyTest {
 
         strategy.launchArguments(tab)
         strategy.restoreArguments(tab)
+        strategy.launchEnvironment(tab)
 
         assertFalse(Files.exists(stateDirectory()))
     }
@@ -98,11 +130,13 @@ class CodexSessionStrategyTest {
         val command = "headroom wrap codex --no-serena --no-tokensave --dangerously-bypass-approvals-and-sandbox"
 
         assertEquals(
-            "$command -- resume $sessionId " +
-                "-c ${ShellWords.quote(expectedToml("SessionStart", stateFile))} " +
-                "-c ${ShellWords.quote(expectedToml("UserPromptSubmit", stateFile))} " +
+            "TUILAUNCH_CODEX_STATE=${ShellWords.quote(stateFile.toString())} $command -- resume $sessionId " +
+                "-c ${ShellWords.quote(expectedToml("SessionStart"))} " +
+                "-c ${ShellWords.quote(expectedToml("UserPromptSubmit"))} " +
                 "--dangerously-bypass-hook-trust",
-            AgentCommand.parse(command).withArguments(strategy.restoreArguments(tab)),
+            AgentCommand.parse(command)
+                .withEnvironment(strategy.restoreEnvironment(tab))
+                .withArguments(strategy.restoreArguments(tab)),
         )
     }
 
@@ -134,17 +168,87 @@ class CodexSessionStrategyTest {
     }
 
     @Test
-    fun aTornLastLineDoesNotHideThePreviousRecord() {
+    fun twoRecordsThatLandedOnTheSameLineAreBothRead() {
         val strategy = CodexSessionStrategy(stateDirectory())
         val stateFile = strategy.stateFile(tab)
 
-        writeState(stateFile, record(sessionId, transcriptPath) + "\n" + """{"session_id":"01""")
+        writeState(
+            stateFile,
+            record(sessionId, transcriptPath) + record(laterSessionId, transcriptPath) + "\n\n",
+        )
+
+        assertEquals(laterSessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun theResumableRecordOfALineHoldingTwoWins() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+
+        writeState(
+            stateFile,
+            record(sessionId, transcriptPath) +
+                """{"session_id":"$laterSessionId","transcript_path":null,"source":"startup"}""" + "\n\n",
+        )
 
         assertEquals(sessionId, strategy.readSessionId(stateFile))
     }
 
     @Test
-    fun aLastLineTornInsideAMultiByteCharacterDoesNotHideThePreviousRecord() {
+    fun aRecordSplitAcrossLinesIsStillRead() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+
+        writeState(
+            stateFile,
+            "{\n\"session_id\":\"$sessionId\",\n\"transcript_path\":\"$transcriptPath\"\n}\n",
+        )
+
+        assertEquals(sessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun aTornRecordDoesNotHideThePreviousOne() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+
+        writeState(stateFile, record(sessionId, transcriptPath) + "\n" + """{"session_id":"01""")
+        assertEquals(sessionId, strategy.readSessionId(stateFile))
+
+        writeState(stateFile, record(sessionId, transcriptPath) + """{"session_id":"01""")
+        assertEquals(sessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun aTornRecordDoesNotHideTheRecordsBehindIt() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+        val torn = """{"session_id":"01"""
+
+        writeState(stateFile, record(sessionId, transcriptPath) + torn + record(laterSessionId, transcriptPath))
+        assertEquals(laterSessionId, strategy.readSessionId(stateFile))
+
+        writeState(
+            stateFile,
+            record(sessionId, transcriptPath) + "\n" + torn + "\n" + record(laterSessionId, transcriptPath) + "\n",
+        )
+        assertEquals(laterSessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun aTailCutInsideARecordSharingItsLineWithAGoodOneStillFindsTheGoodOne() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+        val hugePrompt = "x".repeat(200_000)
+        val huge = """{"session_id":"$sessionId","transcript_path":"$transcriptPath","prompt":"$hugePrompt"}"""
+
+        writeState(stateFile, huge + record(laterSessionId, transcriptPath) + "\n\n")
+
+        assertEquals(laterSessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun aRecordTornInsideAMultiByteCharacterDoesNotHideThePreviousOne() {
         val strategy = CodexSessionStrategy(stateDirectory())
         val stateFile = strategy.stateFile(tab)
         val good = (record(sessionId, transcriptPath) + "\n").toByteArray(Charsets.UTF_8)
@@ -163,6 +267,18 @@ class CodexSessionStrategyTest {
         val filler = record(sessionId, transcriptPath) + "\n"
 
         writeState(stateFile, filler.repeat(2_000) + record(laterSessionId, transcriptPath) + "\n")
+
+        assertEquals(laterSessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun aFirstRecordTheTailCutsInHalfIsSkipped() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+        val hugePrompt = "x".repeat(200_000)
+        val huge = """{"session_id":"$sessionId","transcript_path":"$transcriptPath","prompt":"$hugePrompt"}"""
+
+        writeState(stateFile, huge + "\n" + record(laterSessionId, transcriptPath) + "\n")
 
         assertEquals(laterSessionId, strategy.readSessionId(stateFile))
     }
@@ -221,22 +337,52 @@ class CodexSessionStrategyTest {
     }
 
     @Test
-    fun aStateFilePathThatWouldBreakTheHookIsRefused() {
-        for (name in listOf("say\"hi\"", "back\\slash", "cost\$100", "back`tick`", "two\nlines")) {
+    fun aStateFilePathTheShellWouldReadIsStillManaged() {
+        for (name in listOf("say hi", "it's here", "cost\$100", "back`tick`", """say"hi"""")) {
             val strategy = CodexSessionStrategy(temporaryFolder.root.toPath().resolve(name))
+            val stateFile = strategy.stateFile(tab)
 
-            assertEquals(name, emptyList<String>(), strategy.hookArguments(strategy.stateFile(tab)))
-            assertEquals(emptyList<String>(), strategy.launchArguments(tab))
-            assertEquals(emptyList<String>(), strategy.restoreArguments(tab))
-            assertEquals("codex", AgentCommand.parse("codex").withArguments(strategy.launchArguments(tab)))
+            assertEquals(name, codexHookArguments(), strategy.launchArguments(tab))
+            assertEquals(
+                name,
+                "TUILAUNCH_CODEX_STATE=${ShellWords.quote(stateFile.toString())} codex " +
+                    "-c ${ShellWords.quote(expectedToml("SessionStart"))} " +
+                    "-c ${ShellWords.quote(expectedToml("UserPromptSubmit"))} " +
+                    "--dangerously-bypass-hook-trust",
+                AgentCommand.parse("codex")
+                    .withEnvironment(strategy.launchEnvironment(tab))
+                    .withArguments(strategy.launchArguments(tab)),
+            )
+            assertEquals(name, listOf(stateFile.toString()), reassembledEnvironmentOf(strategy))
         }
     }
 
     @Test
-    fun aPlainStateFilePathIsManageable() {
-        val strategy = CodexSessionStrategy(stateDirectory())
+    fun aShellThatReadsNoEnvironmentPrefixLeavesTheCommandAlone() {
+        val strategy = CodexSessionStrategy(stateDirectory(), false)
+        writeState(strategy.stateFile(tab), record(sessionId, transcriptPath))
 
-        assertEquals(codexHookArguments(strategy.stateFile(tab)), strategy.hookArguments(strategy.stateFile(tab)))
+        strategy.prepareLaunch(tab)
+
+        assertEquals(emptyList<String>(), strategy.launchArguments(tab))
+        assertEquals(emptyList<String>(), strategy.restoreArguments(tab))
+        assertEquals(emptyMap<String, String>(), strategy.launchEnvironment(tab))
+        assertEquals(emptyMap<String, String>(), strategy.restoreEnvironment(tab))
+        assertEquals("codex", AgentCommand.parse("codex").withArguments(strategy.launchArguments(tab)))
+    }
+
+    @Test
+    fun theFactoryPassesTheShellOfTheEnvironmentToTheStrategy() {
+        val posix = AgentSessionStrategies.forKind(AgentCliKind.CODEX, agentSessionEnvironment(true))
+        val windows = AgentSessionStrategies.forKind(AgentCliKind.CODEX, agentSessionEnvironment(false))
+
+        assertEquals(codexHookArguments(), posix.launchArguments(tab))
+        assertEquals(
+            listOf(stateDirectory().resolve("codex").resolve("$tabUuid.jsonl").toString()),
+            posix.launchEnvironment(tab).values.toList(),
+        )
+        assertEquals(emptyList<String>(), windows.launchArguments(tab))
+        assertEquals(emptyMap<String, String>(), windows.launchEnvironment(tab))
     }
 
     @Test
@@ -279,7 +425,21 @@ class CodexSessionStrategyTest {
         assertFalse(Files.exists(strategy.stateFile(tab).parent))
     }
 
-    private fun expectedToml(event: String, stateFile: Path): String = codexHookToml(event, stateFile)
+    private fun reassembledEnvironmentOf(strategy: CodexSessionStrategy): List<String> =
+        ShellWords.split(
+            AgentCommand.parse("codex").withEnvironment(strategy.launchEnvironment(tab)).command,
+        ).filter { it.startsWith("TUILAUNCH_CODEX_STATE=") }
+            .map { it.removePrefix("TUILAUNCH_CODEX_STATE=") }
+
+    private fun agentSessionEnvironment(theShellIsPosix: Boolean): AgentSessionEnvironment =
+        AgentSessionEnvironment(
+            homeDirectory = temporaryFolder.root.toPath().resolve("home"),
+            stateDirectory = stateDirectory(),
+            bundledDirectory = temporaryFolder.root.toPath().resolve("integrations"),
+            theShellIsPosix = theShellIsPosix,
+        )
+
+    private fun expectedToml(event: String): String = codexHookToml(event)
 
     private fun record(sessionId: String, transcriptPath: String): String =
         """{"session_id":"$sessionId","transcript_path":"$transcriptPath","source":"resume"}"""

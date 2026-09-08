@@ -159,7 +159,7 @@ for `claude`, `codex`, `opencode` and `omp`, whether they are launched directly 
 `headroom wrap <cli> <flags>`. Every other command is launched untouched, and so is any command that already
 selects a session itself (`--resume`, `--continue`, `--session-id`, `codex resume`, …), that chains something
 else onto the CLI with `;`, `&&`, `||`, `|`, `&` or a redirection, or that sets one of the variables TUILaunch
-would set itself (`OPENCODE_TUI_CONFIG`, `TUILAUNCH_OPENCODE_STATE`).
+would set itself (`OPENCODE_TUI_CONFIG`, `TUILAUNCH_OPENCODE_STATE`, `TUILAUNCH_CODEX_STATE`).
 
 Turn it on with **Resume the agent session when a TUI tab is reopened**, directly under **Reopen TUI tabs when the
 project is opened**. It is on by default and only has an effect while reopening tabs is on; with it off every tab
@@ -178,7 +178,11 @@ depends on the CLI:
   `--settings` itself gets no hook, because claude keeps only the last `--settings` and your own file has to win;
   such a tab comes back to the conversation of its own identifier.
 - **codex** — no flag can choose the id, so the launch installs a `SessionStart` and a `UserPromptSubmit` hook
-  that report the session codex is in. A reopened tab starts as `codex resume <session id>`.
+  that report the session codex is in. Both hooks append to the file named by `TUILAUNCH_CODEX_STATE=<state file>`
+  in front of the command, so the hook command itself is the same text for every tab and every launch: codex asks
+  you to trust it at most once — answer **Trust all and continue** — and stores that approval itself under
+  `hooks.state` in `~/.codex/config.toml`, which TUILaunch never writes to. A reopened tab starts as
+  `codex resume <session id>`.
 - **opencode** — no flag can choose the id here either, so the launch puts
   `OPENCODE_TUI_CONFIG=<bundled tui.json>` and `TUILAUNCH_OPENCODE_STATE=<state file>` in front of the command,
   which loads a small TUI plugin of TUILaunch's own. That plugin records the session the TUI is showing, and a
@@ -193,8 +197,8 @@ Arguments TUILaunch adds are appended after ` -- ` when the command goes through
 forwards them to the CLI instead of claiming them for itself. Environment assignments go the other way round, in
 front of the program and therefore before `headroom` itself, after any assignments your own command already
 carries, because `headroom wrap` starts the CLI as a child process and hands it the environment it was started
-with. Both forms need a POSIX shell: on `cmd` and PowerShell an opencode tab is launched exactly as configured
-and a claude tab gets its identifier pinned but no hook.
+with. Both forms need a POSIX shell: on `cmd` and PowerShell a codex or opencode tab is launched exactly as
+configured and a claude tab gets its identifier pinned but no hook.
 
 Because all four CLIs report the session they are in themselves, a switch inside the TUI is followed: pick
 another conversation with claude's `/resume`, start an empty one with `/clear`, or do the same in codex, opencode
@@ -215,11 +219,13 @@ time is left closed, and a tab you launched yourself is never restarted.
 
 Everything the CLIs report lands under `<IDE system directory>/TUILaunch/agent-sessions/<project>/`: claude's
 hook writes `claude/<tab id>.json`, the opencode plugin writes `opencode/<tab id>.json`, and the codex hooks
-append to `codex/<tab id>.jsonl`, one line per session start and per prompt, so that file also holds the prompts
+append to `codex/<tab id>.jsonl`, a record per session start and per prompt, so that file also holds the prompts
 you sent while the tab was open. None of the three prints anything or writes outside that directory. They are
 deleted when you close the tab, and files left behind by tabs that are gone are deleted when the project is
 reopened. The codex hooks are added per invocation, which codex accepts only together with
-`--dangerously-bypass-hook-trust`; without that flag its TUI stops on a trust review at every launch.
+`--dangerously-bypass-hook-trust`; without that flag its TUI stops on a trust review at every launch. With the
+flag the launch goes through, and the review codex still offers is the same one for every tab, because which
+file the hooks append to is decided by `TUILAUNCH_CODEX_STATE` alone and not by the hook command.
 
 The omp extension and the opencode plugin are plain `.js` files that TUILaunch keeps under
 `<IDE system directory>/TUILaunch/integrations/`, writes there when they are missing or out of date, and passes
@@ -434,8 +440,11 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `claude --session-id <uuid>` is rejected with "Session ID … is already in use" exactly when `<claudeHome>/projects/<escaped cwd>/<uuid>.jsonl` exists, and that transcript is written lazily on the first message, so a tab that was opened but never prompted has to be relaunched with `--session-id` rather than `--resume`.
 - A codex `SessionStart` hook added per invocation with `-c 'hooks.SessionStart=[…]'` makes the TUI block on a trust review unless `--dangerously-bypass-hook-trust` is also passed, and the hook is queued when a session is built but fires only at the start of that session's first turn, so a `UserPromptSubmit` hook writing the same record is what makes an in-TUI switch observable at all, and never before the first prompt of the new session.
 - codex `/side` and `/btw` fork an ephemeral conversation that fires `SessionStart` with a new id and `"transcript_path": null`, and that id can never be resumed, so a record without a transcript path has to be skipped rather than treated as the newest session.
-- The codex state file is append-only for the life of a tab, because an ephemeral `/side` record must not be allowed to overwrite the last resumable one, so only its last 64 KB is read and decoded leniently: a hook killed by its timeout mid-character must not hide the records before it.
-- The codex hook command runs through `$SHELL -lc`, so a path inside it needs its own double quotes (`{ cat; echo; } >> "<path>"`, escaped as `\"` inside the TOML string); a path holding any character the shell reads inside double quotes — `"`, `\`, `$`, a backtick or a newline — cannot be expressed this way and leaves the tab unmanaged, which is every path on Windows because of the separator.
+- The codex state file is append-only for the life of a tab, because an ephemeral `/side` record must not be allowed to overwrite the last resumable one, so only its last 64 KB is read and decoded leniently: a hook killed by its timeout mid-character must hide neither the records before it nor the ones appended after it, which is why the reader restarts at the last record start of a chunk it cannot read instead of giving up on the rest of the file.
+- The codex hook command runs through `$SHELL -lc` with the codex process environment inherited, so the per-tab path travels in `TUILAUNCH_CODEX_STATE` and the command stays the constant `{ cat; echo; } >> "$TUILAUNCH_CODEX_STATE"` (its double quotes escaped as `\"` inside the TOML string); it may hold no other backslash, because fish collapses `\\` inside single quotes while zsh keeps it and the text codex receives is the text it hashes.
+- codex keys hook trust by source, event and handler index — `<source>:session_start:0:0` for ours, the same for every tab — but hashes the whole handler, command text included, so anything per-tab inside the command is a `Hook 1 · modified` review for every new tab, even with the bypass flag, and trusting one tab overwrites the answer given for the last.
+- codex queues both of our hooks at the start of the first turn and runs them with `async=true` against the same file, so their two records can land on one line as `…}{"session_id"…` with the newlines behind them; the reader has to accept several top-level objects per line rather than one object per line.
+- codex drops every inherited variable whose name holds KEY, SECRET or TOKEN from a hook's environment, so a variable a hook has to read must be named after none of the three.
 - claude holds back the hooks of every settings file, including the ones passed inline with `--settings`, until the user has accepted the workspace trust dialog for the folder or a parent of it, so the first launch of a session cannot rely on its hook having run and has to pin the id with `--session-id` as well.
 - claude adds the stdout of a `SessionStart` hook to the model's context, so such a hook has to print nothing at all, and it keeps only the last `--settings` of a command line rather than merging several.
 - claude's exec form for a hook (`"command": "/bin/sh", "args": ["-c", …, "<path>"]`) binds the trailing argument to `$0`, so a state path used inside the command is never parsed by a shell and never needs quoting.
@@ -450,7 +459,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `api.route.current` is a live getter with no change event behind it, so the session the opencode TUI shows can only be followed by polling.
 - opencode `--continue` starts on the placeholder session id `dummy`, so only an id matching `ses_` followed by 26 alphanumerics is a session worth recording.
 - `opencode --session <id>` validates the id before the TUI starts and exits 1 when that session is gone, which is what lets the early-exit relaunch catch it, while `OPENCODE_ROUTE` only shows a toast and exits 0.
-- A launch command is handed to the terminal's own shell, and `cmd /c` and `powershell -Command` neither read a leading `NAME=value` as an assignment nor treat `'` as quoting, so on Windows an opencode tab can get no environment prefix and a claude tab can get no inline `--settings` document.
+- A launch command is handed to the terminal's own shell, and `cmd /c` and `powershell -Command` neither read a leading `NAME=value` as an assignment nor treat `'` as quoting, so on Windows a codex or opencode tab can get no environment prefix and a claude tab can get no inline `--settings` document.
 - `ContentManager.addContent(Content, int)` inserts at that index and reads -1 as "append", which is the only supported way to put a tab back at the strip position it had.
 - A tab the plugin closes itself and a tab the user closes from the strip both arrive as one `contentRemoved` carrying no reason, so the only way to tell them apart is bookkeeping done before calling `removeContent`; project close fires no event at all and a drag is marked with `Content.TEMPORARY_REMOVED_KEY`.
 

@@ -1,5 +1,9 @@
 package com.github.atm1020.tuilaunch.resume
 
+import com.google.gson.JsonObject
+import com.google.gson.JsonStreamParser
+import com.intellij.openapi.util.SystemInfo
+import java.io.EOFException
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
@@ -7,19 +11,27 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
-class CodexSessionStrategy(private val stateDirectory: Path) : AgentSessionStrategy {
+class CodexSessionStrategy(
+    private val stateDirectory: Path,
+    private val theShellTakesAnEnvironmentPrefix: Boolean = !SystemInfo.isWindows,
+) : AgentSessionStrategy {
     override fun prepareLaunch(tab: TabIdentity) {
+        if (!theShellTakesAnEnvironmentPrefix) return
         AgentStateFiles.createDirectoryFor(stateFile(tab))
     }
 
-    override fun launchArguments(tab: TabIdentity): List<String> = hookArguments(stateFile(tab))
+    override fun launchArguments(tab: TabIdentity): List<String> = hookArguments()
 
     override fun restoreArguments(tab: TabIdentity): List<String> {
-        val file = stateFile(tab)
-        val hookArguments = hookArguments(file)
+        val hookArguments = hookArguments()
         if (hookArguments.isEmpty()) return emptyList()
-        val sessionId = readSessionId(file) ?: return hookArguments
+        val sessionId = readSessionId(stateFile(tab)) ?: return hookArguments
         return listOf(RESUME_SUBCOMMAND, sessionId) + hookArguments
+    }
+
+    override fun launchEnvironment(tab: TabIdentity): Map<String, String> {
+        if (!theShellTakesAnEnvironmentPrefix) return emptyMap()
+        return linkedMapOf(STATE_FILE_VARIABLE to stateFile(tab).toAbsolutePath().toString())
     }
 
     override suspend fun cleanUp(tab: TabIdentity) {
@@ -29,60 +41,99 @@ class CodexSessionStrategy(private val stateDirectory: Path) : AgentSessionStrat
     fun stateFile(tab: TabIdentity): Path =
         stateDirectory.resolve(DIRECTORY_NAME).resolve("${tab.tabUuid}$STATE_FILE_SUFFIX")
 
-    fun hookArguments(stateFile: Path): List<String> {
-        val path = stateFile.toString()
-        if (!isShellSafe(path)) return emptyList()
+    fun hookArguments(): List<String> {
+        if (!theShellTakesAnEnvironmentPrefix) return emptyList()
         return listOf(
             CONFIG_OVERRIDE,
-            hookToml(SESSION_START_EVENT, path),
+            hookToml(SESSION_START_EVENT),
             CONFIG_OVERRIDE,
-            hookToml(USER_PROMPT_SUBMIT_EVENT, path),
+            hookToml(USER_PROMPT_SUBMIT_EVENT),
             BYPASS_HOOK_TRUST,
         )
     }
 
     fun readSessionId(stateFile: Path): String? =
-        newestRecords(stateFile).asReversed().firstNotNullOfOrNull { resumableSessionIdIn(it) }
+        recordsIn(newestBytesOf(stateFile)).asReversed().firstNotNullOfOrNull { resumableSessionIdIn(it) }
 
-    private fun newestRecords(stateFile: Path): List<String> = try {
+    private fun newestBytesOf(stateFile: Path): String = try {
         if (!Files.isRegularFile(stateFile)) {
-            emptyList()
+            ""
         } else {
             Files.newByteChannel(stateFile, StandardOpenOption.READ).use { channel ->
-                val start = maxOf(0L, channel.size() - TAIL_BYTES)
+                val size = channel.size()
+                val start = maxOf(0L, size - TAIL_BYTES)
                 channel.position(start)
-                val buffer = ByteBuffer.allocate((channel.size() - start).toInt())
+                val buffer = ByteBuffer.allocate((size - start).toInt())
                 while (buffer.hasRemaining() && channel.read(buffer) > 0) Unit
-                val tail = String(buffer.array(), 0, buffer.position(), StandardCharsets.UTF_8).split('\n')
-                if (start == 0L) tail else tail.drop(1)
+                String(buffer.array(), 0, buffer.position(), StandardCharsets.UTF_8)
             }
         }
     } catch (_: IOException) {
-        emptyList()
+        ""
+    } catch (_: IllegalArgumentException) {
+        ""
     }
 
-    private fun resumableSessionIdIn(line: String): String? {
-        val record = AgentStateFiles.jsonObjectIn(line) ?: return null
+    private fun recordsIn(tail: String): List<JsonObject> {
+        val records = mutableListOf<JsonObject>()
+        var carriedFromTheLineBefore = ""
+        for (line in tail.lineSequence()) {
+            val chunk = if (carriedFromTheLineBefore.isEmpty()) line else "$carriedFromTheLineBefore\n$line"
+            val parsed = recordsAtTheStartOf(chunk)
+            records += parsed.records
+            carriedFromTheLineBefore = if (parsed.endedInsideARecord) chunk else ""
+            if (parsed.stoppedOnTextItCannotRead) records += lastRecordOf(chunk)
+        }
+        return records
+    }
+
+    private fun recordsAtTheStartOf(chunk: String): ParsedRecords {
+        val records = mutableListOf<JsonObject>()
+        val values = JsonStreamParser(chunk)
+        while (true) {
+            val value = try {
+                if (!values.hasNext()) return ParsedRecords(records, false, false)
+                values.next()
+            } catch (failure: RuntimeException) {
+                val endedInsideARecord = failure.cause is EOFException
+                return ParsedRecords(records, endedInsideARecord, !endedInsideARecord)
+            }
+            if (value.isJsonObject) records.add(value.asJsonObject)
+        }
+    }
+
+    private fun lastRecordOf(chunk: String): List<JsonObject> {
+        if (!chunk.contains(RECORD_START)) return emptyList()
+        return recordsAtTheStartOf(RECORD_START + chunk.substringAfterLast(RECORD_START)).records
+    }
+
+    private fun resumableSessionIdIn(record: JsonObject): String? {
         if (record.nonBlankString(TRANSCRIPT_PATH_FIELD) == null) return null
         return record.nonBlankString(SESSION_ID_FIELD)
     }
 
-    private fun isShellSafe(path: String): Boolean = path.none { it in SHELL_UNSAFE_CHARACTERS }
+    private class ParsedRecords(
+        val records: List<JsonObject>,
+        val endedInsideARecord: Boolean,
+        val stoppedOnTextItCannotRead: Boolean,
+    )
 
-    private fun hookToml(event: String, path: String): String =
-        """hooks.$event=[{hooks=[{type="command",command="{ cat; echo; } >> \"$path\"",async=true,timeout=5}]}]"""
+    private fun hookToml(event: String): String =
+        """hooks.$event=[{hooks=[{type="command",command="$HOOK_COMMAND",async=true,timeout=5}]}]"""
 
     companion object {
         const val DIRECTORY_NAME = "codex"
         const val BYPASS_HOOK_TRUST = "--dangerously-bypass-hook-trust"
         const val CONFIG_OVERRIDE = "-c"
         const val RESUME_SUBCOMMAND = "resume"
+        const val STATE_FILE_VARIABLE = "TUILAUNCH_CODEX_STATE"
+        private const val HOOK_COMMAND = "{ cat; echo; } >> \\\"\$$STATE_FILE_VARIABLE\\\""
         private const val STATE_FILE_SUFFIX = ".jsonl"
         private const val SESSION_ID_FIELD = "session_id"
         private const val TRANSCRIPT_PATH_FIELD = "transcript_path"
         private const val SESSION_START_EVENT = "SessionStart"
         private const val USER_PROMPT_SUBMIT_EVENT = "UserPromptSubmit"
-        private const val SHELL_UNSAFE_CHARACTERS = "\"\\\$`\n"
+        private const val RECORD_START = "{\""
         private const val TAIL_BYTES = 64L * 1024
     }
 }

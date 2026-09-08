@@ -67,15 +67,15 @@ internal fun claudeHookSettings(stateFile: Path): String =
         """"cat > \"$CLAUDE_STATE_FILE_ARGUMENT.tmp\" && mv \"$CLAUDE_STATE_FILE_ARGUMENT.tmp\" """ +
         """\"$CLAUDE_STATE_FILE_ARGUMENT\"","$stateFile"],"timeout":5}]}]}}"""
 
-internal fun codexHookToml(event: String, stateFile: Path): String =
-    """hooks.$event=[{hooks=[{type="command",command="{ cat; echo; } >> \"$stateFile\"",""" +
+internal fun codexHookToml(event: String): String =
+    """hooks.$event=[{hooks=[{type="command",command="{ cat; echo; } >> \"${'$'}TUILAUNCH_CODEX_STATE\"",""" +
         "async=true,timeout=5}]}]"
 
-internal fun codexHookArguments(stateFile: Path): List<String> = listOf(
+internal fun codexHookArguments(): List<String> = listOf(
     "-c",
-    codexHookToml("SessionStart", stateFile),
+    codexHookToml("SessionStart"),
     "-c",
-    codexHookToml("UserPromptSubmit", stateFile),
+    codexHookToml("UserPromptSubmit"),
     "--dangerously-bypass-hook-trust",
 )
 

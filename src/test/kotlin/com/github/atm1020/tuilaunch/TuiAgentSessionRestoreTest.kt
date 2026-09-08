@@ -17,6 +17,7 @@ import java.util.UUID
 
 private const val TAB_UUID = "b7c1e0d4-3a52-4f19-8c7d-2e6f5a9b1c30"
 private const val CODEX_SESSION_ID = "019a4f3c-7b21-7cd0-9e55-3f1b2a6d8c47"
+private const val CODEX_LATER_SESSION_ID = "019a52118c334de1af664e2c3b7e9d58"
 private const val CLAUDE_REPORTED_SESSION = "5c2a7f88-40b6-4d19-b3e7-9a1c0d6f4e22"
 private const val CODEX_TRANSCRIPT_PATH = "/Users/falleng0d/.codex/sessions/2026/09/08/rollout.jsonl"
 private const val OLDER_OMP_SESSION = "2026-09-07T21-15-03-123Z_019a4f3c7b217cd09e553f1b2a6d8c47.jsonl"
@@ -215,10 +216,66 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         service.restoreSavedTabs()
 
         assertEquals(
-            listOf("codex resume $CODEX_SESSION_ID ${ShellWords.join(codexHookArguments(stateFile))}"),
+            listOf(
+                "${codexVariable(TAB_UUID)} codex resume $CODEX_SESSION_ID " +
+                    ShellWords.join(codexHookArguments()),
+            ),
             factory.commands,
         )
         assertEquals(CODEX_SESSION_ID, savedTabs().single().agentSessionId)
+    }
+
+    fun testAFreshCodexTabCarriesTheStateFileInFrontOfTheWrappedCommand() {
+        configureApp("codex", "headroom wrap codex --no-serena")
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("codex", "headroom wrap codex --no-serena")
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(
+            listOf(
+                "${codexVariable(tabUuid)} headroom wrap codex --no-serena -- " +
+                    ShellWords.join(codexHookArguments()),
+            ),
+            factory.commands,
+        )
+        assertTrue(Files.isDirectory(codexStateFile(tabUuid).parent))
+    }
+
+    fun testACodexTabWhoseTwoHooksWroteOnOneLineStillFindsItsSession() {
+        configureApp("codex", "codex")
+        write(
+            codexStateFile(TAB_UUID),
+            codexHookRecord().trimEnd() + codexHookRecord(CODEX_LATER_SESSION_ID).trimEnd() + "\n\n",
+        )
+        saveTab(TuiSessionRecord("codex", "codex", true, TAB_UUID))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+
+        assertEquals(
+            listOf(
+                "${codexVariable(TAB_UUID)} codex resume $CODEX_LATER_SESSION_ID " +
+                    ShellWords.join(codexHookArguments()),
+            ),
+            factory.commands,
+        )
+        assertEquals(CODEX_LATER_SESSION_ID, savedTabs().single().agentSessionId)
+    }
+
+    fun testACodexCommandThatCarriesItsOwnStateFileIsLaunchedUntouched() {
+        val command = "TUILAUNCH_CODEX_STATE=/Users/falleng0d/own-codex.jsonl codex"
+        configureApp("codex", command)
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("codex", command)
+
+        assertEquals(listOf(command), factory.commands)
+        assertFalse(Files.exists(environment.stateDirectory))
+        assertNull(savedTabs().single().agentSessionId)
     }
 
     fun testAFreshOmpTabLoadsTheBundledExtension() {
@@ -765,6 +822,9 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
     private fun codexStateFile(tabUuid: String): Path =
         environment.stateDirectory.resolve("codex").resolve("$tabUuid.jsonl")
+
+    private fun codexVariable(tabUuid: String): String =
+        "TUILAUNCH_CODEX_STATE=${ShellWords.quote(codexStateFile(tabUuid).toString())}"
 
     private fun codexHookRecord(sessionId: String = CODEX_SESSION_ID): String =
         """{"session_id":"$sessionId","transcript_path":"$CODEX_TRANSCRIPT_PATH","source":"startup"}""" + "\n"

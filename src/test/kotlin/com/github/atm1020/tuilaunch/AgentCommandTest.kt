@@ -344,12 +344,47 @@ class AgentCommandTest {
     }
 
     @Test
+    fun aCodexCommandThatSetsTheStateVariableItselfIsNotManageable() {
+        for (command in listOf(
+            "TUILAUNCH_CODEX_STATE=/tmp/state.jsonl codex",
+            "env TUILAUNCH_CODEX_STATE=/tmp/state.jsonl codex",
+            "FOO=1 TUILAUNCH_CODEX_STATE=/tmp/state.jsonl headroom wrap codex --no-serena",
+        )) {
+            val parsed = AgentCommand.parse(command)
+
+            assertTrue(command, parsed.setsASessionVariableItself)
+            assertFalse(command, parsed.isManageable)
+        }
+    }
+
+    @Test
+    fun aCommandCarryingTheStateVariableOfAnotherCliStaysManageable() {
+        assertTrue(AgentCommand.parse("TUILAUNCH_OPENCODE_STATE=/tmp/state.json codex").isManageable)
+        assertTrue(AgentCommand.parse("TUILAUNCH_CODEX_STATE=/tmp/state.jsonl opencode").isManageable)
+    }
+
+    @Test
+    fun theCodexEnvironmentGoesInFrontOfTheProgram() {
+        assertEquals(
+            "TUILAUNCH_CODEX_STATE='/tmp/a b/state.jsonl' headroom wrap codex --no-serena",
+            AgentCommand.parse("headroom wrap codex --no-serena")
+                .withEnvironment(mapOf("TUILAUNCH_CODEX_STATE" to "/tmp/a b/state.jsonl")).command,
+        )
+        assertEquals(
+            "TUILAUNCH_CODEX_STATE='/tmp/it'\\''s/state.jsonl' codex",
+            AgentCommand.parse("codex")
+                .withEnvironment(mapOf("TUILAUNCH_CODEX_STATE" to "/tmp/it's/state.jsonl")).command,
+        )
+    }
+
+    @Test
     fun anotherCliIsNotAffectedByTheTrackerVariables() {
         for (command in listOf(
             "OPENCODE_TUI_CONFIG=/tmp/tui.json claude",
             "TUILAUNCH_OPENCODE_STATE=/tmp/state.json omp",
             "opencode --model gpt-5",
             "OPENCODE_TUI_CONFIGURED=1 opencode",
+            "TUILAUNCH_CODEX_STATED=1 codex",
         )) {
             val parsed = AgentCommand.parse(command)
 
