@@ -212,4 +212,39 @@ class AgentCommandTest {
     fun anUnmanagedProgramIsNotManageable() {
         assertFalse(AgentCommand.parse("lazygit").isManageable)
     }
+
+    @Test
+    fun aCommandThatChainsAnotherOneIsNotManageable() {
+        for (command in listOf(
+            "claude ; echo done",
+            "codex | tee log",
+            "opencode && echo done",
+            "omp &",
+            "claude || echo failed",
+            "codex > /tmp/out",
+            "omp >> /tmp/out",
+            "claude < /tmp/in",
+            "headroom wrap claude --no-serena ; echo done",
+        )) {
+            val parsed = AgentCommand.parse(command)
+
+            assertTrue(command, parsed.chainsOtherCommands)
+            assertFalse(command, parsed.isManageable)
+        }
+    }
+
+    @Test
+    fun aCommandSpanningMoreThanOneLineIsNotManageable() {
+        val parsed = AgentCommand.parse("claude --model opus\necho done")
+
+        assertTrue(parsed.chainsOtherCommands)
+        assertFalse(parsed.isManageable)
+    }
+
+    @Test
+    fun aPlainCommandChainsNothing() {
+        for (command in listOf("claude --model opus", "headroom wrap codex --no-serena", "omp -p 8080")) {
+            assertFalse(command, AgentCommand.parse(command).chainsOtherCommands)
+        }
+    }
 }

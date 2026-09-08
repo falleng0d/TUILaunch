@@ -146,7 +146,7 @@ class CodexSessionStrategyTest {
 
     @Test
     fun aStateFilePathThatWouldBreakTheHookIsRefused() {
-        for (name in listOf("say\"hi\"", "back\\slash")) {
+        for (name in listOf("say\"hi\"", "back\\slash", "cost\$100", "back`tick`", "two\nlines")) {
             val strategy = CodexSessionStrategy(temporaryFolder.root.toPath().resolve(name))
 
             assertFalse(name, strategy.canManage(tab))
@@ -159,6 +159,32 @@ class CodexSessionStrategyTest {
     @Test
     fun aPlainStateFilePathIsManageable() {
         assertTrue(CodexSessionStrategy(stateDirectory()).canManage(tab))
+    }
+
+    @Test
+    fun sweepingKeepsTheStateOfTheTabsThatCameBack() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val kept = strategy.stateFile(tab)
+        val orphan = strategy.stateFile(tab.copy(tabUuid = "2f8d1b60-77aa-4c31-9e02-5d3c8a1f4b77"))
+        val foreign = kept.resolveSibling("notes.txt")
+        writeState(kept, """{"session_id":"$sessionId"}""")
+        writeState(orphan, """{"session_id":"$sessionId"}""")
+        writeState(foreign, "keep me")
+
+        runBlocking { strategy.deleteStateFilesExcept(setOf(tabUuid)) }
+
+        assertTrue(Files.exists(kept))
+        assertFalse(Files.exists(orphan))
+        assertTrue(Files.exists(foreign))
+    }
+
+    @Test
+    fun sweepingAStateDirectoryThatDoesNotExistDoesNothing() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+
+        runBlocking { strategy.deleteStateFilesExcept(setOf(tabUuid)) }
+
+        assertFalse(Files.exists(strategy.stateFile(tab).parent))
     }
 
     private fun expectedToml(stateFile: Path): String =

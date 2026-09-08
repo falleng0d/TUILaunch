@@ -6,9 +6,10 @@ class AgentCommand private constructor(
     val kind: AgentCliKind?,
     val wrappedByHeadroom: Boolean,
     val userSelectsASession: Boolean,
+    val chainsOtherCommands: Boolean,
 ) {
     val isManageable: Boolean
-        get() = kind != null && !userSelectsASession
+        get() = kind != null && !userSelectsASession && !chainsOtherCommands
 
     fun withArguments(extra: List<String>): String {
         if (extra.isEmpty()) return command
@@ -25,6 +26,7 @@ class AgentCommand private constructor(
         private const val HEADROOM_WRAP_SUBCOMMAND = "wrap"
         private const val ENV_PROGRAM = "env"
         private val ASSIGNMENT = Regex("^[A-Za-z_][A-Za-z0-9_]*=")
+        private val SHELL_OPERATORS = setOf(";", "&&", "||", "|", "&", ">", ">>", "<")
 
         private val SESSION_SELECTORS = mapOf(
             AgentCliKind.CLAUDE to listOf("--resume", "-r", "--continue", "-c", "--session-id", "--fork-session"),
@@ -54,8 +56,12 @@ class AgentCommand private constructor(
                 kind = kind,
                 wrappedByHeadroom = wrappedByHeadroom,
                 userSelectsASession = kind != null && selectsASession(kind, arguments),
+                chainsOtherCommands = kind != null && chainsOtherCommands(command, arguments),
             )
         }
+
+        private fun chainsOtherCommands(command: String, arguments: List<String>): Boolean =
+            command.contains('\n') || arguments.any { it in SHELL_OPERATORS }
 
         private fun programIndexIn(tokens: List<String>): Int {
             var index = 0

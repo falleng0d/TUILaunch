@@ -157,15 +157,18 @@ disk and is used again if you turn the setting back on before opening any TUI ta
 A reopened tab that runs a coding agent can come back to the *same conversation* instead of an empty one. It works
 for `claude`, `codex`, `opencode` and `omp`, whether they are launched directly or through
 `headroom wrap <cli> <flags>`. Every other command is launched untouched, and so is any command that already
-selects a session itself (`--resume`, `--continue`, `--session-id`, `codex resume`, …).
+selects a session itself (`--resume`, `--continue`, `--session-id`, `codex resume`, …) or that chains something
+else onto the CLI with `;`, `&&`, `||`, `|`, `&` or a redirection.
 
 Turn it on with **Resume the agent session when a TUI tab is reopened**, directly under **Reopen TUI tabs when the
 project is opened**. It is on by default and only has an effect while reopening tabs is on; with it off every tab
-is launched with your command unchanged and no session state is written.
+is launched with your command unchanged and nothing outside `.idea/workspace.xml` is written.
 
 Each tab gets its own identifier the first time it is launched, and that identifier survives every reopen. It is
 stored next to the tab in the project's `.idea/workspace.xml`, so it is per developer rather than shared through
-VCS. What TUILaunch adds to the configured command depends on the CLI:
+VCS. The CLI a session belongs to is stored with it, so changing an app's command from one agent to another starts
+a fresh conversation instead of handing the old id to the new CLI. What TUILaunch adds to the configured command
+depends on the CLI:
 
 - **claude** — the launch pins the tab's identifier with `--session-id`, so the conversation belongs to the tab
   from its first message. A reopened tab is resumed with `--resume <tab id>` once that transcript exists.
@@ -185,15 +188,19 @@ forwards them to the CLI instead of claiming them for itself.
 A tab you never typed in comes back fresh: claude, codex and omp write their session with the first message, so
 there is nothing to resume and the tab just starts a new conversation. An opencode tab comes back to the session
 the plugin created for it, which is an empty conversation when you never prompted in it. If a reopened tab does
-end within 15 seconds of starting — a session deleted in the CLI, a transcript that is gone — TUILaunch starts it once more
-without the resume arguments, keeping its name and its place in the tab strip, and notes that in the log. A tab
-that ends a second time is left closed, and a tab you launched yourself is never restarted.
+end within 15 seconds of starting — a session deleted in the CLI, a transcript that is gone — TUILaunch starts it
+once more as a new tab with a new identity, keeping its name and its place in the tab strip, and notes that in the
+log. A tab that ends a second time is left closed, and a tab you launched yourself is never restarted.
 
 The codex hook is added per invocation, which codex accepts only together with
 `--dangerously-bypass-hook-trust`; without that flag its TUI stops on a trust review at every launch. The hook
 command writes nothing but codex's session id, into
-`<IDE system directory>/TUILaunch/agent-sessions/<project>/codex/<tab id>.json`, and that file is deleted when you
-close the tab.
+`<IDE system directory>/TUILaunch/agent-sessions/<project>/codex/<tab id>.json`. That file is deleted when you
+close the tab, and files left behind by tabs that are gone are deleted when the project is reopened.
+
+Open the same project in two IDE windows at once and both of them restore the same agent sessions, which none of
+the CLIs support — codex in particular needs the previous writer to be gone before a session can be resumed — so
+use one IDE window per project while relying on this feature.
 
 ### Focus and tab actions
 
@@ -390,7 +397,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - claude derives its transcript directory from the cwd by replacing every non-alphanumeric character with `-`, and when the result exceeds 200 characters it keeps the first 200 and appends `-<base36 of |hash|>` where the hash is the 32-bit `h = h * 31 + c` rolling hash of the *raw* path; the encoding is lossy, so it can only be derived from the project path and never parsed back.
 - `claude --session-id <uuid>` is rejected with "Session ID … is already in use" exactly when `<claudeHome>/projects/<escaped cwd>/<uuid>.jsonl` exists, and that transcript is written lazily on the first message, so a tab that was opened but never prompted has to be relaunched with `--session-id` rather than `--resume`.
 - A codex `SessionStart` hook added per invocation with `-c 'hooks.SessionStart=[…]'` makes the TUI block on a trust review unless `--dangerously-bypass-hook-trust` is also passed, and the hook fires when the first turn starts rather than at process launch, so the session id is only on disk once the user has sent a prompt.
-- The codex hook command runs through `$SHELL -lc`, so a path inside it needs its own double quotes (`cat > "<path>"`, escaped as `\"` inside the TOML string); a path containing a double quote or a backslash cannot be expressed this way and the tab is left unmanaged instead.
+- The codex hook command runs through `$SHELL -lc`, so a path inside it needs its own double quotes (`cat > "<path>"`, escaped as `\"` inside the TOML string); a path holding any character the shell reads inside double quotes — `"`, `\`, `$`, a backtick or a newline — cannot be expressed this way and leaves the tab unmanaged, which is every path on Windows because of the separator.
 - `omp --resume <path>` silently creates an empty session at that path when the file does not exist, so a resume argument must only ever be a file that was found on disk.
 - A bare `opencode` opens no TCP port at all, and its embedded server needs a moment after the process starts, so `GET /global/health` answering `{"healthy":true}` on the port passed as `--port <port> --hostname 127.0.0.1` is the only signal that it is ready to be asked anything.
 - opencode writes its session row only with the first prompt and no flag can pick the id, so a tab's session has to be created through `POST /session?directory=<cwd>` and handed to the running TUI with `POST /tui/select-session`; `GET /session/<id>/message` is what tells a session nobody prompted in apart from one worth keeping.

@@ -229,12 +229,14 @@ internal class RecordingOpenCodeApi(
 ) : OpenCodeApi {
 
     private val healthAsks = AtomicInteger()
+    private val releases = AtomicInteger()
     private val recordedCreations = Collections.synchronizedList(mutableListOf<CreatedSession>())
     private val recordedSelections = Collections.synchronizedList(mutableListOf<String>())
     private val recordedCounts = Collections.synchronizedList(mutableListOf<String>())
     private val recordedDeletions = Collections.synchronizedList(mutableListOf<String>())
 
     val healthCalls: Int get() = healthAsks.get()
+    val closeCalls: Int get() = releases.get()
     val creations: List<CreatedSession> get() = snapshotOf(recordedCreations)
     val selections: List<String> get() = snapshotOf(recordedSelections)
     val messageCounts: List<String> get() = snapshotOf(recordedCounts)
@@ -265,6 +267,10 @@ internal class RecordingOpenCodeApi(
     override suspend fun deleteSession(id: String) {
         recordedDeletions.add(id)
         failure?.let { throw it }
+    }
+
+    override fun close() {
+        releases.incrementAndGet()
     }
 
     private fun <T> snapshotOf(recorded: MutableList<T>): List<T> = synchronized(recorded) { recorded.toList() }

@@ -8,6 +8,7 @@ import com.intellij.util.xmlb.XmlSerializer
 import org.jdom.Element
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -69,14 +70,22 @@ class TuiOpenTabsSerializationTest {
     fun `a tab uuid and its agent session id round trip`() {
         val original = TuiOpenTabsService.State(
             mutableListOf(
-                TuiSessionRecord("claude", "claude", true, RECORD_TAB_UUID, RECORD_TAB_UUID),
-                TuiSessionRecord("codex", "codex", false, RECORD_OTHER_TAB_UUID, RECORD_CODEX_SESSION_ID),
+                TuiSessionRecord("claude", "claude", true, RECORD_TAB_UUID, RECORD_TAB_UUID, "CLAUDE"),
+                TuiSessionRecord(
+                    "codex",
+                    "codex",
+                    false,
+                    RECORD_OTHER_TAB_UUID,
+                    RECORD_CODEX_SESSION_ID,
+                    "CODEX",
+                ),
             )
         )
 
         val restored = XmlSerializer.deserialize(serialize(original), TuiOpenTabsService.State::class.java)
 
         assertEquals(original, restored)
+        assertEquals(listOf("CLAUDE", "CODEX"), restored.tabs.map { it.agentCliKind })
     }
 
     @Test
@@ -85,6 +94,7 @@ class TuiOpenTabsSerializationTest {
 
         assertFalse(xml.contains("tabUuid"))
         assertFalse(xml.contains("agentSessionId"))
+        assertFalse(xml.contains("agentCliKind"))
     }
 
     @Test
@@ -114,7 +124,37 @@ class TuiOpenTabsSerializationTest {
 
         assertEquals(listOf("claude", "git"), restored.tabs.map { it.title })
         assertEquals(listOf("git"), restored.tabs.filter { it.selected }.map { it.title })
-        assertTrue(restored.tabs.all { it.tabUuid == null && it.agentSessionId == null })
+        assertTrue(
+            restored.tabs.all { it.tabUuid == null && it.agentSessionId == null && it.agentCliKind == null }
+        )
+    }
+
+    @Test
+    fun `a record written before the cli kind was stored keeps its session id`() {
+        val restored = XmlSerializer.deserialize(
+            JDOMUtil.load(
+                """
+                <State>
+                  <option name="tabs">
+                    <list>
+                      <TuiSessionRecord>
+                        <option name="appName" value="codex" />
+                        <option name="title" value="codex" />
+                        <option name="tabUuid" value="$RECORD_TAB_UUID" />
+                        <option name="agentSessionId" value="$RECORD_CODEX_SESSION_ID" />
+                      </TuiSessionRecord>
+                    </list>
+                  </option>
+                </State>
+                """.trimIndent()
+            ),
+            TuiOpenTabsService.State::class.java,
+        )
+
+        val record = restored.tabs.single()
+        assertEquals(RECORD_TAB_UUID, record.tabUuid)
+        assertEquals(RECORD_CODEX_SESSION_ID, record.agentSessionId)
+        assertNull(record.agentCliKind)
     }
 
     @Test

@@ -211,6 +211,21 @@ class OpenCodeSessionStrategyTest {
         assertTrue(api.deletions.isEmpty())
     }
 
+    @Test
+    fun theApiIsReleasedAfterEveryPieceOfServerWork() {
+        val api = RecordingOpenCodeApi(messages = 0)
+        val strategy = newStrategy(api)
+        strategy.launchArguments(tab)
+
+        runBlocking { strategy.afterLaunch(tab, RememberedSession()) }
+
+        assertEquals(1, api.closeCalls)
+
+        runBlocking { strategy.cleanUp(tab, RememberedSession(CREATED_OPENCODE_SESSION)) }
+
+        assertEquals(2, api.closeCalls)
+    }
+
     private fun newStrategy(api: OpenCodeApi): OpenCodeSessionStrategy = OpenCodeSessionStrategy(
         freePort = { 45123 },
         apiFactory = { api },

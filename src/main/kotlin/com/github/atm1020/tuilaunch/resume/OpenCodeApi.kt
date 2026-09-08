@@ -14,7 +14,7 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 
-interface OpenCodeApi {
+interface OpenCodeApi : AutoCloseable {
     suspend fun health(): Boolean
 
     suspend fun createSession(directory: String, tabUuid: String): String
@@ -24,13 +24,20 @@ interface OpenCodeApi {
     suspend fun messageCount(id: String): Int
 
     suspend fun deleteSession(id: String)
+
+    override fun close() {
+    }
 }
 
 class HttpOpenCodeApi(
     private val port: Int,
     private val hostname: String = OpenCodeSessionStrategy.LOOPBACK_HOSTNAME,
-    private val client: HttpClient = sharedClient,
+    private val client: HttpClient = newClient(),
 ) : OpenCodeApi {
+
+    override fun close() {
+        client.close()
+    }
 
     override suspend fun health(): Boolean {
         val response = send(requestTo(HEALTH_PATH).GET().build())
@@ -40,7 +47,7 @@ class HttpOpenCodeApi(
     }
 
     override suspend fun createSession(directory: String, tabUuid: String): String {
-        val encodedDirectory = URLEncoder.encode(directory, StandardCharsets.UTF_8)
+        val encodedDirectory = URLEncoder.encode(directory, StandardCharsets.UTF_8).replace("+", "%20")
         val path = "$SESSION_PATH?$DIRECTORY_PARAMETER=$encodedDirectory"
         val response = sendExpectingSuccess(post(path, newSessionBody(tabUuid)))
         val id = stringField(jsonObjectOf(response.body())?.get(ID_FIELD))
@@ -127,8 +134,6 @@ class HttpOpenCodeApi(
         private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(1)
         private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(5)
 
-        private val sharedClient: HttpClient by lazy {
-            HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build()
-        }
+        private fun newClient(): HttpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build()
     }
 }

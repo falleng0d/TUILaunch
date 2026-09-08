@@ -2,7 +2,10 @@ package com.github.atm1020.tuilaunch.resume
 
 import com.intellij.openapi.diagnostic.thisLogger
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 class OpenCodeSessionStrategy(
@@ -11,6 +14,7 @@ class OpenCodeSessionStrategy(
     private val pollIntervalMillis: Long = DEFAULT_POLL_INTERVAL_MILLIS,
     private val startupTimeoutMillis: Long = DEFAULT_STARTUP_TIMEOUT_MILLIS,
 ) : AgentSessionStrategy {
+    @Volatile
     var lastPort: Int? = null
         private set
 
@@ -30,36 +34,46 @@ class OpenCodeSessionStrategy(
         if (!remembered.agentSessionId.isNullOrBlank()) return null
         val port = lastPort ?: return null
         val api = apiFactory(port)
-        if (!theServerStarted(api)) {
-            thisLogger().info(
-                "OpenCode did not answer on port $port within $startupTimeoutMillis ms; " +
-                    "this tab will not remember a session"
-            )
-            return null
-        }
-        return try {
-            val sessionId = api.createSession(tab.projectPath, tab.tabUuid)
-            api.selectSession(sessionId)
-            sessionId
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Exception) {
-            thisLogger().info("Could not open an OpenCode session on port $port: ${describe(failure)}")
-            null
+        try {
+            if (!theServerStarted(api)) {
+                thisLogger().info(
+                    "OpenCode did not answer on port $port within $startupTimeoutMillis ms; " +
+                        "this tab will not remember a session"
+                )
+                return null
+            }
+            return try {
+                val sessionId = api.createSession(tab.projectPath, tab.tabUuid)
+                api.selectSession(sessionId)
+                sessionId
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Exception) {
+                thisLogger().info("Could not open an OpenCode session on port $port: ${describe(failure)}")
+                null
+            }
+        } finally {
+            release(api)
         }
     }
 
     override suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
         val sessionId = remembered.agentSessionId?.takeIf { it.isNotBlank() } ?: return
         val port = lastPort ?: return
+        val api = apiFactory(port)
         try {
-            val api = apiFactory(port)
             if (api.messageCount(sessionId) == 0) api.deleteSession(sessionId)
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Exception) {
             thisLogger().debug("Left the OpenCode session $sessionId on port $port in place", failure)
+        } finally {
+            release(api)
         }
+    }
+
+    private suspend fun release(api: OpenCodeApi) {
+        withContext(NonCancellable + Dispatchers.IO) { api.close() }
     }
 
     private suspend fun theServerStarted(api: OpenCodeApi): Boolean =

@@ -104,6 +104,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         var openedFromTui: Boolean,
         val tabUuid: String,
         var agentSessionId: String?,
+        val agentCliKind: String?,
         val launchedAt: Long,
         val restoredFromRecord: Boolean,
         val agentArgumentsWereAdded: Boolean,
@@ -124,6 +125,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val command: String,
         val argumentsWereAdded: Boolean,
         val agentSessionId: String?,
+        val cliKind: String?,
         val strategy: AgentSessionStrategy?,
     )
 
@@ -194,7 +196,14 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val records = host.orderedHandles().mapNotNull { handle ->
             val tab = tabFor(handle) ?: return@mapNotNull null
             if (tab.sessionId in closingSessions) return@mapNotNull null
-            TuiSessionRecord(tab.appName, tab.title, handle == activeHandle, tab.tabUuid, tab.agentSessionId)
+            TuiSessionRecord(
+                tab.appName,
+                tab.title,
+                handle == activeHandle,
+                tab.tabUuid,
+                tab.agentSessionId,
+                tab.agentCliKind,
+            )
         }
         TuiOpenTabsService.getInstance(project).replaceTabs(records)
     }
@@ -253,10 +262,19 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         if (restoreAttempted) return
         restoreAttempted = true
         val saved = TuiOpenTabsService.getInstance(project).state.tabs.toList()
+        deleteAgentStateOfTabsThatAreGone(saved)
         if (saved.isEmpty()) return
         val host = hostWithListeners() ?: return
         restoringTabs = true
         restoreTabAt(host, saved, 0, null, null)
+    }
+
+    private fun deleteAgentStateOfTabsThatAreGone(saved: List<TuiSessionRecord>) {
+        if (!agentSessionsAreResumed()) return
+        val codex = agentSessionStrategies(AgentCliKind.CODEX, agentSessionEnvironment()) as? CodexSessionStrategy
+            ?: return
+        val restoredTabUuids = saved.mapNotNullTo(mutableSetOf()) { it.tabUuid }
+        scope.launch { codex.deleteStateFilesExcept(restoredTabUuids) }
     }
 
     private fun restoreTabAt(
@@ -494,6 +512,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     openedFromTui = isTuiFocused(),
                     tabUuid = intent.tabUuid,
                     agentSessionId = agentLaunch.agentSessionId,
+                    agentCliKind = agentLaunch.cliKind,
                     launchedAt = launchedAt,
                     restoredFromRecord = intent is LaunchIntent.Restore,
                     agentArgumentsWereAdded = agentLaunch.argumentsWereAdded,
@@ -520,6 +539,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             command = command,
             argumentsWereAdded = false,
             agentSessionId = null,
+            cliKind = null,
             strategy = null,
         )
         if (!agentSessionsAreResumed()) return plainLaunch
@@ -529,17 +549,27 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         if (kind == null || !parsed.isManageable) return plainLaunch
         val tab = TabIdentity(intent.tabUuid, projectPath, project.locationHash)
         val strategy = agentSessionStrategies(kind, agentSessionEnvironment())
+        val remembered = rememberedSessionOf(intent, kind)
         val arguments = when (intent) {
             is LaunchIntent.Fresh -> strategy.launchArguments(tab)
-            is LaunchIntent.Restore -> strategy.restoreArguments(tab, RememberedSession(intent.record.agentSessionId))
+            is LaunchIntent.Restore -> strategy.restoreArguments(tab, remembered)
         }
         if (arguments.isEmpty()) return plainLaunch
         return AgentLaunch(
             command = parsed.withArguments(arguments),
             argumentsWereAdded = true,
-            agentSessionId = agentSessionIdFor(kind, strategy, tab, intent),
+            agentSessionId = agentSessionIdFor(kind, strategy, tab, intent, remembered),
+            cliKind = kind.name,
             strategy = strategy,
         )
+    }
+
+    private fun rememberedSessionOf(intent: LaunchIntent, kind: AgentCliKind): RememberedSession {
+        val record = (intent as? LaunchIntent.Restore)?.record ?: return RememberedSession()
+        val rememberedKind = record.agentCliKind
+        val theSessionBelongsToAnotherCli = rememberedKind != null && rememberedKind != kind.name
+        if (theSessionBelongsToAnotherCli) return RememberedSession()
+        return RememberedSession(record.agentSessionId)
     }
 
     private fun agentSessionsAreResumed(): Boolean {
@@ -552,10 +582,11 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         strategy: AgentSessionStrategy,
         tab: TabIdentity,
         intent: LaunchIntent,
+        remembered: RememberedSession,
     ): String? = when (kind) {
         AgentCliKind.CLAUDE -> tab.tabUuid
         AgentCliKind.CODEX -> codexSessionIdOnRestore(strategy, tab, intent)
-        AgentCliKind.OPENCODE -> rememberedSessionId(intent)
+        AgentCliKind.OPENCODE -> remembered.agentSessionId
         AgentCliKind.OMP -> null
     }
 
@@ -569,10 +600,9 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         return codex.readSessionId(codex.stateFile(tab))
     }
 
-    private fun rememberedSessionId(intent: LaunchIntent): String? =
-        (intent as? LaunchIntent.Restore)?.record?.agentSessionId
-
     private fun onSessionTerminated(host: IdeToolWindowHost, tab: OpenTab) {
+        if (tab.sessionId in closingSessions) return
+        if (tabsBySessionId[tab.sessionId] !== tab) return
         if (aResumedAgentSessionDiedOnStartup(tab)) {
             relaunchWithoutTheAgentSession(host, tab)
         } else {
@@ -594,8 +624,9 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val position = host.orderedHandles().indexOf(tab.handle)
         val theTabWasSelected = host.activeTab() == tab.handle
         thisLogger().info(
-            "Reopened TUI tab '${tab.title}' ended right after launch; starting it again without its agent session",
+            "Reopened TUI tab '${tab.title}' ended right after launch; starting it again as a new tab",
         )
+        cleanUpAgentSession(tab)
         closeTab(tab.sessionId)
         openNewTab(
             host = host,
@@ -603,7 +634,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             appName = tab.appName,
             command = config.command,
             title = tab.title,
-            intent = LaunchIntent.Fresh(tab.tabUuid),
+            intent = LaunchIntent.Fresh(newTabUuid()),
             index = position,
             onOpened = { relaunched -> if (theTabWasSelected) host.selectTab(relaunched.handle) },
         )

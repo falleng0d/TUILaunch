@@ -27,7 +27,19 @@ class CodexSessionStrategy(private val stateDirectory: Path) : AgentSessionStrat
         }
     }
 
-    fun stateFile(tab: TabIdentity): Path = stateDirectory.resolve(DIRECTORY_NAME).resolve("${tab.tabUuid}.json")
+    suspend fun deleteStateFilesExcept(tabUuids: Set<String>) {
+        withContext(Dispatchers.IO) {
+            orphanedStateFiles(tabUuids).forEach { file ->
+                try {
+                    Files.deleteIfExists(file)
+                } catch (_: IOException) {
+                }
+            }
+        }
+    }
+
+    fun stateFile(tab: TabIdentity): Path =
+        stateDirectory.resolve(DIRECTORY_NAME).resolve("${tab.tabUuid}$STATE_FILE_SUFFIX")
 
     fun canManage(tab: TabIdentity): Boolean = isShellSafe(stateFile(tab).toString())
 
@@ -56,6 +68,14 @@ class CodexSessionStrategy(private val stateDirectory: Path) : AgentSessionStrat
         return sessionId.asString.takeIf { it.isNotBlank() }
     }
 
+    private fun orphanedStateFiles(tabUuids: Set<String>): List<Path> = try {
+        Files.newDirectoryStream(stateDirectory.resolve(DIRECTORY_NAME), "*$STATE_FILE_SUFFIX").use { entries ->
+            entries.filter { it.fileName.toString().removeSuffix(STATE_FILE_SUFFIX) !in tabUuids }
+        }
+    } catch (_: IOException) {
+        emptyList()
+    }
+
     private fun createParentDirectory(stateFile: Path): Boolean {
         val parent = stateFile.parent ?: return false
         return try {
@@ -66,7 +86,7 @@ class CodexSessionStrategy(private val stateDirectory: Path) : AgentSessionStrat
         }
     }
 
-    private fun isShellSafe(path: String): Boolean = path.none { it == '"' || it == '\\' }
+    private fun isShellSafe(path: String): Boolean = path.none { it in SHELL_UNSAFE_CHARACTERS }
 
     private fun sessionStartHookToml(path: String): String =
         """hooks.SessionStart=[{hooks=[{type="command",command="cat > \"$path\"",async=true,timeout=5}]}]"""
@@ -76,6 +96,8 @@ class CodexSessionStrategy(private val stateDirectory: Path) : AgentSessionStrat
         const val BYPASS_HOOK_TRUST = "--dangerously-bypass-hook-trust"
         const val CONFIG_OVERRIDE = "-c"
         const val RESUME_SUBCOMMAND = "resume"
+        private const val STATE_FILE_SUFFIX = ".json"
         private const val SESSION_ID_FIELD = "session_id"
+        private const val SHELL_UNSAFE_CHARACTERS = "\"\\\$`\n"
     }
 }

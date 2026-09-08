@@ -206,7 +206,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertEquals(listOf("claude --session-id ${record.tabUuid}"), factory.commands)
     }
 
-    fun testAReopenedTabThatEndsRightAwayComesBackFreshInTheSamePlace() {
+    fun testAReopenedTabThatEndsRightAwayComesBackAsANewTabInTheSamePlace() {
         configureApp("claude", "claude")
         configureApp("second", "second")
         configureApp("third", "third")
@@ -225,11 +225,98 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
         assertEquals(
-            listOf("claude --resume $TAB_UUID", "second", "third", "claude --session-id $TAB_UUID"),
+            listOf("claude --resume $TAB_UUID", "second", "third"),
+            factory.commands.take(3),
+        )
+        val relaunchedTabUuid = savedTabs().first().tabUuid!!
+        assertEquals(relaunchedTabUuid, UUID.fromString(relaunchedTabUuid).toString())
+        assertTrue(relaunchedTabUuid, relaunchedTabUuid != TAB_UUID)
+        assertEquals("claude --session-id $relaunchedTabUuid", factory.commands.last())
+        assertEquals(4, factory.commands.size)
+        assertEquals(listOf("claude", "second", "third"), savedTabs().map { it.title })
+    }
+
+    fun testARelaunchedTabDropsTheHookStateOfTheSessionThatDied() {
+        configureApp("codex", "codex")
+        val stateFile = codexStateFile(TAB_UUID)
+        write(stateFile, """{"session_id":"$CODEX_SESSION_ID"}""")
+        saveTab(TuiSessionRecord("codex", "codex", true, TAB_UUID, CODEX_SESSION_ID, "CODEX"))
+        val sessions = List(2) { FakeSession() }
+        val factory = FakeFactory(sessions)
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+        sessions[0].terminate()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        awaitDeletedFile(stateFile)
+        val relaunchedTabUuid = savedTabs().single().tabUuid!!
+        assertTrue(relaunchedTabUuid, relaunchedTabUuid != TAB_UUID)
+        assertTrue(factory.commands.last(), factory.commands.last().contains(relaunchedTabUuid))
+    }
+
+    fun testATabTheUserClosedIsNotStartedAgainWhenItsProcessEnds() {
+        configureApp("claude", "claude")
+        writeClaudeTranscript(TAB_UUID)
+        saveTab(TuiSessionRecord("claude", "claude", true, TAB_UUID, agentCliKind = "CLAUDE"))
+        val sessions = List(2) { FakeSession() }
+        val factory = FakeFactory(sessions)
+        val (service, host) = newService(factory)
+
+        service.restoreSavedTabs()
+        service.closeActiveTui()
+        sessions[0].terminate()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        sessions[0].terminate()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(listOf("claude --resume $TAB_UUID"), factory.commands)
+        assertTrue(host.tabs.isEmpty())
+        assertTrue(savedTabs().isEmpty())
+    }
+
+    fun testASessionIdRememberedForAnotherCliIsNotHandedToTheNewOne() {
+        configureApp("agent", "opencode")
+        saveTab(TuiSessionRecord("agent", "agent", true, TAB_UUID, CODEX_SESSION_ID, "CODEX"))
+        val api = RecordingOpenCodeApi()
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory, api)
+
+        service.restoreSavedTabs()
+
+        assertEquals(listOf("opencode --port $OPENCODE_PORT --hostname 127.0.0.1"), factory.commands)
+        assertEquals(CREATED_OPENCODE_SESSION, awaitRecordedAgentSessionId())
+        assertEquals("OPENCODE", savedTabs().single().agentCliKind)
+    }
+
+    fun testASessionIdRememberedForTheSameCliIsUsedAgain() {
+        configureApp("agent", "opencode")
+        saveTab(TuiSessionRecord("agent", "agent", true, TAB_UUID, CREATED_OPENCODE_SESSION, "OPENCODE"))
+        val api = RecordingOpenCodeApi()
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory, api)
+
+        service.restoreSavedTabs()
+
+        assertEquals(
+            listOf("opencode --port $OPENCODE_PORT --hostname 127.0.0.1 --session $CREATED_OPENCODE_SESSION"),
             factory.commands,
         )
-        assertEquals(listOf("claude", "second", "third"), savedTabs().map { it.title })
-        assertEquals(TAB_UUID, savedTabs().first().tabUuid)
+    }
+
+    fun testReopeningTheProjectDropsTheHookStateOfTabsThatAreGone() {
+        configureApp("codex", "codex")
+        val kept = codexStateFile(TAB_UUID)
+        val orphan = codexStateFile("41d9b7e2-5c08-4a6f-8b13-9e7c0a2f6d54")
+        write(kept, """{"session_id":"$CODEX_SESSION_ID"}""")
+        write(orphan, """{"session_id":"$CODEX_SESSION_ID"}""")
+        saveTab(TuiSessionRecord("codex", "codex", true, TAB_UUID, CODEX_SESSION_ID, "CODEX"))
+        val (service, _) = newService(FakeFactory(FakeSession()))
+
+        service.restoreSavedTabs()
+
+        awaitDeletedFile(orphan)
+        assertTrue(Files.exists(kept))
     }
 
     fun testACodexTabThatEndsTwiceAfterAReopenIsNotStartedAThirdTime() {

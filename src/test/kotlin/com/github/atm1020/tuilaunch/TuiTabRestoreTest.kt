@@ -61,7 +61,7 @@ class TuiTabRestoreTest : BasePlatformTestCase() {
     private fun savedTabs(): List<TuiSessionRecord> = TuiOpenTabsService.getInstance(project).state.tabs
 
     private fun savedTabsWithoutTheirIdentity(): List<TuiSessionRecord> =
-        savedTabs().map { it.copy(tabUuid = null, agentSessionId = null) }
+        savedTabs().map { it.copy(tabUuid = null, agentSessionId = null, agentCliKind = null) }
 
     private fun saveTabs(vararg records: TuiSessionRecord) {
         TuiOpenTabsService.getInstance(project).replaceTabs(records.toList())

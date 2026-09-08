@@ -16,7 +16,7 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
-import java.net.URLDecoder
+import java.net.http.HttpClient
 import java.nio.charset.StandardCharsets
 import java.util.Collections
 
@@ -30,17 +30,20 @@ private data class Reply(val status: Int, val body: String)
 private data class RecordedRequest(
     val method: String,
     val path: String,
-    val query: String?,
+    val rawQuery: String?,
     val body: String,
 )
 
 class OpenCodeApiTest {
 
     private var server: HttpServer? = null
+    private val clients = mutableListOf<OpenCodeApi>()
     private val recorded = Collections.synchronizedList(mutableListOf<RecordedRequest>())
 
     @After
     fun stopTheServer() {
+        clients.forEach { it.close() }
+        clients.clear()
         server?.stop(0)
         server = null
     }
@@ -69,9 +72,18 @@ class OpenCodeApiTest {
 
     @Test
     fun aPortWithNoServerBehindItFails() {
-        val api = HttpOpenCodeApi(aPortNothingListensOn())
+        val api = HttpOpenCodeApi(aPortNothingListensOn()).also { clients.add(it) }
 
         assertThrows(IOException::class.java) { runBlocking { api.health() } }
+    }
+
+    @Test
+    fun closingTheApiShutsItsHttpClientDown() {
+        val client = HttpClient.newHttpClient()
+
+        HttpOpenCodeApi(aPortNothingListensOn(), client = client).close()
+
+        assertTrue(client.isTerminated)
     }
 
     @Test
@@ -83,8 +95,18 @@ class OpenCodeApiTest {
         val request = requests().single()
         assertEquals("POST", request.method)
         assertEquals("/session", request.path)
-        assertEquals(PROJECT_DIRECTORY, decodedDirectoryOf(request))
         assertEquals("""{"metadata":{"tuilaunchTab":"$TAB_UUID"}}""", request.body)
+    }
+
+    @Test
+    fun aSpaceInTheDirectoryIsSentAsAPercentEscapeRatherThanAPlus() {
+        val api = serve("/session" to Reply(200, """{"id":"$SESSION_ID"}"""))
+
+        runBlocking { api.createSession(PROJECT_DIRECTORY, TAB_UUID) }
+
+        val rawQuery = requireNotNull(requests().single().rawQuery) { "The request carried no query string" }
+        assertEquals("directory=%2FUsers%2Ffalleng0d%2FMy%20Projects%2FTUILaunch", rawQuery)
+        assertFalse(rawQuery, rawQuery.contains("+"))
     }
 
     @Test
@@ -110,7 +132,7 @@ class OpenCodeApiTest {
         val request = requests().single()
         assertEquals("POST", request.method)
         assertEquals("/tui/select-session", request.path)
-        assertNull(request.query)
+        assertNull(request.rawQuery)
         assertEquals("""{"sessionID":"$SESSION_ID"}""", request.body)
     }
 
@@ -162,7 +184,7 @@ class OpenCodeApiTest {
         started.createContext("/") { exchange -> answer(exchange, replies) }
         started.start()
         server = started
-        return HttpOpenCodeApi(started.address.port)
+        return HttpOpenCodeApi(started.address.port).also { clients.add(it) }
     }
 
     private fun answer(exchange: HttpExchange, replies: Map<String, Reply>) {
@@ -172,7 +194,7 @@ class OpenCodeApiTest {
                 RecordedRequest(
                     method = exchange.requestMethod,
                     path = exchange.requestURI.path,
-                    query = exchange.requestURI.query,
+                    rawQuery = exchange.requestURI.rawQuery,
                     body = body,
                 )
             )
@@ -186,12 +208,6 @@ class OpenCodeApiTest {
     }
 
     private fun requests(): List<RecordedRequest> = synchronized(recorded) { recorded.toList() }
-
-    private fun decodedDirectoryOf(request: RecordedRequest): String {
-        val query = requireNotNull(request.query) { "The request carried no query string" }
-        val value = query.substringAfter("directory=")
-        return URLDecoder.decode(value, StandardCharsets.UTF_8)
-    }
 
     private fun aPortNothingListensOn(): Int = ServerSocket(0).use { it.localPort }
 }

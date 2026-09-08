@@ -12,12 +12,14 @@
   understands: `--session-id`/`--resume` for claude, a `SessionStart` hook plus `codex resume` for codex, a
   per-tab session directory plus `--resume` for omp, and `--session` for opencode, whose tab starts its
   embedded server on a loopback port so the plugin can create the session there as soon as the server answers
-  and point the TUI at it. Any other command, and any command that already picks a session itself, is
-  launched exactly as configured. The new "Resume the agent session when a TUI tab is reopened" setting sits
-  under "Reopen TUI tabs when the project is opened", is on by default and only applies while that one is on.
-  A tab you never typed in comes back fresh, and a reopened tab whose session cannot be resumed is started
-  once more without the resume arguments, keeping its name and its place in the tab strip. Closing an opencode
-  tab whose session nobody ever prompted in asks its server to delete that session again.
+  and point the TUI at it. Any other command, any command that already picks a session itself, and any command
+  that chains something else onto the CLI with `;`, `&&`, `|` or a redirection, is launched exactly as
+  configured. The new "Resume the agent session when a TUI tab is reopened" setting sits under "Reopen TUI tabs
+  when the project is opened", is on by default and only applies while that one is on. A tab you never typed in
+  comes back fresh, and a reopened tab whose session cannot be resumed is started once more as a new tab with a
+  new identity, keeping its name and its place in the tab strip. The CLI a session belongs to is remembered
+  with it, so changing an app's command from one agent to another starts a fresh conversation. Closing an
+  opencode tab whose session nobody ever prompted in asks its server to delete that session again.
 
 ## [0.9.0] - 2026-09-07
 
