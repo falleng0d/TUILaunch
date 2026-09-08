@@ -6,32 +6,48 @@
 
 ### Changed
 
-- A reopened `claude` or `codex` tab now comes back to the session you were last in, not the one the tab was
-  launched with. Both CLIs report their active session to the plugin themselves: claude through a
-  `SessionStart` hook passed inline with `--settings`, codex through a `SessionStart` and a
-  `UserPromptSubmit` hook passed with `-c`. Switching conversations inside the TUI with `/resume`, `/clear`,
-  `/new` or `/fork` is therefore followed, for codex from the first message sent in the new session onwards,
-  and a codex `/side` or `/btw` excursion is ignored because those conversations cannot be resumed. A tab
-  whose CLI reported nothing yet still falls back to the conversation of its own tab identifier, so a tab you
-  never typed in comes back fresh.
-- A reopened `omp` tab comes back to the session you were last in as well. Its launch loads a small extension of
-  the plugin's own with `--hook`, kept in `<IDE system directory>/TUILaunch/integrations/omp/` and written there
-  when it is missing or out of date, which records the session omp is in inside the tab's own session directory
-  as you switch with `/new`, `/resume`, `/fork`, `/branch` or `/tree` and after every turn. Nothing under
-  `~/.omp` is written. A tab whose extension recorded nothing resumes the session file of its directory that was
-  changed last, rather than the one whose name sorts highest, so a session you resumed and kept working in is
-  picked again. A command that carries `--trusted-extension` is launched without the hook, because omp refuses
-  those two flags together.
-- A reopened `opencode` tab now comes back to the session you were last in as well, and opencode is no longer
-  started with `--port`/`--hostname`: the plugin neither creates, selects nor deletes sessions through its
-  server any more. The launch puts `OPENCODE_TUI_CONFIG` and `TUILAUNCH_OPENCODE_STATE` in front of the
-  program instead, before `headroom` when the command is wrapped, which loads a small TUI plugin of its own from
-  `<IDE system directory>/TUILaunch/integrations/opencode/` and records the session the TUI is showing into the
-  tab's state file, so a switch in the session list or a `/new` is followed and a reopened tab starts with
-  `--session <session id>`. Nothing under `~/.config/opencode` is written or read. A tab you never prompted in
-  reported no session and comes back fresh, and a command that sets `OPENCODE_TUI_CONFIG` or
-  `TUILAUNCH_OPENCODE_STATE` itself is launched exactly as configured, as is every opencode command on a shell
-  that reads no environment prefix, which is `cmd` and PowerShell on Windows.
+- A reopened tab now comes back to the session you were last in, not the one the tab was launched with. All four
+  CLIs report their active session to the plugin themselves, so switching conversations inside the TUI with
+  `/resume`, `/clear`, `/new`, `/fork` or a session list is followed: claude through a `SessionStart` hook passed
+  inline with `--settings`; codex through a `SessionStart` and a `UserPromptSubmit` hook passed with `-c`, which
+  makes the switch visible from the first message sent in the new session onwards; omp through a small extension
+  loaded with `--hook`; opencode through a small TUI plugin loaded with an `OPENCODE_TUI_CONFIG` and
+  `TUILAUNCH_OPENCODE_STATE` prefix in front of the program, before `headroom` when the command is wrapped. A
+  codex `/side` or `/btw` excursion is ignored, because those conversations cannot be resumed. A tab whose CLI
+  reported nothing yet falls back to the conversation of its own identifier, so a tab you never typed in still
+  comes back fresh.
+- opencode is no longer started with `--port`/`--hostname`: the plugin neither creates, selects nor deletes
+  sessions through its server any more, and a reopened tab starts with `--session <session id>` from the
+  plugin's own record.
+- An omp tab whose extension recorded nothing now resumes the session file of its directory that was changed
+  last, rather than the one whose name sorts highest, so a session you resumed and kept working in is picked
+  again.
+- The omp extension and the opencode plugin and its `tui.json` are kept under
+  `<IDE system directory>/TUILaunch/integrations/` and written there when they are missing or out of date. No
+  configuration file of any CLI is touched: nothing is written or read under `~/.claude`, `~/.codex`,
+  `~/.config/opencode`, or anywhere in `~/.omp` other than the one session directory per tab that
+  `--session-dir` names.
+- A command that carries a hook flag of its own is launched without ours: `claude --settings <file>`, because
+  claude keeps only the last `--settings`, and `omp --trusted-extension`, because omp refuses that flag together
+  with `--hook`. Such a tab comes back to the conversation of its own identifier, or for omp to the newest
+  session file of its directory.
+- An opencode command that sets `OPENCODE_TUI_CONFIG` or `TUILAUNCH_OPENCODE_STATE` itself is launched exactly as
+  configured, as is every opencode command on a shell that reads no environment prefix, which is `cmd` and
+  PowerShell on Windows. A claude tab on those shells is launched with its identifier pinned but no hook.
+
+### Fixed
+
+- A reopened tab that was not asked to resume any session is no longer restarted when it ends within 15 seconds
+  of launching, so quitting such a tab yourself no longer reopens it and drops the session it was following.
+- An omp extension that is handed another tab's session directory — after a cross-project resume, a `/move` or a
+  `/wt` — now records into the directory of the tab it was launched for instead of overwriting that other tab's
+  record.
+- A bundled integration file that could not be written is left off the command line, so a launch fails no more
+  and the tab falls back to starting fresh; the failure is logged.
+- A codex state file whose last line was torn inside a multi-byte character no longer hides the records before
+  it, and only the tail of a long file is read.
+- The sweep that removes the state of tabs that are gone now also removes the staging files a failed rename can
+  leave behind.
 
 ## [0.10.0] - 2026-09-08
 

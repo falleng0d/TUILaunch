@@ -167,87 +167,76 @@ is launched with your command unchanged and nothing outside `.idea/workspace.xml
 
 Each tab gets its own identifier the first time it is launched, and that identifier survives every reopen. It is
 stored next to the tab in the project's `.idea/workspace.xml`, so it is per developer rather than shared through
-VCS. The CLI a session belongs to is stored with it, so changing an app's command from one agent to another starts
-a fresh conversation instead of handing the old id to the new CLI. What TUILaunch adds to the configured command
+VCS. Everything a tab remembers is kept per CLI, so changing an app's command from one agent to another starts a
+fresh conversation instead of handing the old id to the new CLI. What TUILaunch adds to the configured command
 depends on the CLI:
 
-- **claude** — the launch pins the tab's identifier with `--session-id`, so the conversation belongs to the tab
-  from its first message, and adds a `SessionStart` hook through `--settings` that reports the session claude is
-  in to TUILaunch's state directory. A reopened tab is resumed with `--resume <session id>` from that report,
-  and with `--resume <tab id>` while there is no report yet but the tab's own transcript is on disk.
+- **claude** — the launch pins the tab's identifier with `--session-id` and adds a `SessionStart` hook through
+  `--settings` that reports the session claude is in. A reopened tab is resumed with `--resume <session id>` from
+  that report, and with `--resume <tab id>` while there is no report yet but the tab's own transcript is on disk;
+  pinning the identifier is what makes that fallback possible before any hook has run. A command that passes
+  `--settings` itself gets no hook, because claude keeps only the last `--settings` and your own file has to win;
+  such a tab comes back to the conversation of its own identifier.
 - **codex** — no flag can choose the id, so the launch installs a `SessionStart` and a `UserPromptSubmit` hook
-  that report the session codex is in to TUILaunch's state directory. A reopened tab starts as
-  `codex resume <session id>`.
+  that report the session codex is in. A reopened tab starts as `codex resume <session id>`.
 - **opencode** — no flag can choose the id here either, so the launch puts
   `OPENCODE_TUI_CONFIG=<bundled tui.json>` and `TUILAUNCH_OPENCODE_STATE=<state file>` in front of the command,
-  which loads a small TUI plugin of TUILaunch's own from
-  `<IDE system directory>/TUILaunch/integrations/opencode/`. That plugin records the session the TUI is showing
-  into the tab's state file, and a reopened tab comes back with `--session <session id>` from that record.
+  which loads a small TUI plugin of TUILaunch's own. That plugin records the session the TUI is showing, and a
+  reopened tab comes back with `--session <session id>`.
 - **omp** — the launch points omp at a session directory of the tab's own with `--session-dir` and loads a small
   extension of TUILaunch's own with `--hook`, which records the session omp is in inside that same directory. A
-  reopened tab resumes the recorded session with `--resume <file>`, and the newest session file of the directory
-  when there is no record yet.
+  reopened tab resumes the recorded session with `--resume <file>`, and the session file of the directory that
+  was changed last when there is no record yet. A command that carries `--trusted-extension` gets no hook,
+  because omp refuses those two flags together.
 
 Arguments TUILaunch adds are appended after ` -- ` when the command goes through `headroom wrap`, so headroom
-forwards them to the CLI instead of claiming them for itself. Environment assignments go the other way round,
-in front of the program and therefore before `headroom` itself, after any assignments your own command already
+forwards them to the CLI instead of claiming them for itself. Environment assignments go the other way round, in
+front of the program and therefore before `headroom` itself, after any assignments your own command already
 carries, because `headroom wrap` starts the CLI as a child process and hands it the environment it was started
-with. A shell that reads no such prefix — `cmd` and PowerShell on Windows — leaves an opencode tab launched
-exactly as configured.
+with. Both forms need a POSIX shell: on `cmd` and PowerShell an opencode tab is launched exactly as configured
+and a claude tab gets its identifier pinned but no hook.
 
-Because all four CLIs report the session they are in themselves, switching sessions inside the TUI is
-followed: pick another conversation with claude's `/resume`, start an empty one with `/clear`, or do the same in
-codex, opencode or omp with `/resume`, the session list, `/new` or `/fork`, and the reopened tab comes back to
-the session you switched to instead of the one it was launched with. claude and omp report the switch as it
-happens, omp also after every turn and after a `/branch`, a `/rewind` or a hop through `/tree`; the opencode
-plugin reads the session the TUI is showing about every half second, so a switch in the session list or a `/new`
-is followed as soon as you make it, while a child session you drill into from a subagent is skipped once
-opencode itself knows it is a child;
-codex reports it with the first message you send in the new session, so a session you switched to and never
-typed in is not followed. A codex `/side` or `/btw` excursion is never followed either, because those
-conversations cannot be resumed at all.
+Because all four CLIs report the session they are in themselves, a switch inside the TUI is followed: pick
+another conversation with claude's `/resume`, start an empty one with `/clear`, or do the same in codex, opencode
+or omp with `/resume`, the session list, `/new` or `/fork`, and the reopened tab comes back to the session you
+switched to. claude and omp report the switch as it happens, omp also after every turn and after a `/branch`, a
+`/rewind` or a hop through `/tree`. The opencode plugin reads the session the TUI is showing about every half
+second and skips a child session you drill into from a subagent. codex reports the switch with the first message
+you send in the new session, so a session you switched to and never typed in is not followed, and a `/side` or
+`/btw` excursion is never followed at all because those conversations cannot be resumed.
 
-A tab you never typed in comes back fresh: claude, codex and omp write their conversation with the first
-message, so there is nothing to resume — a report that names a transcript which was never written is ignored —
-and the tab just starts a new conversation. An opencode tab reports nothing until a session is on screen, so it
-comes back fresh in the same way. If a reopened tab does end within 15 seconds of starting — a session deleted
-in the CLI, a transcript that is gone — TUILaunch starts it once more as a new tab with a new identity, keeping
-its name and its place in the tab strip, and notes that in the log. A tab that ends a second time is left
-closed, and a tab you launched yourself is never restarted.
+A tab you never typed in comes back fresh: claude, codex and omp write their conversation with the first message,
+so there is nothing to resume — a report that names a transcript which was never written is ignored — and the tab
+just starts a new conversation. An opencode tab reports nothing until a session is on screen, so it comes back
+fresh in the same way. If a reopened tab that *was* asked to resume a session ends within 15 seconds of starting
+— a session deleted in the CLI, a transcript that is gone — TUILaunch starts it once more as a new tab with a new
+identity, keeping its name and its place in the tab strip, and notes that in the log. A tab that ends a second
+time is left closed, and a tab you launched yourself is never restarted.
 
-The codex hooks are added per invocation, which codex accepts only together with
-`--dangerously-bypass-hook-trust`; without that flag its TUI stops on a trust review at every launch. They
-append what codex hands them to
-`<IDE system directory>/TUILaunch/agent-sessions/<project>/codex/<tab id>.jsonl`, one line per session start
-and per prompt, and claude's hook writes the same kind of report to `.../claude/<tab id>.json`, as does the
-opencode plugin to `.../opencode/<tab id>.json`. None of the three prints anything or writes anywhere else.
-Those files are deleted when you close the tab, and files left behind by tabs that are gone are deleted when the
-project is reopened.
+Everything the CLIs report lands under `<IDE system directory>/TUILaunch/agent-sessions/<project>/`: claude's
+hook writes `claude/<tab id>.json`, the opencode plugin writes `opencode/<tab id>.json`, and the codex hooks
+append to `codex/<tab id>.jsonl`, one line per session start and per prompt, so that file also holds the prompts
+you sent while the tab was open. None of the three prints anything or writes outside that directory. They are
+deleted when you close the tab, and files left behind by tabs that are gone are deleted when the project is
+reopened. The codex hooks are added per invocation, which codex accepts only together with
+`--dangerously-bypass-hook-trust`; without that flag its TUI stops on a trust review at every launch.
 
-The omp extension is one `.js` file that TUILaunch keeps in
-`<IDE system directory>/TUILaunch/integrations/omp/`, writes there when it is missing or out of date and passes
-with `--hook <file>`, omp's own flag for loading an extension from a path. Nothing under `~/.omp` is written or
-read: the extension stays inert unless the session directory it is handed belongs to a TUILaunch tab, and the
-only thing it writes is a `tuilaunch-active.json` inside that tab's own session directory. You can switch it off
-from omp's side with `disabledExtensions: ["extension-module:tuilaunch-follow-session"]`. A command that carries
-`--trusted-extension` is launched without the hook, because omp refuses those two flags together; such a tab
-comes back to the newest session file of its directory instead.
-
-The opencode plugin is one `.js` file next to the `tui.json` that loads it, both kept in
-`<IDE system directory>/TUILaunch/integrations/opencode/` and written there when they are missing or out of
-date. `OPENCODE_TUI_CONFIG` adds that `tui.json` to your own configuration for the one launch, so nothing under
-`~/.config/opencode` is written or read and your own themes, keybinds and plugins stay as they are. You can
-switch it off from opencode's side by disabling the plugin id `tuilaunch-session-tracker` through
-`plugin_enabled` or opencode's plugin manager; `--pure` turns every plugin off, ours with them. A command that
-sets `OPENCODE_TUI_CONFIG` or `TUILAUNCH_OPENCODE_STATE` itself is launched exactly as configured.
-
-claude runs no hook at all, from any settings file, until you have accepted its workspace trust dialog for the
-project, which is why the first launch of a tab also pins the tab's identifier with `--session-id`: the tab
-still knows which conversation is its own even when nothing could report it.
+The omp extension and the opencode plugin are plain `.js` files that TUILaunch keeps under
+`<IDE system directory>/TUILaunch/integrations/`, writes there when they are missing or out of date, and passes
+by path; a file it could not write is left off the command line and the tab falls back to launching fresh. No
+configuration file of any CLI is touched: nothing is written or read under `~/.claude`, `~/.codex`,
+`~/.config/opencode`, or anywhere in `~/.omp` other than the one session directory per tab that `--session-dir`
+names, which holds that tab's own conversations and the extension's `tuilaunch-active.json` and is left for you
+to manage. `OPENCODE_TUI_CONFIG` adds the bundled `tui.json` to your own configuration for the one launch, so
+your themes, keybinds and plugins stay as they are. You can switch the omp extension off from omp's side with
+`disabledExtensions: ["extension-module:tuilaunch-follow-session"]`, and the opencode plugin by disabling the id
+`tuilaunch-session-tracker` through `plugin_enabled` or opencode's plugin manager; `--pure` turns every opencode
+plugin off, ours with them.
 
 Open the same project in two IDE windows at once and both of them restore the same agent sessions, which none of
 the CLIs support — codex in particular needs the previous writer to be gone before a session can be resumed — so
 use one IDE window per project while relying on this feature.
+
 
 ### Focus and tab actions
 
@@ -440,24 +429,28 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `FoldingModel.runBatchFoldingOperation(Runnable)` is the variant that is allowed to move the caret out of a region it collapses; `runBatchFoldingOperationDoNotCollapseCaret` leaves a region holding the caret expanded instead.
 - Fold regions are built whether or not `EditorSettings.isFoldingOutlineShown` is on, so an editor that collapses regions programmatically still has to turn the outline on for the user to be able to expand them.
 - `BaseOSProcessHandler.startNotify` attaches a `BaseOutputReader` that consumes the child's stdout and decodes it into lines, which destroys `Content-Length` framing, and `ProcessHandler.destroyProcess` queues its work behind `startNotify`, so a handler for a stdio LSP server has to call `startNotify` and override `createProcessOutReader` to hand the base class an empty reader while the JSON-RPC loop reads `handler.process.inputStream` itself.
-- `headroom wrap <cli>` declares its pass-through argument as a click `nargs=-1, type=UNPROCESSED` parameter under `ignore_unknown_options`, so the `--` separator is consumed by click and everything after it reaches the CLI unchanged and in order; without the separator headroom claims the flags it owns for that CLI first, and `wrap opencode --port 1234` reaches opencode with no port at all because headroom takes it as its own proxy port. Appending managed arguments after ` -- ` is therefore required, and adding a second `--` is not (verified against headroom 0.37.0 by building the click contexts for `wrap claude|codex|opencode|omp`).
+- `headroom wrap <cli>` declares its pass-through argument as a click `nargs=-1, type=UNPROCESSED` parameter under `ignore_unknown_options`, so the `--` separator is consumed by click and everything after it reaches the CLI unchanged and in order; without the separator headroom claims the flags it owns for that CLI first, and `wrap claude --resume <id>` reaches claude with no id at all because headroom takes the flag as its own. Appending managed arguments after ` -- ` is therefore required, and adding a second `--` is not (verified against headroom 0.37.0 by building the click contexts for `wrap claude|codex|opencode|omp`).
 - claude derives its transcript directory from the cwd by replacing every non-alphanumeric character with `-`, and when the result exceeds 200 characters it keeps the first 200 and appends `-<base36 of |hash|>` where the hash is the 32-bit `h = h * 31 + c` rolling hash of the *raw* path; the encoding is lossy, so it can only be derived from the project path and never parsed back.
 - `claude --session-id <uuid>` is rejected with "Session ID … is already in use" exactly when `<claudeHome>/projects/<escaped cwd>/<uuid>.jsonl` exists, and that transcript is written lazily on the first message, so a tab that was opened but never prompted has to be relaunched with `--session-id` rather than `--resume`.
 - A codex `SessionStart` hook added per invocation with `-c 'hooks.SessionStart=[…]'` makes the TUI block on a trust review unless `--dangerously-bypass-hook-trust` is also passed, and the hook is queued when a session is built but fires only at the start of that session's first turn, so a `UserPromptSubmit` hook writing the same record is what makes an in-TUI switch observable at all, and never before the first prompt of the new session.
 - codex `/side` and `/btw` fork an ephemeral conversation that fires `SessionStart` with a new id and `"transcript_path": null`, and that id can never be resumed, so a record without a transcript path has to be skipped rather than treated as the newest session.
+- The codex state file is append-only for the life of a tab, because an ephemeral `/side` record must not be allowed to overwrite the last resumable one, so only its last 64 KB is read and decoded leniently: a hook killed by its timeout mid-character must not hide the records before it.
 - The codex hook command runs through `$SHELL -lc`, so a path inside it needs its own double quotes (`{ cat; echo; } >> "<path>"`, escaped as `\"` inside the TOML string); a path holding any character the shell reads inside double quotes — `"`, `\`, `$`, a backtick or a newline — cannot be expressed this way and leaves the tab unmanaged, which is every path on Windows because of the separator.
 - claude holds back the hooks of every settings file, including the ones passed inline with `--settings`, until the user has accepted the workspace trust dialog for the folder or a parent of it, so the first launch of a session cannot rely on its hook having run and has to pin the id with `--session-id` as well.
-- claude adds the stdout of a `SessionStart` hook to the model's context, so such a hook has to print nothing at all; `cat > "$0"` in the exec form (`"command": "/bin/sh", "args": ["-c", …, "<path>"]`) writes the payload without a shell parsing the path and without echoing it, while `tee` would feed it back to the model.
+- claude adds the stdout of a `SessionStart` hook to the model's context, so such a hook has to print nothing at all, and it keeps only the last `--settings` of a command line rather than merging several.
+- claude's exec form for a hook (`"command": "/bin/sh", "args": ["-c", …, "<path>"]`) binds the trailing argument to `$0`, so a state path used inside the command is never parsed by a shell and never needs quoting.
 - `omp --resume <path>` silently creates an empty session at that path when the file does not exist, so a resume argument must only ever be a file that was found on disk.
 - `omp --hook <path>` is an alias of `--extension`/`-e <path>` and is rejected as a usage error when the same command also carries `--trusted-extension`, which is an exact allowlist that suppresses every other extension, so a command carrying that flag has to be launched with no hook of ours at all.
 - A `-e`/`--hook` path also gets its own directory scanned for `skills/`, `hooks/`, `tools/`, `commands/`, `rules/`, `prompts/` and `.mcp.json`, so a bundled extension has to sit alone in a directory of its own or unrelated files next to it are loaded with it.
 - The first session of an omp process is written lazily, with its first assistant message, so the session path an extension reads at `session_start` can name a file that does not exist yet and every recorded path has to be checked on disk before it is resumed.
+- `ctx.sessionManager.getSessionDir()` re-roots to another project's directory on a cross-project resume, a `/move` or a `/wt`, so the extension pins the first TUILaunch session directory it sees and keeps writing its record there; writing to the live directory instead would overwrite the record of whichever tab owns it.
 - opencode declares TUI plugins in `tui.json` rather than in `opencode.json` and auto-discovers none of them from a directory, so the only way to add one for a single launch is `OPENCODE_TUI_CONFIG=<file>`, which merges that one `tui.json` additively and leaves the user's own theme, keybinds and plugins alone.
 - A file plugin must never sit in a `plugin/` or `plugins/` directory of an opencode config directory, because the server loader scans those as well and logs a load error on every launch for a module that exports `tui` instead of `server`.
 - A plugin loaded from a path needs an `id` of its own in the module it exports, or opencode drops it without a word in the TUI or the log.
-- `api.route.current` is a live getter with no change event behind it, so the session the TUI shows can only be followed by polling; `--continue` starts on the placeholder id `dummy`, so only an id beginning with `ses_` is a session worth recording.
+- `api.route.current` is a live getter with no change event behind it, so the session the opencode TUI shows can only be followed by polling.
+- opencode `--continue` starts on the placeholder session id `dummy`, so only an id matching `ses_` followed by 26 alphanumerics is a session worth recording.
 - `opencode --session <id>` validates the id before the TUI starts and exits 1 when that session is gone, which is what lets the early-exit relaunch catch it, while `OPENCODE_ROUTE` only shows a toast and exits 0.
-- A launch command is handed to the terminal's own shell, and `cmd /c` and `powershell -Command` read a leading `NAME=value` as the name of the program to run, so a command can only be given an environment prefix on a POSIX shell and an opencode tab stays unmanaged on Windows.
+- A launch command is handed to the terminal's own shell, and `cmd /c` and `powershell -Command` neither read a leading `NAME=value` as an assignment nor treat `'` as quoting, so on Windows an opencode tab can get no environment prefix and a claude tab can get no inline `--settings` document.
 - `ContentManager.addContent(Content, int)` inserts at that index and reads -1 as "append", which is the only supported way to put a tab back at the strip position it had.
 - A tab the plugin closes itself and a tab the user closes from the strip both arrive as one `contentRemoved` carrying no reason, so the only way to tell them apart is bookkeeping done before calling `removeContent`; project close fires no event at all and a drag is marked with `Content.TEMPORARY_REMOVED_KEY`.
 

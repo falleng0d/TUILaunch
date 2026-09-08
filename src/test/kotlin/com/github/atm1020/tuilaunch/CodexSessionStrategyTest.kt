@@ -3,7 +3,6 @@ package com.github.atm1020.tuilaunch
 import com.github.atm1020.tuilaunch.resume.AgentCommand
 import com.github.atm1020.tuilaunch.resume.AgentStateFiles
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
-import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import kotlinx.coroutines.runBlocking
@@ -75,7 +74,7 @@ class CodexSessionStrategyTest {
         val strategy = CodexSessionStrategy(stateDirectory())
 
         strategy.launchArguments(tab)
-        strategy.restoreArguments(tab, RememberedSession())
+        strategy.restoreArguments(tab)
 
         assertFalse(Files.exists(stateDirectory()))
     }
@@ -87,7 +86,7 @@ class CodexSessionStrategyTest {
 
         assertEquals(
             listOf("resume", sessionId) + strategy.launchArguments(tab),
-            strategy.restoreArguments(tab, RememberedSession()),
+            strategy.restoreArguments(tab),
         )
     }
 
@@ -103,7 +102,7 @@ class CodexSessionStrategyTest {
                 "-c ${ShellWords.quote(expectedToml("SessionStart", stateFile))} " +
                 "-c ${ShellWords.quote(expectedToml("UserPromptSubmit", stateFile))} " +
                 "--dangerously-bypass-hook-trust",
-            AgentCommand.parse(command).withArguments(strategy.restoreArguments(tab, RememberedSession())),
+            AgentCommand.parse(command).withArguments(strategy.restoreArguments(tab)),
         )
     }
 
@@ -112,13 +111,13 @@ class CodexSessionStrategyTest {
         val strategy = CodexSessionStrategy(stateDirectory())
         val launch = strategy.launchArguments(tab)
 
-        assertEquals(launch, strategy.restoreArguments(tab, RememberedSession()))
+        assertEquals(launch, strategy.restoreArguments(tab))
 
         writeState(strategy.stateFile(tab), """{"cwd":"/Users/falleng0d/Projects/TUILaunch"}""")
-        assertEquals(launch, strategy.restoreArguments(tab, RememberedSession()))
+        assertEquals(launch, strategy.restoreArguments(tab))
 
         writeState(strategy.stateFile(tab), "{not json")
-        assertEquals(launch, strategy.restoreArguments(tab, RememberedSession()))
+        assertEquals(launch, strategy.restoreArguments(tab))
     }
 
     @Test
@@ -142,6 +141,30 @@ class CodexSessionStrategyTest {
         writeState(stateFile, record(sessionId, transcriptPath) + "\n" + """{"session_id":"01""")
 
         assertEquals(sessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun aLastLineTornInsideAMultiByteCharacterDoesNotHideThePreviousRecord() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+        val good = (record(sessionId, transcriptPath) + "\n").toByteArray(Charsets.UTF_8)
+        val torn = """{"session_id":"01","prompt":"café""".toByteArray(Charsets.UTF_8)
+
+        Files.createDirectories(stateFile.parent)
+        Files.write(stateFile, good + torn.dropLast(1).toByteArray())
+
+        assertEquals(sessionId, strategy.readSessionId(stateFile))
+    }
+
+    @Test
+    fun onlyTheTailOfAVeryLongStateFileIsRead() {
+        val strategy = CodexSessionStrategy(stateDirectory())
+        val stateFile = strategy.stateFile(tab)
+        val filler = record(sessionId, transcriptPath) + "\n"
+
+        writeState(stateFile, filler.repeat(2_000) + record(laterSessionId, transcriptPath) + "\n")
+
+        assertEquals(laterSessionId, strategy.readSessionId(stateFile))
     }
 
     @Test
@@ -190,8 +213,8 @@ class CodexSessionStrategyTest {
         writeState(strategy.stateFile(tab), record(sessionId, transcriptPath))
 
         runBlocking {
-            strategy.cleanUp(tab, RememberedSession(sessionId))
-            strategy.cleanUp(tab, RememberedSession(sessionId))
+            strategy.cleanUp(tab)
+            strategy.cleanUp(tab)
         }
 
         assertFalse(Files.exists(strategy.stateFile(tab)))
@@ -202,16 +225,18 @@ class CodexSessionStrategyTest {
         for (name in listOf("say\"hi\"", "back\\slash", "cost\$100", "back`tick`", "two\nlines")) {
             val strategy = CodexSessionStrategy(temporaryFolder.root.toPath().resolve(name))
 
-            assertFalse(name, strategy.canManage(tab))
+            assertEquals(name, emptyList<String>(), strategy.hookArguments(strategy.stateFile(tab)))
             assertEquals(emptyList<String>(), strategy.launchArguments(tab))
-            assertEquals(emptyList<String>(), strategy.restoreArguments(tab, RememberedSession(sessionId)))
+            assertEquals(emptyList<String>(), strategy.restoreArguments(tab))
             assertEquals("codex", AgentCommand.parse("codex").withArguments(strategy.launchArguments(tab)))
         }
     }
 
     @Test
     fun aPlainStateFilePathIsManageable() {
-        assertTrue(CodexSessionStrategy(stateDirectory()).canManage(tab))
+        val strategy = CodexSessionStrategy(stateDirectory())
+
+        assertEquals(codexHookArguments(strategy.stateFile(tab)), strategy.hookArguments(strategy.stateFile(tab)))
     }
 
     @Test
@@ -224,6 +249,9 @@ class CodexSessionStrategyTest {
             writeState(directory.resolve("$orphanUuid.jsonl"), record(sessionId, transcriptPath))
             writeState(directory.resolve("$orphanUuid.json"), record(sessionId, transcriptPath))
             writeState(directory.resolve("notes.txt"), "keep me")
+            writeState(directory.resolve("$tabUuid.json.tmp"), "half written")
+            writeState(directory.resolve("$orphanUuid.json.tmp"), "half written")
+            writeState(directory.resolve("$orphanUuid.json.4321.tmp"), "half written")
         }
 
         runBlocking {
@@ -236,6 +264,9 @@ class CodexSessionStrategyTest {
             assertFalse(directory.toString(), Files.exists(directory.resolve("$orphanUuid.jsonl")))
             assertFalse(directory.toString(), Files.exists(directory.resolve("$orphanUuid.json")))
             assertTrue(directory.toString(), Files.exists(directory.resolve("notes.txt")))
+            assertTrue(directory.toString(), Files.exists(directory.resolve("$tabUuid.json.tmp")))
+            assertFalse(directory.toString(), Files.exists(directory.resolve("$orphanUuid.json.tmp")))
+            assertFalse(directory.toString(), Files.exists(directory.resolve("$orphanUuid.json.4321.tmp")))
         }
     }
 

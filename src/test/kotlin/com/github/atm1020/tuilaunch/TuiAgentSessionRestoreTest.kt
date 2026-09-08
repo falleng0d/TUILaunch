@@ -148,12 +148,42 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertEquals(TAB_UUID, savedTabs().single().agentSessionId)
     }
 
+    fun testAClaudeCommandCarryingItsOwnSettingsKeepsThatFileAlone() {
+        val command = "claude --settings /Users/falleng0d/team-settings.json"
+        configureApp("claude", command)
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("claude", command)
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf("$command --session-id $tabUuid"), factory.commands)
+        assertFalse(Files.exists(claudeStateFile(tabUuid).parent))
+    }
+
+    fun testAWrappedClaudeCommandCarryingItsOwnSettingsResumesItsOwnTab() {
+        val command = "headroom wrap claude --settings=/Users/falleng0d/team-settings.json"
+        configureApp("claude", command)
+        write(
+            claudeStateFile(TAB_UUID),
+            """{"session_id":"$CLAUDE_REPORTED_SESSION"}""",
+        )
+        writeClaudeTranscript(TAB_UUID)
+        saveTab(TuiSessionRecord("claude", "claude", true, TAB_UUID, TAB_UUID, "CLAUDE"))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+
+        assertEquals(listOf("$command -- --resume $TAB_UUID"), factory.commands)
+    }
+
     fun testTheStrategyPreparesItsStateBeforeTheArgumentsAreBuilt() {
         configureApp("claude", "claude")
         val strategy = RecordingSessionStrategy()
         val factory = FakeFactory(FakeSession())
         val (service, _) = newService(factory)
-        service.agentSessionStrategies = { _, _ -> strategy }
+        service.agentSessionStrategies = { _, _, _ -> strategy }
 
         service.launchNew("claude", "claude")
 
@@ -613,6 +643,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
     fun testAReopenedOpenCodeTabThatEndsRightAwayComesBackAsANewTab() {
         configureApp("opencode", "opencode")
         saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, agentCliKind = "OPENCODE"))
+        write(openCodeStateFile(TAB_UUID), """{"sessionId":"$OPENCODE_SESSION_ID"}""")
         val sessions = List(2) { FakeSession() }
         val factory = FakeFactory(sessions)
         val (service, _) = newService(factory)
@@ -625,11 +656,26 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertTrue(relaunchedTabUuid, relaunchedTabUuid != TAB_UUID)
         assertEquals(
             listOf(
-                "${openCodeVariables(TAB_UUID)} opencode",
+                "${openCodeVariables(TAB_UUID)} opencode --session $OPENCODE_SESSION_ID",
                 "${openCodeVariables(relaunchedTabUuid)} opencode",
             ),
             factory.commands,
         )
+    }
+
+    fun testAReopenedTabThatAskedForNoSessionIsNotStartedAgain() {
+        configureApp("opencode", "opencode")
+        saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, agentCliKind = "OPENCODE"))
+        val sessions = List(2) { FakeSession() }
+        val factory = FakeFactory(sessions)
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+        sessions[0].terminate()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(listOf("${openCodeVariables(TAB_UUID)} opencode"), factory.commands)
+        assertTrue(savedTabs().toString(), savedTabs().isEmpty())
     }
 
     fun testTheSettingOffLaunchesAnOpenCodeTabExactlyAsConfigured() {

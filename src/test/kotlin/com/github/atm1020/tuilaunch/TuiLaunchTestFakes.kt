@@ -13,7 +13,6 @@ import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategy
-import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
@@ -256,7 +255,7 @@ internal class RecordingSessionStrategy(
         return arguments
     }
 
-    override fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String> {
+    override fun restoreArguments(tab: TabIdentity): List<String> {
         recorded.add("restoreArguments")
         return arguments
     }

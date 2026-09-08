@@ -3,13 +3,13 @@ package com.github.atm1020.tuilaunch
 import com.github.atm1020.tuilaunch.resume.AgentCommand
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.OmpSessionStrategy
-import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -59,6 +59,7 @@ class OmpSessionStrategyTest {
     @Test
     fun launchArgumentsPointOmpAtTheTabDirectoryAndTheBundledExtension() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
 
         assertEquals(
             listOf(
@@ -108,8 +109,34 @@ class OmpSessionStrategyTest {
     }
 
     @Test
+    fun theExtensionPinsItsOwnDirectoryAndUsesNoTimer() {
+        val extension = String(bundledResource())
+
+        for (expected in listOf(
+            """const MARKER = "--tuilaunch-";""",
+            "ownDirectory",
+            "join(ownDirectory, STATE_FILE)",
+            "renameSync(staging, target)",
+        )) {
+            assertTrue(expected, extension.contains(expected))
+        }
+        assertFalse(extension, extension.contains("setTimeout"))
+        assertFalse(extension, extension.contains("setInterval"))
+    }
+
+    @Test
+    fun anExtensionThatCouldNotBeWrittenIsNotPutOnTheCommandLine() {
+        val strategy = newStrategy()
+        val directoryArguments = listOf("--session-dir", strategy.sessionDirectory(tab).toString())
+
+        assertEquals(directoryArguments, strategy.launchArguments(tab))
+        assertEquals(directoryArguments, strategy.restoreArguments(tab))
+    }
+
+    @Test
     fun restoreResumesTheSessionTheExtensionReported() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
         val directory = strategy.sessionDirectory(tab)
         val reported = writeSession(directory, OLDER_SESSION, modifiedAt = 1_000_000)
         writeSession(directory, NEWEST_SESSION, modifiedAt = 2_000_000)
@@ -117,7 +144,7 @@ class OmpSessionStrategyTest {
 
         assertEquals(
             sessionArguments(strategy) + listOf("--resume", reported.toString()),
-            strategy.restoreArguments(tab, RememberedSession()),
+            strategy.restoreArguments(tab),
         )
         assertEquals(REPORTED_SESSION_ID, strategy.readSessionId(strategy.activeSessionFile(tab)))
     }
@@ -125,6 +152,7 @@ class OmpSessionStrategyTest {
     @Test
     fun aReportedSessionThatIsGoneFallsBackToTheNewestFile() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
         val directory = strategy.sessionDirectory(tab)
         val newest = writeSession(directory, NEWEST_SESSION, modifiedAt = 2_000_000)
         writeActiveSession(strategy, directory.resolve("2026-09-01T00-00-00-000Z_gone.jsonl"))
@@ -133,13 +161,14 @@ class OmpSessionStrategyTest {
         assertNull(strategy.readSessionId(strategy.activeSessionFile(tab)))
         assertEquals(
             sessionArguments(strategy) + listOf("--resume", newest.toString()),
-            strategy.restoreArguments(tab, RememberedSession()),
+            strategy.restoreArguments(tab),
         )
     }
 
     @Test
     fun aReportThatDoesNotParseFallsBackToTheNewestFile() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
         val directory = strategy.sessionDirectory(tab)
         val newest = writeSession(directory, NEWEST_SESSION, modifiedAt = 2_000_000)
         write(strategy.activeSessionFile(tab), """{"sessionFile":"""")
@@ -147,13 +176,14 @@ class OmpSessionStrategyTest {
         assertNull(strategy.readActiveSession(strategy.activeSessionFile(tab)))
         assertEquals(
             sessionArguments(strategy) + listOf("--resume", newest.toString()),
-            strategy.restoreArguments(tab, RememberedSession()),
+            strategy.restoreArguments(tab),
         )
     }
 
     @Test
     fun aReportWithoutASessionFileFallsBackToTheNewestFile() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
         val directory = strategy.sessionDirectory(tab)
         val newest = writeSession(directory, NEWEST_SESSION, modifiedAt = 2_000_000)
         write(strategy.activeSessionFile(tab), """{"sessionId":"$REPORTED_SESSION_ID"}""")
@@ -161,13 +191,14 @@ class OmpSessionStrategyTest {
         assertNull(strategy.readSessionId(strategy.activeSessionFile(tab)))
         assertEquals(
             sessionArguments(strategy) + listOf("--resume", newest.toString()),
-            strategy.restoreArguments(tab, RememberedSession()),
+            strategy.restoreArguments(tab),
         )
     }
 
     @Test
     fun theFallbackTakesTheMostRecentlyModifiedFile() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
         val directory = strategy.sessionDirectory(tab)
         writeSession(directory, NEWEST_SESSION, modifiedAt = 1_000_000)
         val resumedAgain = writeSession(directory, OLDER_SESSION, modifiedAt = 2_000_000)
@@ -178,6 +209,7 @@ class OmpSessionStrategyTest {
     @Test
     fun filesModifiedAtTheSameTimeAreOrderedByName() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
         val directory = strategy.sessionDirectory(tab)
         writeSession(directory, OLDER_SESSION, modifiedAt = 1_000_000)
         val newest = writeSession(directory, NEWEST_SESSION, modifiedAt = 1_000_000)
@@ -192,7 +224,7 @@ class OmpSessionStrategyTest {
         Files.createDirectories(directory)
 
         assertNull(strategy.newestSessionFile(directory))
-        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab, RememberedSession()))
+        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab))
     }
 
     @Test
@@ -200,7 +232,7 @@ class OmpSessionStrategyTest {
         val strategy = newStrategy()
 
         assertNull(strategy.newestSessionFile(strategy.sessionDirectory(tab)))
-        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab, RememberedSession()))
+        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab))
     }
 
     @Test
@@ -215,8 +247,7 @@ class OmpSessionStrategyTest {
 
     @Test
     fun aCommandWithATrustedExtensionGetsNoHook() {
-        val strategy = newStrategy()
-        strategy.hookAllowed = false
+        val strategy = OmpSessionStrategy(root(), bundledDirectory(), hookAllowed = false)
         val directory = strategy.sessionDirectory(tab)
         val reported = writeSession(directory, NEWEST_SESSION, modifiedAt = 2_000_000)
         writeActiveSession(strategy, reported)
@@ -225,13 +256,14 @@ class OmpSessionStrategyTest {
         assertEquals(directoryArguments, strategy.launchArguments(tab))
         assertEquals(
             directoryArguments + listOf("--resume", reported.toString()),
-            strategy.restoreArguments(tab, RememberedSession()),
+            strategy.restoreArguments(tab),
         )
     }
 
     @Test
     fun theWrappedRestoreCommandPassesEveryPathThroughHeadroom() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
         val directory = strategy.sessionDirectory(tab)
         val file = writeSession(directory, NEWEST_SESSION, modifiedAt = 2_000_000)
 
@@ -243,7 +275,7 @@ class OmpSessionStrategyTest {
             "headroom wrap omp --no-serena -- --session-dir $expectedDirectory " +
                 "--hook $expectedExtension --resume $expectedFile",
             AgentCommand.parse("headroom wrap omp --no-serena")
-                .withArguments(strategy.restoreArguments(tab, RememberedSession())),
+                .withArguments(strategy.restoreArguments(tab)),
         )
     }
 

@@ -5,7 +5,6 @@ import com.github.atm1020.tuilaunch.resume.AgentCommand
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategies
 import com.github.atm1020.tuilaunch.resume.OpenCodeSessionStrategy
-import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import kotlinx.coroutines.runBlocking
@@ -133,6 +132,14 @@ class OpenCodeSessionStrategyTest {
     }
 
     @Test
+    fun bundledFilesThatCouldNotBeWrittenLeaveTheCommandAlone() {
+        val strategy = newStrategy()
+
+        assertEquals(emptyMap<String, String>(), strategy.launchEnvironment(tab))
+        assertEquals(emptyMap<String, String>(), strategy.restoreEnvironment(tab))
+    }
+
+    @Test
     fun aShellThatReadsNoEnvironmentPrefixLeavesTheCommandAlone() {
         val strategy = OpenCodeSessionStrategy(stateDirectory(), bundledDirectory(), false)
         writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
@@ -140,8 +147,8 @@ class OpenCodeSessionStrategyTest {
         strategy.prepareLaunch(tab)
 
         assertEquals(emptyMap<String, String>(), strategy.launchEnvironment(tab))
-        assertEquals(emptyMap<String, String>(), strategy.restoreEnvironment(tab, RememberedSession()))
-        assertEquals(emptyList<String>(), strategy.restoreArguments(tab, RememberedSession()))
+        assertEquals(emptyMap<String, String>(), strategy.restoreEnvironment(tab))
+        assertEquals(emptyList<String>(), strategy.restoreArguments(tab))
         assertFalse(Files.exists(strategy.tuiConfigFile()))
         assertFalse(Files.exists(strategy.sessionTrackerFile()))
     }
@@ -149,6 +156,7 @@ class OpenCodeSessionStrategyTest {
     @Test
     fun theEnvironmentPointsOpenCodeAtTheBundledConfigAndTheTabStateFile() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
 
         val environment = strategy.launchEnvironment(tab)
 
@@ -160,7 +168,7 @@ class OpenCodeSessionStrategyTest {
             listOf(strategy.tuiConfigFile().toString(), strategy.stateFile(tab).toString()),
             environment.values.toList(),
         )
-        assertEquals(environment, strategy.restoreEnvironment(tab, RememberedSession()))
+        assertEquals(environment, strategy.restoreEnvironment(tab))
     }
 
     @Test
@@ -175,7 +183,7 @@ class OpenCodeSessionStrategyTest {
 
         assertEquals(
             listOf("--session", REPORTED_SESSION_ID),
-            strategy.restoreArguments(tab, RememberedSession()),
+            strategy.restoreArguments(tab),
         )
         assertEquals(REPORTED_SESSION_ID, strategy.readSessionId(strategy.stateFile(tab)))
     }
@@ -194,7 +202,7 @@ class OpenCodeSessionStrategyTest {
             writeState(strategy, """{"sessionId":"$reported"}""")
 
             assertNull(reported, strategy.readSessionId(strategy.stateFile(tab)))
-            assertEquals(reported, emptyList<String>(), strategy.restoreArguments(tab, RememberedSession()))
+            assertEquals(reported, emptyList<String>(), strategy.restoreArguments(tab))
         }
     }
 
@@ -214,26 +222,27 @@ class OpenCodeSessionStrategyTest {
             writeState(strategy, content)
 
             assertNull(content, strategy.readSessionId(strategy.stateFile(tab)))
-            assertEquals(content, emptyList<String>(), strategy.restoreArguments(tab, RememberedSession()))
+            assertEquals(content, emptyList<String>(), strategy.restoreArguments(tab))
         }
     }
 
     @Test
     fun aTabWithoutAStateFileRestoresLikeAFreshOne() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
 
         assertNull(strategy.readSessionId(strategy.stateFile(tab)))
-        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab, RememberedSession()))
-        assertEquals(strategy.launchEnvironment(tab), strategy.restoreEnvironment(tab, RememberedSession()))
+        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab))
+        assertEquals(strategy.launchEnvironment(tab), strategy.restoreEnvironment(tab))
     }
 
     @Test
-    fun aRememberedIdIsNeverTrustedOverTheStateFile() {
+    fun aTabWithoutAReportGetsNoSessionArgument() {
         val strategy = newStrategy()
 
         assertEquals(
             emptyList<String>(),
-            strategy.restoreArguments(tab, RememberedSession(REPORTED_SESSION_ID)),
+            strategy.restoreArguments(tab),
         )
     }
 
@@ -242,7 +251,7 @@ class OpenCodeSessionStrategyTest {
         val strategy = newStrategy()
         writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
 
-        runBlocking { strategy.cleanUp(tab, RememberedSession()) }
+        runBlocking { strategy.cleanUp(tab) }
 
         assertFalse(Files.exists(strategy.stateFile(tab)))
     }
@@ -251,7 +260,7 @@ class OpenCodeSessionStrategyTest {
     fun closingATabThatWroteNothingIsHarmless() {
         val strategy = newStrategy()
 
-        runBlocking { strategy.cleanUp(tab, RememberedSession()) }
+        runBlocking { strategy.cleanUp(tab) }
 
         assertFalse(Files.exists(strategy.stateFile(tab)))
     }
@@ -259,6 +268,7 @@ class OpenCodeSessionStrategyTest {
     @Test
     fun theWrappedRestoreCommandCarriesTheVariablesAndTheSessionThroughHeadroom() {
         val strategy = newStrategy()
+        strategy.prepareLaunch(tab)
         writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
 
         val expectedConfig = ShellWords.quote(strategy.tuiConfigFile().toString())
@@ -268,8 +278,8 @@ class OpenCodeSessionStrategyTest {
             "OPENCODE_TUI_CONFIG=$expectedConfig TUILAUNCH_OPENCODE_STATE=$expectedState " +
                 "headroom wrap opencode --no-serena -- --session $REPORTED_SESSION_ID",
             AgentCommand.parse("headroom wrap opencode --no-serena")
-                .withEnvironment(strategy.restoreEnvironment(tab, RememberedSession()))
-                .withArguments(strategy.restoreArguments(tab, RememberedSession())),
+                .withEnvironment(strategy.restoreEnvironment(tab))
+                .withArguments(strategy.restoreArguments(tab)),
         )
     }
 
@@ -282,6 +292,7 @@ class OpenCodeSessionStrategyTest {
         )
 
         val strategy = AgentSessionStrategies.forKind(AgentCliKind.OPENCODE, environment)
+        strategy.prepareLaunch(tab)
 
         assertEquals(emptyList<String>(), strategy.launchArguments(tab))
         assertEquals(

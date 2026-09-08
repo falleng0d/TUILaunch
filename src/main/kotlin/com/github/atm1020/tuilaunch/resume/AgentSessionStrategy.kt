@@ -1,6 +1,8 @@
 package com.github.atm1020.tuilaunch.resume
 
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.intellij.openapi.util.SystemInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -13,22 +15,19 @@ data class TabIdentity(
     val projectHash: String,
 )
 
-data class RememberedSession(val agentSessionId: String? = null)
-
 interface AgentSessionStrategy {
     fun prepareLaunch(tab: TabIdentity) {
     }
 
     fun launchArguments(tab: TabIdentity): List<String>
 
-    fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String>
+    fun restoreArguments(tab: TabIdentity): List<String>
 
     fun launchEnvironment(tab: TabIdentity): Map<String, String> = emptyMap()
 
-    fun restoreEnvironment(tab: TabIdentity, remembered: RememberedSession): Map<String, String> =
-        launchEnvironment(tab)
+    fun restoreEnvironment(tab: TabIdentity): Map<String, String> = launchEnvironment(tab)
 
-    suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
+    suspend fun cleanUp(tab: TabIdentity) {
     }
 }
 
@@ -39,7 +38,7 @@ internal fun JsonObject.nonBlankString(field: String): String? {
 }
 
 object AgentStateFiles {
-    private val STATE_FILE_SUFFIXES = listOf(".json", ".jsonl")
+    private val STATE_FILE_NAME = Regex("""^([^.]+)\.(json|jsonl)(\..+)?$""")
 
     fun createDirectoryFor(stateFile: Path) {
         val parent = stateFile.parent ?: return
@@ -47,6 +46,26 @@ object AgentStateFiles {
             Files.createDirectories(parent)
         } catch (_: IOException) {
         }
+    }
+
+    fun readJsonObject(stateFile: Path): JsonObject? {
+        val text = try {
+            if (!Files.isRegularFile(stateFile)) return null
+            Files.readString(stateFile)
+        } catch (_: IOException) {
+            return null
+        }
+        return jsonObjectIn(text)
+    }
+
+    fun jsonObjectIn(text: String): JsonObject? {
+        if (text.isBlank()) return null
+        val parsed = try {
+            JsonParser.parseString(text)
+        } catch (_: RuntimeException) {
+            return null
+        }
+        return if (parsed.isJsonObject) parsed.asJsonObject else null
     }
 
     suspend fun delete(stateFile: Path) {
@@ -78,9 +97,8 @@ object AgentStateFiles {
     }
 
     private fun belongsToATabThatIsGone(file: Path, tabUuids: Set<String>): Boolean {
-        val name = file.fileName.toString()
-        val suffix = STATE_FILE_SUFFIXES.firstOrNull { name.endsWith(it) } ?: return false
-        return name.removeSuffix(suffix) !in tabUuids
+        val name = STATE_FILE_NAME.matchEntire(file.fileName.toString()) ?: return false
+        return name.groupValues[1] !in tabUuids
     }
 }
 
@@ -90,6 +108,7 @@ data class AgentSessionEnvironment(
     val bundledDirectory: Path,
     val claudeConfigDir: String? = null,
     val piCodingAgentDir: String? = null,
+    val theShellIsPosix: Boolean = !SystemInfo.isWindows,
 ) {
     val claudeHome: Path
         get() = overriddenDirectory(claudeConfigDir) ?: homeDirectory.resolve(".claude")
@@ -116,10 +135,29 @@ data class AgentSessionEnvironment(
 }
 
 object AgentSessionStrategies {
-    fun forKind(kind: AgentCliKind, environment: AgentSessionEnvironment): AgentSessionStrategy = when (kind) {
-        AgentCliKind.CLAUDE -> ClaudeSessionStrategy(environment.claudeHome, environment.stateDirectory)
+    fun forKind(
+        kind: AgentCliKind,
+        environment: AgentSessionEnvironment,
+        hookAllowed: Boolean = true,
+    ): AgentSessionStrategy = when (kind) {
+        AgentCliKind.CLAUDE -> ClaudeSessionStrategy(
+            claudeHome = environment.claudeHome,
+            stateDirectory = environment.stateDirectory,
+            hookAllowed = hookAllowed && environment.theShellIsPosix,
+        )
+
         AgentCliKind.CODEX -> CodexSessionStrategy(environment.stateDirectory)
-        AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(environment.stateDirectory, environment.bundledDirectory)
-        AgentCliKind.OMP -> OmpSessionStrategy(environment.ompRoot, environment.bundledDirectory)
+
+        AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(
+            stateDirectory = environment.stateDirectory,
+            bundledDirectory = environment.bundledDirectory,
+            theShellTakesAnEnvironmentPrefix = environment.theShellIsPosix,
+        )
+
+        AgentCliKind.OMP -> OmpSessionStrategy(
+            root = environment.ompRoot,
+            bundledDirectory = environment.bundledDirectory,
+            hookAllowed = hookAllowed,
+        )
     }
 }

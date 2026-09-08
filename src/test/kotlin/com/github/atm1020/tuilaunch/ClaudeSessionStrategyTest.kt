@@ -6,7 +6,6 @@ import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategies
 import com.github.atm1020.tuilaunch.resume.ClaudeProjectPath
 import com.github.atm1020.tuilaunch.resume.ClaudeSessionStrategy
-import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import kotlinx.coroutines.runBlocking
@@ -118,7 +117,7 @@ class ClaudeSessionStrategyTest {
 
         assertEquals(
             listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", reportedSessionId),
-            strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+            strategy.restoreArguments(tab),
         )
     }
 
@@ -129,7 +128,7 @@ class ClaudeSessionStrategyTest {
 
         assertEquals(
             listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", reportedSessionId),
-            strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+            strategy.restoreArguments(tab),
         )
     }
 
@@ -142,7 +141,7 @@ class ClaudeSessionStrategyTest {
 
         assertEquals(
             listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", tabUuid),
-            strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+            strategy.restoreArguments(tab),
         )
     }
 
@@ -157,7 +156,7 @@ class ClaudeSessionStrategyTest {
             assertEquals(
                 content,
                 listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", tabUuid),
-                strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+                strategy.restoreArguments(tab),
             )
         }
     }
@@ -169,7 +168,7 @@ class ClaudeSessionStrategyTest {
 
         assertEquals(
             listOf("--settings", expectedSettings(strategy.stateFile(tab)), "--resume", tabUuid),
-            strategy.restoreArguments(tab, RememberedSession(tabUuid)),
+            strategy.restoreArguments(tab),
         )
     }
 
@@ -177,7 +176,7 @@ class ClaudeSessionStrategyTest {
     fun restoreFallsBackToTheLaunchArgumentsWithoutAnyState() {
         val strategy = newStrategy()
 
-        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab))
     }
 
     @Test
@@ -185,7 +184,7 @@ class ClaudeSessionStrategyTest {
         val strategy = newStrategy()
         writeTranscript(strategy.transcriptFile(tab.copy(projectPath = "/Users/falleng0d/Projects/Other")))
 
-        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab))
     }
 
     @Test
@@ -194,11 +193,11 @@ class ClaudeSessionStrategyTest {
         val transcript = temporaryFolder.newFile("combined.jsonl").toPath()
 
         val everyForm = mutableListOf(strategy.launchArguments(tab))
-        everyForm.add(strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+        everyForm.add(strategy.restoreArguments(tab))
         writeTranscript(strategy.transcriptFile(tab))
-        everyForm.add(strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+        everyForm.add(strategy.restoreArguments(tab))
         writeState(strategy.stateFile(tab), reportedState(transcript.toString()))
-        everyForm.add(strategy.restoreArguments(tab, RememberedSession(tabUuid)))
+        everyForm.add(strategy.restoreArguments(tab))
 
         for (arguments in everyForm) {
             assertFalse(
@@ -206,6 +205,49 @@ class ClaudeSessionStrategyTest {
                 arguments.contains("--resume") && arguments.contains("--session-id"),
             )
         }
+    }
+
+    @Test
+    fun aUserOwnedSettingsFlagLeavesTheHookOutOfTheLaunch() {
+        val strategy = newStrategy(hookAllowed = false)
+
+        assertEquals(listOf("--session-id", tabUuid), strategy.launchArguments(tab))
+    }
+
+    @Test
+    fun aUserOwnedSettingsFlagFallsBackToTheSessionOfTheTabItself() {
+        val strategy = newStrategy(hookAllowed = false)
+        val transcript = temporaryFolder.newFile("owned.jsonl").toPath()
+        writeState(strategy.stateFile(tab), reportedState(transcript.toString()))
+
+        assertEquals(listOf("--session-id", tabUuid), strategy.restoreArguments(tab))
+
+        writeTranscript(strategy.transcriptFile(tab))
+        assertEquals(listOf("--resume", tabUuid), strategy.restoreArguments(tab))
+    }
+
+    @Test
+    fun aUserOwnedSettingsFlagKeepsTheStateDirectoryOutOfTheWay() {
+        val strategy = newStrategy(hookAllowed = false)
+
+        strategy.prepareLaunch(tab)
+        runBlocking { strategy.cleanUp(tab) }
+
+        assertFalse(Files.exists(stateDirectory()))
+    }
+
+    @Test
+    fun aWindowsShellGetsNoInlineSettingsDocument() {
+        val environment = AgentSessionEnvironment(
+            homeDirectory = temporaryFolder.root.toPath().resolve("home"),
+            stateDirectory = stateDirectory(),
+            bundledDirectory = temporaryFolder.root.toPath().resolve("integrations"),
+            claudeConfigDir = claudeHome().toString(),
+            theShellIsPosix = false,
+        )
+        val strategy = AgentSessionStrategies.forKind(AgentCliKind.CLAUDE, environment)
+
+        assertEquals(listOf("--session-id", tabUuid), strategy.launchArguments(tab))
     }
 
     @Test
@@ -222,7 +264,7 @@ class ClaudeSessionStrategyTest {
         val strategy = newStrategy()
 
         strategy.launchArguments(tab)
-        strategy.restoreArguments(tab, RememberedSession(tabUuid))
+        strategy.restoreArguments(tab)
 
         assertFalse(Files.exists(stateDirectory()))
     }
@@ -233,8 +275,8 @@ class ClaudeSessionStrategyTest {
         writeState(strategy.stateFile(tab), """{"session_id":"$reportedSessionId"}""")
 
         runBlocking {
-            strategy.cleanUp(tab, RememberedSession(tabUuid))
-            strategy.cleanUp(tab, RememberedSession(tabUuid))
+            strategy.cleanUp(tab)
+            strategy.cleanUp(tab)
         }
 
         assertFalse(Files.exists(strategy.stateFile(tab)))
@@ -288,7 +330,8 @@ class ClaudeSessionStrategyTest {
         assertEquals(home.resolve(".claude"), environment.claudeHome)
     }
 
-    private fun newStrategy(): ClaudeSessionStrategy = ClaudeSessionStrategy(claudeHome(), stateDirectory())
+    private fun newStrategy(hookAllowed: Boolean = true): ClaudeSessionStrategy =
+        ClaudeSessionStrategy(claudeHome(), stateDirectory(), hookAllowed)
 
     private fun expectedSettings(stateFile: Path): String = claudeHookSettings(stateFile)
 

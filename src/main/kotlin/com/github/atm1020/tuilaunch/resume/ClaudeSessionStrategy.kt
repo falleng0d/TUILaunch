@@ -4,8 +4,6 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
-import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
@@ -41,23 +39,25 @@ object ClaudeProjectPath {
 class ClaudeSessionStrategy(
     private val claudeHome: Path,
     private val stateDirectory: Path,
+    private val hookAllowed: Boolean = true,
 ) : AgentSessionStrategy {
     override fun prepareLaunch(tab: TabIdentity) {
+        if (!hookAllowed) return
         AgentStateFiles.createDirectoryFor(stateFile(tab))
     }
 
     override fun launchArguments(tab: TabIdentity): List<String> =
         settingsArguments(tab) + listOf(SESSION_ID_FLAG, tab.tabUuid)
 
-    override fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String> {
-        val settings = settingsArguments(tab)
+    override fun restoreArguments(tab: TabIdentity): List<String> {
+        if (!hookAllowed) return theSessionOfTheTabItself(tab)
         val reported = readSessionId(stateFile(tab))
-        if (reported != null) return settings + listOf(RESUME_FLAG, reported)
-        if (Files.isRegularFile(transcriptFile(tab))) return settings + listOf(RESUME_FLAG, tab.tabUuid)
-        return settings + listOf(SESSION_ID_FLAG, tab.tabUuid)
+        if (reported != null) return settingsArguments(tab) + listOf(RESUME_FLAG, reported)
+        return settingsArguments(tab) + theSessionOfTheTabItself(tab)
     }
 
-    override suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
+    override suspend fun cleanUp(tab: TabIdentity) {
+        if (!hookAllowed) return
         AgentStateFiles.delete(stateFile(tab))
     }
 
@@ -65,19 +65,7 @@ class ClaudeSessionStrategy(
         stateDirectory.resolve(DIRECTORY_NAME).resolve("${tab.tabUuid}$STATE_FILE_SUFFIX")
 
     fun readSessionId(stateFile: Path): String? {
-        val text = try {
-            if (!Files.isRegularFile(stateFile)) return null
-            Files.readString(stateFile)
-        } catch (_: IOException) {
-            return null
-        }
-        val root = try {
-            JsonParser.parseString(text)
-        } catch (_: RuntimeException) {
-            return null
-        }
-        if (!root.isJsonObject) return null
-        val record = root.asJsonObject
+        val record = AgentStateFiles.readJsonObject(stateFile) ?: return null
         if (!theTranscriptIsStillThere(record)) return null
         return record.nonBlankString(SESSION_ID_FIELD)
     }
@@ -87,8 +75,17 @@ class ClaudeSessionStrategy(
         .resolve(ClaudeProjectPath.escape(tab.projectPath))
         .resolve("${tab.tabUuid}.jsonl")
 
-    private fun settingsArguments(tab: TabIdentity): List<String> =
-        listOf(SETTINGS_FLAG, settingsJsonFor(stateFile(tab)))
+    private fun settingsArguments(tab: TabIdentity): List<String> {
+        if (!hookAllowed) return emptyList()
+        return listOf(SETTINGS_FLAG, settingsJsonFor(stateFile(tab)))
+    }
+
+    private fun theSessionOfTheTabItself(tab: TabIdentity): List<String> =
+        if (Files.isRegularFile(transcriptFile(tab))) {
+            listOf(RESUME_FLAG, tab.tabUuid)
+        } else {
+            listOf(SESSION_ID_FLAG, tab.tabUuid)
+        }
 
     private fun theTranscriptIsStillThere(record: JsonObject): Boolean {
         val transcriptPath = record.nonBlankString(TRANSCRIPT_PATH_FIELD) ?: return true

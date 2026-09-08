@@ -18,7 +18,8 @@ export default {
         const sessionId = route.params && route.params.sessionID;
         if (typeof sessionId !== "string" || !sessionId.startsWith("ses_") || sessionId === last) return;
         if (api.state.ready && api.state.session.get(sessionId)?.parentID) return;
-        writeFileSync(staging, `${JSON.stringify({ sessionId, updatedAt: Date.now() })}\n`, "utf8");
+        const payload = JSON.stringify({ sessionId, updatedAt: new Date().toISOString() });
+        writeFileSync(staging, `${payload}\n`, "utf8");
         renameSync(staging, target);
         last = sessionId;
       } catch {
@@ -28,7 +29,9 @@ export default {
 
     const timer = setInterval(record, POLL_MS);
     if (timer.unref) timer.unref();
-    api.lifecycle.onDispose(() => clearInterval(timer));
     record();
+    try {
+      api.lifecycle.onDispose(() => clearInterval(timer));
+    } catch {}
   },
 };

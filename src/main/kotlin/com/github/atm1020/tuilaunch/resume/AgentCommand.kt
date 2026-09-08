@@ -7,7 +7,7 @@ class AgentCommand private constructor(
     val wrappedByHeadroom: Boolean,
     val userSelectsASession: Boolean,
     val chainsOtherCommands: Boolean,
-    val loadsATrustedExtension: Boolean,
+    val bringsItsOwnHookFlag: Boolean,
     val setsASessionVariableItself: Boolean,
     private val programStart: Int,
 ) {
@@ -27,7 +27,7 @@ class AgentCommand private constructor(
             wrappedByHeadroom = wrappedByHeadroom,
             userSelectsASession = userSelectsASession,
             chainsOtherCommands = chainsOtherCommands,
-            loadsATrustedExtension = loadsATrustedExtension,
+            bringsItsOwnHookFlag = bringsItsOwnHookFlag,
             setsASessionVariableItself = setsASessionVariableItself,
             programStart = programStart + prefix.length,
         )
@@ -47,6 +47,7 @@ class AgentCommand private constructor(
         private const val HEADROOM_PROGRAM = "headroom"
         private const val HEADROOM_WRAP_SUBCOMMAND = "wrap"
         private const val ENV_PROGRAM = "env"
+        private const val TRUSTED_EXTENSION_FLAG = "--trusted-extension"
         private val ASSIGNMENT = Regex("^[A-Za-z_][A-Za-z0-9_]*=")
         private val SHELL_OPERATORS = setOf(";", "&&", "||", "|", "&", ">", ">>", "<")
 
@@ -65,7 +66,10 @@ class AgentCommand private constructor(
             ),
         )
 
-        private val TRUSTED_EXTENSION_FLAGS = mapOf(AgentCliKind.OMP to listOf("--trusted-extension"))
+        private val HOOK_FLAGS_THE_USER_MAY_OWN = mapOf(
+            AgentCliKind.CLAUDE to listOf(ClaudeSessionStrategy.SETTINGS_FLAG),
+            AgentCliKind.OMP to listOf(TRUSTED_EXTENSION_FLAG),
+        )
 
         private val SESSION_VARIABLES = mapOf(
             AgentCliKind.OPENCODE to listOf(
@@ -90,8 +94,8 @@ class AgentCommand private constructor(
                 userSelectsASession = kind != null &&
                     anyArgumentMatches(arguments, SESSION_SELECTORS.getValue(kind)),
                 chainsOtherCommands = kind != null && chainsOtherCommands(command, arguments),
-                loadsATrustedExtension = kind != null &&
-                    anyArgumentMatches(arguments, TRUSTED_EXTENSION_FLAGS[kind].orEmpty()),
+                bringsItsOwnHookFlag = kind != null &&
+                    anyArgumentMatches(arguments, HOOK_FLAGS_THE_USER_MAY_OWN[kind].orEmpty()),
                 setsASessionVariableItself = kind != null &&
                     anyAssignmentMatches(texts.take(programIndex), SESSION_VARIABLES[kind].orEmpty()),
                 programStart = tokens.getOrNull(programIndex)?.start ?: command.length,

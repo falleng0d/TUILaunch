@@ -1,9 +1,6 @@
 package com.github.atm1020.tuilaunch.resume
 
-import com.google.gson.JsonParser
 import com.intellij.openapi.util.SystemInfo
-import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.Path
 
 class OpenCodeSessionStrategy(
@@ -21,7 +18,7 @@ class OpenCodeSessionStrategy(
 
     override fun launchArguments(tab: TabIdentity): List<String> = emptyList()
 
-    override fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String> {
+    override fun restoreArguments(tab: TabIdentity): List<String> {
         if (!theShellTakesAnEnvironmentPrefix) return emptyList()
         val reported = readSessionId(stateFile(tab)) ?: return emptyList()
         return listOf(SESSION_FLAG, reported)
@@ -29,13 +26,14 @@ class OpenCodeSessionStrategy(
 
     override fun launchEnvironment(tab: TabIdentity): Map<String, String> {
         if (!theShellTakesAnEnvironmentPrefix) return emptyMap()
+        if (!BundledIntegrationFiles.areOnDisk(tuiConfigFile(), sessionTrackerFile())) return emptyMap()
         return linkedMapOf(
             TUI_CONFIG_VARIABLE to tuiConfigFile().toAbsolutePath().toString(),
             STATE_FILE_VARIABLE to stateFile(tab).toAbsolutePath().toString(),
         )
     }
 
-    override suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
+    override suspend fun cleanUp(tab: TabIdentity) {
         AgentStateFiles.delete(stateFile(tab))
     }
 
@@ -48,19 +46,8 @@ class OpenCodeSessionStrategy(
         bundledDirectory.resolve(BUNDLED_SUBDIRECTORY).resolve(SESSION_TRACKER_FILE_NAME)
 
     fun readSessionId(stateFile: Path): String? {
-        val text = try {
-            if (!Files.isRegularFile(stateFile)) return null
-            Files.readString(stateFile)
-        } catch (_: IOException) {
-            return null
-        }
-        val root = try {
-            JsonParser.parseString(text)
-        } catch (_: RuntimeException) {
-            return null
-        }
-        if (!root.isJsonObject) return null
-        val reported = root.asJsonObject.nonBlankString(SESSION_ID_FIELD) ?: return null
+        val record = AgentStateFiles.readJsonObject(stateFile) ?: return null
+        val reported = record.nonBlankString(SESSION_ID_FIELD) ?: return null
         return reported.takeIf { SESSION_ID.matches(it) }
     }
 

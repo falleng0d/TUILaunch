@@ -135,31 +135,46 @@ class AgentCommandTest {
     }
 
     @Test
-    fun aTrustedExtensionIsDetectedInEverySpelling() {
+    fun aHookFlagTheUserOwnsIsDetectedInEverySpelling() {
         for (command in listOf(
             "omp --trusted-extension /x/y.ts",
             "omp --trusted-extension=/x/y.ts",
             "omp --model opus --trusted-extension /x/y.ts",
             "headroom wrap omp --trusted-extension /x",
             "headroom wrap omp --no-serena -- --trusted-extension /x",
+            "claude --settings /x/team.json",
+            "claude --settings=/x/team.json",
+            "claude --model opus --settings /x/team.json",
+            "headroom wrap claude --settings /x/team.json",
+            "headroom wrap claude --no-serena -- --settings /x/team.json",
         )) {
-            assertTrue(command, AgentCommand.parse(command).loadsATrustedExtension)
+            assertTrue(command, AgentCommand.parse(command).bringsItsOwnHookFlag)
             assertFalse(command, AgentCommand.parse(command).userSelectsASession)
             assertTrue(command, AgentCommand.parse(command).isManageable)
         }
     }
 
     @Test
-    fun anOrdinaryExtensionIsNotATrustedOne() {
+    fun aHookFlagOfAnotherCliIsNotDetected() {
         for (command in listOf(
             "omp -e foo.ts",
             "omp --hook /x/y.js",
             "omp",
+            "omp --settings /x/team.json",
             "claude --trusted-extension /x/y.ts",
+            "claude --model opus",
             "lazygit --trusted-extension /x/y.ts",
+            "lazygit --settings /x/team.json",
         )) {
-            assertFalse(command, AgentCommand.parse(command).loadsATrustedExtension)
+            assertFalse(command, AgentCommand.parse(command).bringsItsOwnHookFlag)
         }
+    }
+
+    @Test
+    fun aDecoratedCommandKeepsTheHookFlagItAlreadyHad() {
+        val decorated = AgentCommand.parse("claude --settings /x/team.json").withEnvironment(mapOf("A" to "b"))
+
+        assertTrue(decorated.bringsItsOwnHookFlag)
     }
 
     @Test

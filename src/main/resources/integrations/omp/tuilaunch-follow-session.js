@@ -5,13 +5,19 @@ const MARKER = "--tuilaunch-";
 const STATE_FILE = "tuilaunch-active.json";
 const EVENTS = ["session_start", "session_switch", "session_branch", "session_tree", "agent_end"];
 
+let ownDirectory = null;
+
 function writeActiveSession(ctx) {
   try {
     const sessionDir = ctx.sessionManager.getSessionDir();
-    if (!sessionDir || !basename(sessionDir).includes(MARKER)) return;
+    if (!sessionDir) return;
+    if (ownDirectory === null) {
+      if (!basename(sessionDir).includes(MARKER)) return;
+      ownDirectory = sessionDir;
+    }
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile) return;
-    const target = join(sessionDir, STATE_FILE);
+    const target = join(ownDirectory, STATE_FILE);
     const staging = `${target}.tmp`;
     const payload = JSON.stringify({
       sessionFile,
@@ -25,6 +31,8 @@ function writeActiveSession(ctx) {
 
 export default function tuilaunchFollowSession(pi) {
   for (const event of EVENTS) {
-    pi.on(event, (_event, ctx) => writeActiveSession(ctx));
+    try {
+      pi.on(event, (_event, ctx) => writeActiveSession(ctx));
+    } catch {}
   }
 }
