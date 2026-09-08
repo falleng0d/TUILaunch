@@ -4,7 +4,6 @@ import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
-import java.net.ServerSocket
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -24,7 +23,10 @@ interface AgentSessionStrategy {
 
     fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String>
 
-    suspend fun afterLaunch(tab: TabIdentity, remembered: RememberedSession): String? = null
+    fun launchEnvironment(tab: TabIdentity): Map<String, String> = emptyMap()
+
+    fun restoreEnvironment(tab: TabIdentity, remembered: RememberedSession): Map<String, String> =
+        launchEnvironment(tab)
 
     suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
     }
@@ -114,17 +116,10 @@ data class AgentSessionEnvironment(
 }
 
 object AgentSessionStrategies {
-    fun forKind(
-        kind: AgentCliKind,
-        environment: AgentSessionEnvironment,
-        freePort: () -> Int = ::allocateFreePort,
-        openCodeApi: (Int) -> OpenCodeApi = { port -> HttpOpenCodeApi(port) },
-    ): AgentSessionStrategy = when (kind) {
+    fun forKind(kind: AgentCliKind, environment: AgentSessionEnvironment): AgentSessionStrategy = when (kind) {
         AgentCliKind.CLAUDE -> ClaudeSessionStrategy(environment.claudeHome, environment.stateDirectory)
         AgentCliKind.CODEX -> CodexSessionStrategy(environment.stateDirectory)
-        AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(freePort, openCodeApi)
+        AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(environment.stateDirectory, environment.bundledDirectory)
         AgentCliKind.OMP -> OmpSessionStrategy(environment.ompRoot, environment.bundledDirectory)
     }
-
-    fun allocateFreePort(): Int = ServerSocket(0).use { it.localPort }
 }

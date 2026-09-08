@@ -22,6 +22,16 @@
   changed last, rather than the one whose name sorts highest, so a session you resumed and kept working in is
   picked again. A command that carries `--trusted-extension` is launched without the hook, because omp refuses
   those two flags together.
+- A reopened `opencode` tab now comes back to the session you were last in as well, and opencode is no longer
+  started with `--port`/`--hostname`: the plugin neither creates, selects nor deletes sessions through its
+  server any more. The launch puts `OPENCODE_TUI_CONFIG` and `TUILAUNCH_OPENCODE_STATE` in front of the
+  program instead, before `headroom` when the command is wrapped, which loads a small TUI plugin of its own from
+  `<IDE system directory>/TUILaunch/integrations/opencode/` and records the session the TUI is showing into the
+  tab's state file, so a switch in the session list or a `/new` is followed and a reopened tab starts with
+  `--session <session id>`. Nothing under `~/.config/opencode` is written or read. A tab you never prompted in
+  reported no session and comes back fresh, and a command that sets `OPENCODE_TUI_CONFIG` or
+  `TUILAUNCH_OPENCODE_STATE` itself is launched exactly as configured, as is every opencode command on a shell
+  that reads no environment prefix, which is `cmd` and PowerShell on Windows.
 
 ## [0.10.0] - 2026-09-08
 

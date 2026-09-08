@@ -4,233 +4,310 @@ import com.github.atm1020.tuilaunch.resume.AgentCliKind
 import com.github.atm1020.tuilaunch.resume.AgentCommand
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategies
-import com.github.atm1020.tuilaunch.resume.OpenCodeApi
 import com.github.atm1020.tuilaunch.resume.OpenCodeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.RememberedSession
+import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
-import java.io.IOException
+import org.junit.rules.TemporaryFolder
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.FileTime
+
+private const val REPORTED_SESSION_ID = "ses_8a3f1c0d9b2e4a6c8d0f2b4a6c"
 
 class OpenCodeSessionStrategyTest {
 
+    @get:Rule
+    val temporaryFolder = TemporaryFolder()
+
+    private val tabUuid = "8b2c7d40-3e19-4c58-9f6a-1d0e5b7c2a93"
+
     private val tab = TabIdentity(
-        tabUuid = "8b2c7d40-3e19-4c58-9f6a-1d0e5b7c2a93",
+        tabUuid = tabUuid,
         projectPath = "/Users/falleng0d/Projects/TUILaunch",
         projectHash = "TUILaunch.b2c3d4",
     )
 
     @Test
-    fun launchArgumentsBindTheEmbeddedServerToLoopback() {
-        val strategy = OpenCodeSessionStrategy(freePort = { 45123 })
+    fun theBundledFilesAndTheStateFileSitInDirectoriesOfTheirOwn() {
+        val strategy = newStrategy()
 
+        assertEquals(bundledDirectory().resolve("opencode").resolve("tui.json"), strategy.tuiConfigFile())
         assertEquals(
-            listOf("--port", "45123", "--hostname", "127.0.0.1"),
-            strategy.launchArguments(tab),
+            bundledDirectory().resolve("opencode").resolve("tuilaunch-session-tracker.js"),
+            strategy.sessionTrackerFile(),
         )
-    }
-
-    @Test
-    fun theChosenPortIsReadableAfterTheArgumentsAreBuilt() {
-        val strategy = OpenCodeSessionStrategy(freePort = { 45123 })
-
-        assertNull(strategy.lastPort)
-
-        strategy.launchArguments(tab)
-
-        assertEquals(45123, strategy.lastPort)
-    }
-
-    @Test
-    fun everyLaunchAsksTheProviderForAFreshPort() {
-        val ports = listOf(45123, 45124).iterator()
-        val strategy = OpenCodeSessionStrategy(freePort = { ports.next() })
-
-        assertEquals(listOf("--port", "45123", "--hostname", "127.0.0.1"), strategy.launchArguments(tab))
-        assertEquals(listOf("--port", "45124", "--hostname", "127.0.0.1"), strategy.launchArguments(tab))
-        assertEquals(45124, strategy.lastPort)
-    }
-
-    @Test
-    fun restoreAddsTheRememberedSessionId() {
-        val strategy = OpenCodeSessionStrategy(freePort = { 45123 })
-
         assertEquals(
-            listOf("--port", "45123", "--hostname", "127.0.0.1", "--session", "ses_9f1c2d"),
-            strategy.restoreArguments(tab, RememberedSession("ses_9f1c2d")),
+            stateDirectory().resolve("opencode").resolve("$tabUuid.json"),
+            strategy.stateFile(tab),
         )
     }
 
     @Test
-    fun restoreWithoutAnIdFallsBackToTheLaunchArguments() {
-        val strategy = OpenCodeSessionStrategy(freePort = { 45123 })
-        val expected = listOf("--port", "45123", "--hostname", "127.0.0.1")
+    fun prepareLaunchWritesBothBundledFilesAndTheStateDirectory() {
+        val strategy = newStrategy()
 
-        assertEquals(expected, strategy.restoreArguments(tab, RememberedSession()))
-        assertEquals(expected, strategy.restoreArguments(tab, RememberedSession("   ")))
-    }
+        strategy.prepareLaunch(tab)
 
-    @Test
-    fun theWrappedRestoreCommandPassesThePortThroughHeadroom() {
-        val strategy = OpenCodeSessionStrategy(freePort = { 45123 })
-
-        assertEquals(
-            "headroom wrap opencode --no-serena -- --port 45123 --hostname 127.0.0.1 --session ses_9f1c2d",
-            AgentCommand.parse("headroom wrap opencode --no-serena")
-                .withArguments(strategy.restoreArguments(tab, RememberedSession("ses_9f1c2d"))),
+        assertArrayEquals(
+            bundledResource(OpenCodeSessionStrategy.TUI_CONFIG_RESOURCE),
+            Files.readAllBytes(strategy.tuiConfigFile()),
         )
-    }
-
-    @Test
-    fun theFactoryBuildsAnOpenCodeStrategyWithTheGivenPortProvider() {
-        val environment = AgentSessionEnvironment(
-            homeDirectory = Path.of("/tmp/tuilaunch-test-home"),
-            stateDirectory = Path.of("/tmp/tuilaunch-test-state"),
-            bundledDirectory = Path.of("/tmp/tuilaunch-test-integrations"),
+        assertArrayEquals(
+            bundledResource(OpenCodeSessionStrategy.SESSION_TRACKER_RESOURCE),
+            Files.readAllBytes(strategy.sessionTrackerFile()),
         )
-
-        val strategy = AgentSessionStrategies.forKind(AgentCliKind.OPENCODE, environment, freePort = { 45123 })
-
-        assertEquals(listOf("--port", "45123", "--hostname", "127.0.0.1"), strategy.launchArguments(tab))
+        assertTrue(Files.isDirectory(strategy.stateFile(tab).parent))
     }
 
     @Test
-    fun theDefaultPortProviderHandsOutAUsablePort() {
-        val port = AgentSessionStrategies.allocateFreePort()
-
-        assertTrue(port.toString(), port in 1..65535)
-    }
-
-    @Test
-    fun theSessionIsCreatedAsSoonAsTheServerAnswers() {
-        val api = RecordingOpenCodeApi(healthyFromCall = 3)
-        val strategy = newStrategy(api)
-        strategy.launchArguments(tab)
-
-        val sessionId = runBlocking { strategy.afterLaunch(tab, RememberedSession()) }
-
-        assertEquals(CREATED_OPENCODE_SESSION, sessionId)
-        assertEquals(3, api.healthCalls)
-        assertEquals(listOf(CreatedSession(tab.projectPath, tab.tabUuid)), api.creations)
-        assertEquals(listOf(CREATED_OPENCODE_SESSION), api.selections)
-    }
-
-    @Test
-    fun aServerThatNeverAnswersLeavesTheTabWithoutASession() {
-        val api = RecordingOpenCodeApi(healthyFromCall = RecordingOpenCodeApi.NEVER_HEALTHY)
-        val strategy = newStrategy(api)
-        strategy.launchArguments(tab)
-
-        assertNull(runBlocking { strategy.afterLaunch(tab, RememberedSession()) })
-        assertTrue(api.creations.isEmpty())
-        assertTrue(api.selections.isEmpty())
-    }
-
-    @Test
-    fun aTabThatAlreadyKnowsItsSessionAsksTheServerNothing() {
-        val api = RecordingOpenCodeApi()
-        val strategy = newStrategy(api)
-        strategy.restoreArguments(tab, RememberedSession("ses_9f1c2d"))
-
-        assertNull(runBlocking { strategy.afterLaunch(tab, RememberedSession("ses_9f1c2d")) })
-        assertEquals(0, api.healthCalls)
-        assertTrue(api.creations.isEmpty())
-    }
-
-    @Test
-    fun aLaunchThatWasNeverBuiltCreatesNothing() {
-        val api = RecordingOpenCodeApi()
-
-        assertNull(runBlocking { newStrategy(api).afterLaunch(tab, RememberedSession()) })
-        assertEquals(0, api.healthCalls)
-    }
-
-    @Test
-    fun aSessionThatFailsToOpenLeavesTheTabWithoutOne() {
-        val api = RecordingOpenCodeApi(failure = IOException("the server went away"))
-        val strategy = newStrategy(api)
-        strategy.launchArguments(tab)
-
-        assertNull(runBlocking { strategy.afterLaunch(tab, RememberedSession()) })
-        assertEquals(1, api.creations.size)
-        assertTrue(api.selections.isEmpty())
-    }
-
-    @Test
-    fun closingATabDiscardsASessionNobodyPromptedIn() {
-        val api = RecordingOpenCodeApi(messages = 0)
-        val strategy = newStrategy(api)
-        strategy.launchArguments(tab)
-
-        runBlocking { strategy.cleanUp(tab, RememberedSession(CREATED_OPENCODE_SESSION)) }
-
-        assertEquals(listOf(CREATED_OPENCODE_SESSION), api.messageCounts)
-        assertEquals(listOf(CREATED_OPENCODE_SESSION), api.deletions)
-    }
-
-    @Test
-    fun closingATabKeepsASessionThatHasMessages() {
-        val api = RecordingOpenCodeApi(messages = 2)
-        val strategy = newStrategy(api)
-        strategy.launchArguments(tab)
-
-        runBlocking { strategy.cleanUp(tab, RememberedSession(CREATED_OPENCODE_SESSION)) }
-
-        assertEquals(listOf(CREATED_OPENCODE_SESSION), api.messageCounts)
-        assertTrue(api.deletions.isEmpty())
-    }
-
-    @Test
-    fun cleanUpAsksNothingWithoutASessionOrAPort() {
-        val api = RecordingOpenCodeApi()
-        val started = newStrategy(api)
-        started.launchArguments(tab)
-
-        runBlocking {
-            started.cleanUp(tab, RememberedSession())
-            started.cleanUp(tab, RememberedSession("   "))
-            newStrategy(api).cleanUp(tab, RememberedSession(CREATED_OPENCODE_SESSION))
+    fun prepareLaunchLeavesBundledFilesThatAreAlreadyCurrentAlone() {
+        val strategy = newStrategy()
+        val untouched = FileTime.fromMillis(1_000_000)
+        listOf(
+            strategy.tuiConfigFile() to OpenCodeSessionStrategy.TUI_CONFIG_RESOURCE,
+            strategy.sessionTrackerFile() to OpenCodeSessionStrategy.SESSION_TRACKER_RESOURCE,
+        ).forEach { (file, resource) ->
+            Files.createDirectories(file.parent)
+            Files.write(file, bundledResource(resource))
+            Files.setLastModifiedTime(file, untouched)
         }
 
-        assertTrue(api.messageCounts.isEmpty())
-        assertTrue(api.deletions.isEmpty())
+        strategy.prepareLaunch(tab)
+
+        assertEquals(untouched, Files.getLastModifiedTime(strategy.tuiConfigFile()))
+        assertEquals(untouched, Files.getLastModifiedTime(strategy.sessionTrackerFile()))
     }
 
     @Test
-    fun aServerThatRefusesToAnswerDoesNotBreakTheClose() {
-        val api = RecordingOpenCodeApi(failure = IOException("the server went away"))
-        val strategy = newStrategy(api)
-        strategy.launchArguments(tab)
+    fun prepareLaunchRewritesABundledFileThatDiffers() {
+        val strategy = newStrategy()
+        val tracker = strategy.sessionTrackerFile()
+        Files.createDirectories(tracker.parent)
+        Files.writeString(tracker, "export default {};\n")
 
-        runBlocking { strategy.cleanUp(tab, RememberedSession(CREATED_OPENCODE_SESSION)) }
+        strategy.prepareLaunch(tab)
 
-        assertEquals(listOf(CREATED_OPENCODE_SESSION), api.messageCounts)
-        assertTrue(api.deletions.isEmpty())
+        assertArrayEquals(
+            bundledResource(OpenCodeSessionStrategy.SESSION_TRACKER_RESOURCE),
+            Files.readAllBytes(tracker),
+        )
+        assertFalse(Files.exists(tracker.resolveSibling("${tracker.fileName}.tmp")))
     }
 
     @Test
-    fun theApiIsReleasedAfterEveryPieceOfServerWork() {
-        val api = RecordingOpenCodeApi(messages = 0)
-        val strategy = newStrategy(api)
-        strategy.launchArguments(tab)
-
-        runBlocking { strategy.afterLaunch(tab, RememberedSession()) }
-
-        assertEquals(1, api.closeCalls)
-
-        runBlocking { strategy.cleanUp(tab, RememberedSession(CREATED_OPENCODE_SESSION)) }
-
-        assertEquals(2, api.closeCalls)
+    fun theTuiConfigLoadsTheTrackerNextToIt() {
+        assertEquals(
+            """{"plugin":["./tuilaunch-session-tracker.js"]}""",
+            String(bundledResource(OpenCodeSessionStrategy.TUI_CONFIG_RESOURCE)).trim(),
+        )
     }
 
-    private fun newStrategy(api: OpenCodeApi): OpenCodeSessionStrategy = OpenCodeSessionStrategy(
-        freePort = { 45123 },
-        apiFactory = { api },
-        pollIntervalMillis = 5,
-        startupTimeoutMillis = 150,
-    )
+    @Test
+    fun theTrackerFollowsTheDisplayedRootSessionAndWritesThroughARename() {
+        val tracker = String(bundledResource(OpenCodeSessionStrategy.SESSION_TRACKER_RESOURCE))
+
+        for (expected in listOf(
+            """id: "tuilaunch-session-tracker"""",
+            "process.env.TUILAUNCH_OPENCODE_STATE",
+            "api.route.current",
+            """route.name !== "session"""",
+            """sessionId.startsWith("ses_")""",
+            "api.state.session.get(sessionId)?.parentID",
+            "const POLL_MS = 500;",
+            "setInterval(record, POLL_MS)",
+            "timer.unref",
+            "api.lifecycle.onDispose",
+            "renameSync(staging, target)",
+        )) {
+            assertTrue(expected, tracker.contains(expected))
+        }
+    }
+
+    @Test
+    fun aShellThatReadsNoEnvironmentPrefixLeavesTheCommandAlone() {
+        val strategy = OpenCodeSessionStrategy(stateDirectory(), bundledDirectory(), false)
+        writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
+
+        strategy.prepareLaunch(tab)
+
+        assertEquals(emptyMap<String, String>(), strategy.launchEnvironment(tab))
+        assertEquals(emptyMap<String, String>(), strategy.restoreEnvironment(tab, RememberedSession()))
+        assertEquals(emptyList<String>(), strategy.restoreArguments(tab, RememberedSession()))
+        assertFalse(Files.exists(strategy.tuiConfigFile()))
+        assertFalse(Files.exists(strategy.sessionTrackerFile()))
+    }
+
+    @Test
+    fun theEnvironmentPointsOpenCodeAtTheBundledConfigAndTheTabStateFile() {
+        val strategy = newStrategy()
+
+        val environment = strategy.launchEnvironment(tab)
+
+        assertEquals(
+            listOf("OPENCODE_TUI_CONFIG", "TUILAUNCH_OPENCODE_STATE"),
+            environment.keys.toList(),
+        )
+        assertEquals(
+            listOf(strategy.tuiConfigFile().toString(), strategy.stateFile(tab).toString()),
+            environment.values.toList(),
+        )
+        assertEquals(environment, strategy.restoreEnvironment(tab, RememberedSession()))
+    }
+
+    @Test
+    fun launchAddsNoArgumentsAtAll() {
+        assertEquals(emptyList<String>(), newStrategy().launchArguments(tab))
+    }
+
+    @Test
+    fun restoreOpensTheSessionTheTrackerReported() {
+        val strategy = newStrategy()
+        writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID","updatedAt":1757328131000}""" + "\n")
+
+        assertEquals(
+            listOf("--session", REPORTED_SESSION_ID),
+            strategy.restoreArguments(tab, RememberedSession()),
+        )
+        assertEquals(REPORTED_SESSION_ID, strategy.readSessionId(strategy.stateFile(tab)))
+    }
+
+    @Test
+    fun anIdThatIsNotASessionIdIsIgnored() {
+        val strategy = newStrategy()
+        val rejected = listOf(
+            "dummy",
+            "ses_8a3f1c0d9b2e",
+            "ses_8a3f1c0d9b2e4a6c8d0f2b4a6c7",
+            "ses_8a3f-c0d9b2e4a6c8d0f2b4a6c",
+            "8a3f1c0d9b2e4a6c8d0f2b4a6c",
+        )
+        for (reported in rejected) {
+            writeState(strategy, """{"sessionId":"$reported"}""")
+
+            assertNull(reported, strategy.readSessionId(strategy.stateFile(tab)))
+            assertEquals(reported, emptyList<String>(), strategy.restoreArguments(tab, RememberedSession()))
+        }
+    }
+
+    @Test
+    fun aStateFileThatIsNotAUsableRecordIsIgnored() {
+        val strategy = newStrategy()
+        val rejected = listOf(
+            "",
+            "   ",
+            """{"sessionId":""",
+            """["$REPORTED_SESSION_ID"]""",
+            "{}",
+            """{"sessionId":""}""",
+            """{"sessionId":42}""",
+        )
+        for (content in rejected) {
+            writeState(strategy, content)
+
+            assertNull(content, strategy.readSessionId(strategy.stateFile(tab)))
+            assertEquals(content, emptyList<String>(), strategy.restoreArguments(tab, RememberedSession()))
+        }
+    }
+
+    @Test
+    fun aTabWithoutAStateFileRestoresLikeAFreshOne() {
+        val strategy = newStrategy()
+
+        assertNull(strategy.readSessionId(strategy.stateFile(tab)))
+        assertEquals(strategy.launchArguments(tab), strategy.restoreArguments(tab, RememberedSession()))
+        assertEquals(strategy.launchEnvironment(tab), strategy.restoreEnvironment(tab, RememberedSession()))
+    }
+
+    @Test
+    fun aRememberedIdIsNeverTrustedOverTheStateFile() {
+        val strategy = newStrategy()
+
+        assertEquals(
+            emptyList<String>(),
+            strategy.restoreArguments(tab, RememberedSession(REPORTED_SESSION_ID)),
+        )
+    }
+
+    @Test
+    fun closingATabDeletesItsStateFile() {
+        val strategy = newStrategy()
+        writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
+
+        runBlocking { strategy.cleanUp(tab, RememberedSession()) }
+
+        assertFalse(Files.exists(strategy.stateFile(tab)))
+    }
+
+    @Test
+    fun closingATabThatWroteNothingIsHarmless() {
+        val strategy = newStrategy()
+
+        runBlocking { strategy.cleanUp(tab, RememberedSession()) }
+
+        assertFalse(Files.exists(strategy.stateFile(tab)))
+    }
+
+    @Test
+    fun theWrappedRestoreCommandCarriesTheVariablesAndTheSessionThroughHeadroom() {
+        val strategy = newStrategy()
+        writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
+
+        val expectedConfig = ShellWords.quote(strategy.tuiConfigFile().toString())
+        val expectedState = ShellWords.quote(strategy.stateFile(tab).toString())
+
+        assertEquals(
+            "OPENCODE_TUI_CONFIG=$expectedConfig TUILAUNCH_OPENCODE_STATE=$expectedState " +
+                "headroom wrap opencode --no-serena -- --session $REPORTED_SESSION_ID",
+            AgentCommand.parse("headroom wrap opencode --no-serena")
+                .withEnvironment(strategy.restoreEnvironment(tab, RememberedSession()))
+                .withArguments(strategy.restoreArguments(tab, RememberedSession())),
+        )
+    }
+
+    @Test
+    fun theFactoryBuildsAnOpenCodeStrategyOverThePluginDirectories() {
+        val environment = AgentSessionEnvironment(
+            homeDirectory = temporaryFolder.root.toPath().resolve("home"),
+            stateDirectory = stateDirectory(),
+            bundledDirectory = bundledDirectory(),
+        )
+
+        val strategy = AgentSessionStrategies.forKind(AgentCliKind.OPENCODE, environment)
+
+        assertEquals(emptyList<String>(), strategy.launchArguments(tab))
+        assertEquals(
+            listOf(
+                bundledDirectory().resolve("opencode").resolve("tui.json").toString(),
+                stateDirectory().resolve("opencode").resolve("$tabUuid.json").toString(),
+            ),
+            strategy.launchEnvironment(tab).values.toList(),
+        )
+    }
+
+    private fun newStrategy(): OpenCodeSessionStrategy =
+        OpenCodeSessionStrategy(stateDirectory(), bundledDirectory())
+
+    private fun stateDirectory(): Path = temporaryFolder.root.toPath().resolve("state")
+
+    private fun bundledDirectory(): Path = temporaryFolder.root.toPath().resolve("integrations")
+
+    private fun bundledResource(resource: String): ByteArray {
+        val stream = requireNotNull(OpenCodeSessionStrategy::class.java.getResourceAsStream(resource))
+        return stream.use { it.readBytes() }
+    }
+
+    private fun writeState(strategy: OpenCodeSessionStrategy, content: String) {
+        val file = strategy.stateFile(tab)
+        Files.createDirectories(file.parent)
+        Files.writeString(file, content)
+    }
 }

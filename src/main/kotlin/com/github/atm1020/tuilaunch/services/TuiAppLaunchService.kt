@@ -17,6 +17,7 @@ import com.github.atm1020.tuilaunch.resume.AgentStateFiles
 import com.github.atm1020.tuilaunch.resume.ClaudeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
 import com.github.atm1020.tuilaunch.resume.OmpSessionStrategy
+import com.github.atm1020.tuilaunch.resume.OpenCodeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
@@ -112,11 +113,11 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val disposable: Disposable,
         var openedFromTui: Boolean,
         val tabUuid: String,
-        var agentSessionId: String?,
+        val agentSessionId: String?,
         val agentCliKind: String?,
         val launchedAt: Long,
         val restoredFromRecord: Boolean,
-        val agentArgumentsWereAdded: Boolean,
+        val commandWasDecorated: Boolean,
         val agentStrategy: AgentSessionStrategy?,
     )
 
@@ -132,7 +133,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 
     private data class AgentLaunch(
         val command: String,
-        val argumentsWereAdded: Boolean,
+        val commandWasDecorated: Boolean,
         val agentSessionId: String?,
         val cliKind: String?,
         val strategy: AgentSessionStrategy?,
@@ -281,8 +282,11 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     private fun deleteAgentStateOfTabsThatAreGone(saved: List<TuiSessionRecord>) {
         if (!agentSessionsAreResumed()) return
         val stateDirectory = agentSessionEnvironment().stateDirectory
-        val directories = listOf(ClaudeSessionStrategy.DIRECTORY_NAME, CodexSessionStrategy.DIRECTORY_NAME)
-            .map { stateDirectory.resolve(it) }
+        val directories = listOf(
+            ClaudeSessionStrategy.DIRECTORY_NAME,
+            CodexSessionStrategy.DIRECTORY_NAME,
+            OpenCodeSessionStrategy.DIRECTORY_NAME,
+        ).map { stateDirectory.resolve(it) }
         val restoredTabUuids = saved.mapNotNullTo(mutableSetOf()) { it.tabUuid }
         scope.launch {
             directories.forEach { AgentStateFiles.deleteStateFilesExcept(it, restoredTabUuids) }
@@ -527,14 +531,13 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     agentCliKind = agentLaunch.cliKind,
                     launchedAt = launchedAt,
                     restoredFromRecord = intent is LaunchIntent.Restore,
-                    agentArgumentsWereAdded = agentLaunch.argumentsWereAdded,
+                    commandWasDecorated = agentLaunch.commandWasDecorated,
                     agentStrategy = agentLaunch.strategy,
                 )
                 tabsBySessionId[sessionId] = tab
                 layout.onPromptBoxPercentChanged = { percent -> onPromptBoxPercentChanged(tab, percent) }
                 session.onTerminated { onSessionTerminated(host, tab) }
                 recordOpenTabs()
-                startTheAgentSession(tab)
                 if (onOpened != null) onOpened(tab) else selectTuiTab(host, tab)
             },
             onFailed = { throwable ->
@@ -549,7 +552,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     private fun agentLaunchFor(command: String, intent: LaunchIntent): AgentLaunch {
         val plainLaunch = AgentLaunch(
             command = command,
-            argumentsWereAdded = false,
+            commandWasDecorated = false,
             agentSessionId = null,
             cliKind = null,
             strategy = null,
@@ -568,11 +571,15 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             is LaunchIntent.Fresh -> strategy.launchArguments(tab)
             is LaunchIntent.Restore -> strategy.restoreArguments(tab, remembered)
         }
-        if (arguments.isEmpty()) return plainLaunch
+        val environment = when (intent) {
+            is LaunchIntent.Fresh -> strategy.launchEnvironment(tab)
+            is LaunchIntent.Restore -> strategy.restoreEnvironment(tab, remembered)
+        }
+        if (arguments.isEmpty() && environment.isEmpty()) return plainLaunch
         return AgentLaunch(
-            command = parsed.withArguments(arguments),
-            argumentsWereAdded = true,
-            agentSessionId = agentSessionIdFor(kind, strategy, tab, intent, remembered),
+            command = parsed.withEnvironment(environment).withArguments(arguments),
+            commandWasDecorated = true,
+            agentSessionId = agentSessionIdFor(kind, strategy, tab, intent),
             cliKind = kind.name,
             strategy = strategy,
         )
@@ -596,11 +603,10 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         strategy: AgentSessionStrategy,
         tab: TabIdentity,
         intent: LaunchIntent,
-        remembered: RememberedSession,
     ): String? = when (kind) {
         AgentCliKind.CLAUDE -> claudeSessionId(strategy, tab, intent)
         AgentCliKind.CODEX -> codexSessionIdOnRestore(strategy, tab, intent)
-        AgentCliKind.OPENCODE -> remembered.agentSessionId
+        AgentCliKind.OPENCODE -> openCodeSessionIdOnRestore(strategy, tab, intent)
         AgentCliKind.OMP -> ompSessionIdOnRestore(strategy, tab, intent)
     }
 
@@ -622,6 +628,16 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         if (intent !is LaunchIntent.Restore) return null
         val codex = strategy as? CodexSessionStrategy ?: return null
         return codex.readSessionId(codex.stateFile(tab))
+    }
+
+    private fun openCodeSessionIdOnRestore(
+        strategy: AgentSessionStrategy,
+        tab: TabIdentity,
+        intent: LaunchIntent,
+    ): String? {
+        if (intent !is LaunchIntent.Restore) return null
+        val openCode = strategy as? OpenCodeSessionStrategy ?: return null
+        return openCode.readSessionId(openCode.stateFile(tab))
     }
 
     private fun ompSessionIdOnRestore(
@@ -646,7 +662,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 
     private fun aResumedAgentSessionDiedOnStartup(tab: OpenTab): Boolean =
         tab.restoredFromRecord &&
-            tab.agentArgumentsWereAdded &&
+            tab.commandWasDecorated &&
             clock() - tab.launchedAt < EARLY_EXIT_RELAUNCH_WINDOW_MILLIS
 
     private fun relaunchWithoutTheAgentSession(host: IdeToolWindowHost, tab: OpenTab) {
@@ -674,27 +690,8 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         )
     }
 
-    private fun startTheAgentSession(tab: OpenTab) {
-        if (!tab.agentArgumentsWereAdded) return
-        val strategy = tab.agentStrategy ?: return
-        val identity = identityOf(tab) ?: return
-        val remembered = RememberedSession(tab.agentSessionId)
-        val work = scope.launch {
-            val sessionId = strategy.afterLaunch(identity, remembered) ?: return@launch
-            invokeLater { rememberTheAgentSession(tab, sessionId) }
-        }
-        Disposer.register(tab.disposable) { work.cancel() }
-    }
-
-    private fun rememberTheAgentSession(tab: OpenTab, sessionId: String) {
-        if (tabsBySessionId[tab.sessionId] !== tab) return
-        if (tab.sessionId in closingSessions) return
-        tab.agentSessionId = sessionId
-        recordOpenTabs()
-    }
-
     private fun cleanUpAgentSession(tab: OpenTab) {
-        if (!tab.agentArgumentsWereAdded) return
+        if (!tab.commandWasDecorated) return
         val strategy = tab.agentStrategy ?: return
         val identity = identityOf(tab) ?: return
         val remembered = RememberedSession(tab.agentSessionId)

@@ -7,13 +7,19 @@ object ShellWords {
     private const val DOUBLE_QUOTE_ESCAPABLES = "\"\\$`"
     private val SAFE_CHARACTERS = Regex("^[A-Za-z0-9_./:=@,-]+$")
 
-    fun split(command: String): List<String> {
-        val tokens = mutableListOf<String>()
+    data class Token(val start: Int, val text: String)
+
+    fun split(command: String): List<String> = tokenize(command).map { it.text }
+
+    fun tokenize(command: String): List<Token> {
+        val tokens = mutableListOf<Token>()
         val token = StringBuilder()
         var tokenStarted = false
+        var tokenStart = 0
         var index = 0
         while (index < command.length) {
             val character = command[index]
+            if (!tokenStarted && !character.isWhitespace()) tokenStart = index
             when {
                 character == BACKSLASH && index + 1 < command.length -> {
                     token.append(command[index + 1])
@@ -51,7 +57,7 @@ object ShellWords {
 
                 character.isWhitespace() -> {
                     if (tokenStarted) {
-                        tokens.add(token.toString())
+                        tokens.add(Token(tokenStart, token.toString()))
                         token.setLength(0)
                         tokenStarted = false
                     }
@@ -65,7 +71,7 @@ object ShellWords {
                 }
             }
         }
-        if (tokenStarted) tokens.add(token.toString())
+        if (tokenStarted) tokens.add(Token(tokenStart, token.toString()))
         return tokens
     }
 

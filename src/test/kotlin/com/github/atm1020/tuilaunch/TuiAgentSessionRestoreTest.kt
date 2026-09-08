@@ -4,8 +4,6 @@ import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.ClaudeProjectPath
-import com.github.atm1020.tuilaunch.resume.OpenCodeApi
-import com.github.atm1020.tuilaunch.resume.OpenCodeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
@@ -24,10 +22,8 @@ private const val CODEX_TRANSCRIPT_PATH = "/Users/falleng0d/.codex/sessions/2026
 private const val OLDER_OMP_SESSION = "2026-09-07T21-15-03-123Z_019a4f3c7b217cd09e553f1b2a6d8c47.jsonl"
 private const val NEWEST_OMP_SESSION = "2026-09-08T09-02-11-000Z_019a52118c334de1af664e2c3b7e9d58.jsonl"
 private const val OMP_SESSION_ID = "019a4f3c7b217cd09e553f1b2a6d8c47"
-private const val OPENCODE_PORT = 45123
+private const val OPENCODE_SESSION_ID = "ses_8a3f1c0d9b2e4a6c8d0f2b4a6c"
 private const val AGENT_SESSION_TIMEOUT_SECONDS = 30
-private const val QUIET_MILLIS = 200L
-private const val QUIET_POLL_MILLIS = 5L
 
 class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
@@ -422,44 +418,17 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertTrue(savedTabs().isEmpty())
     }
 
-    fun testASessionIdRememberedForAnotherCliIsNotHandedToTheNewOne() {
-        configureApp("agent", "opencode")
-        saveTab(TuiSessionRecord("agent", "agent", true, TAB_UUID, CODEX_SESSION_ID, "CODEX"))
-        val api = RecordingOpenCodeApi()
-        val factory = FakeFactory(FakeSession())
-        val (service, _) = newService(factory, api)
-
-        service.restoreSavedTabs()
-
-        assertEquals(listOf("opencode --port $OPENCODE_PORT --hostname 127.0.0.1"), factory.commands)
-        assertEquals(CREATED_OPENCODE_SESSION, awaitRecordedAgentSessionId())
-        assertEquals("OPENCODE", savedTabs().single().agentCliKind)
-    }
-
-    fun testASessionIdRememberedForTheSameCliIsUsedAgain() {
-        configureApp("agent", "opencode")
-        saveTab(TuiSessionRecord("agent", "agent", true, TAB_UUID, CREATED_OPENCODE_SESSION, "OPENCODE"))
-        val api = RecordingOpenCodeApi()
-        val factory = FakeFactory(FakeSession())
-        val (service, _) = newService(factory, api)
-
-        service.restoreSavedTabs()
-
-        assertEquals(
-            listOf("opencode --port $OPENCODE_PORT --hostname 127.0.0.1 --session $CREATED_OPENCODE_SESSION"),
-            factory.commands,
-        )
-    }
-
     fun testReopeningTheProjectDropsTheHookStateOfTabsThatAreGone() {
         configureApp("codex", "codex")
         val goneTabUuid = "41d9b7e2-5c08-4a6f-8b13-9e7c0a2f6d54"
         val kept = codexStateFile(TAB_UUID)
         val orphan = codexStateFile(goneTabUuid)
         val claudeOrphan = claudeStateFile(goneTabUuid)
+        val openCodeOrphan = openCodeStateFile(goneTabUuid)
         write(kept, codexHookRecord())
         write(orphan, codexHookRecord())
         write(claudeOrphan, """{"session_id":"$CLAUDE_REPORTED_SESSION"}""")
+        write(openCodeOrphan, """{"sessionId":"$OPENCODE_SESSION_ID"}""")
         saveTab(TuiSessionRecord("codex", "codex", true, TAB_UUID, CODEX_SESSION_ID, "CODEX"))
         val (service, _) = newService(FakeFactory(FakeSession()))
 
@@ -467,6 +436,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         awaitDeletedFile(orphan)
         awaitDeletedFile(claudeOrphan)
+        awaitDeletedFile(openCodeOrphan)
         assertTrue(Files.exists(kept))
     }
 
@@ -551,116 +521,143 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         awaitDeletedFile(stateFile)
     }
 
-    fun testAFreshOpenCodeTabRecordsTheSessionItsServerCreated() {
+    fun testAFreshOpenCodeTabCarriesTheTrackerVariablesAndNoArguments() {
         configureApp("opencode", "opencode")
-        val api = RecordingOpenCodeApi(healthyFromCall = 3)
         val factory = FakeFactory(FakeSession())
-        val (service, _) = newService(factory, api)
+        val (service, _) = newService(factory)
 
         service.launchNew("opencode", "opencode")
 
-        assertEquals(CREATED_OPENCODE_SESSION, awaitRecordedAgentSessionId())
-        assertEquals(listOf("opencode --port $OPENCODE_PORT --hostname 127.0.0.1"), factory.commands)
-        assertEquals(
-            listOf(CreatedSession(projectPath(), savedTabs().single().tabUuid!!)),
-            api.creations,
-        )
-        assertEquals(listOf(CREATED_OPENCODE_SESSION), api.selections)
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf("${openCodeVariables(tabUuid)} opencode"), factory.commands)
+        assertTrue(Files.isRegularFile(openCodeTuiConfig()))
+        assertTrue(Files.isRegularFile(openCodeSessionTracker()))
+        assertTrue(Files.isDirectory(openCodeStateFile(tabUuid).parent))
+        assertNull(savedTabs().single().agentSessionId)
     }
 
-    fun testAWrappedOpenCodeTabRecordsTheSessionItsServerCreated() {
+    fun testAWrappedOpenCodeTabCarriesTheTrackerVariablesBeforeHeadroom() {
         configureApp("opencode", "headroom wrap opencode --no-serena")
-        val api = RecordingOpenCodeApi()
         val factory = FakeFactory(FakeSession())
-        val (service, _) = newService(factory, api)
+        val (service, _) = newService(factory)
 
         service.launchNew("opencode", "headroom wrap opencode --no-serena")
 
-        assertEquals(CREATED_OPENCODE_SESSION, awaitRecordedAgentSessionId())
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
         assertEquals(
-            listOf("headroom wrap opencode --no-serena -- --port $OPENCODE_PORT --hostname 127.0.0.1"),
+            listOf("${openCodeVariables(tabUuid)} headroom wrap opencode --no-serena"),
             factory.commands,
         )
     }
 
-    fun testAnOpenCodeTabComesBackToTheSessionItRecorded() {
+    fun testAnOpenCodeTabComesBackToTheSessionItsTrackerReported() {
         configureApp("opencode", "opencode")
-        saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, CREATED_OPENCODE_SESSION))
-        val api = RecordingOpenCodeApi()
+        write(openCodeStateFile(TAB_UUID), """{"sessionId":"$OPENCODE_SESSION_ID"}""" + "\n")
+        saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, agentCliKind = "OPENCODE"))
         val factory = FakeFactory(FakeSession())
-        val (service, _) = newService(factory, api)
+        val (service, _) = newService(factory)
 
         service.restoreSavedTabs()
-        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(
+            listOf("${openCodeVariables(TAB_UUID)} opencode --session $OPENCODE_SESSION_ID"),
+            factory.commands,
+        )
+        assertEquals(OPENCODE_SESSION_ID, savedTabs().single().agentSessionId)
+    }
+
+    fun testAWrappedOpenCodeTabResumesThroughThePassThrough() {
+        configureApp("opencode", "headroom wrap opencode --no-serena")
+        write(openCodeStateFile(TAB_UUID), """{"sessionId":"$OPENCODE_SESSION_ID"}""" + "\n")
+        saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, agentCliKind = "OPENCODE"))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
 
         assertEquals(
             listOf(
-                "opencode --port $OPENCODE_PORT --hostname 127.0.0.1 --session $CREATED_OPENCODE_SESSION"
+                "${openCodeVariables(TAB_UUID)} headroom wrap opencode --no-serena " +
+                    "-- --session $OPENCODE_SESSION_ID"
             ),
             factory.commands,
         )
-        assertEquals(CREATED_OPENCODE_SESSION, savedTabs().single().agentSessionId)
-        assertStaysFalse("A reopened opencode tab asked its server for another session") {
-            api.healthCalls > 0 || api.creations.isNotEmpty()
-        }
     }
 
-    fun testTheSettingOffLeavesAnOpenCodeTabWithoutAnyServerWork() {
+    fun testAnOpenCodeTabWithoutAReportComesBackFreshWhateverWasRemembered() {
+        configureApp("opencode", "opencode")
+        saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, CODEX_SESSION_ID, "CODEX"))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+
+        assertEquals(listOf("${openCodeVariables(TAB_UUID)} opencode"), factory.commands)
+        assertNull(savedTabs().single().agentSessionId)
+        assertEquals("OPENCODE", savedTabs().single().agentCliKind)
+    }
+
+    fun testClosingAnOpenCodeTabDeletesTheSessionItsTrackerReported() {
+        configureApp("opencode", "opencode")
+        val (service, _) = newService(FakeFactory(FakeSession()))
+        service.launchNew("opencode", "opencode")
+        val stateFile = openCodeStateFile(savedTabs().single().tabUuid!!)
+        write(stateFile, """{"sessionId":"$OPENCODE_SESSION_ID"}""" + "\n")
+
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        awaitDeletedFile(stateFile)
+    }
+
+    fun testAReopenedOpenCodeTabThatEndsRightAwayComesBackAsANewTab() {
+        configureApp("opencode", "opencode")
+        saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, agentCliKind = "OPENCODE"))
+        val sessions = List(2) { FakeSession() }
+        val factory = FakeFactory(sessions)
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+        sessions[0].terminate()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        val relaunchedTabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertTrue(relaunchedTabUuid, relaunchedTabUuid != TAB_UUID)
+        assertEquals(
+            listOf(
+                "${openCodeVariables(TAB_UUID)} opencode",
+                "${openCodeVariables(relaunchedTabUuid)} opencode",
+            ),
+            factory.commands,
+        )
+    }
+
+    fun testTheSettingOffLaunchesAnOpenCodeTabExactlyAsConfigured() {
         TuiLauncherSettings.getInstance().state.restoreAgentSessions = false
         configureApp("opencode", "opencode")
-        val api = RecordingOpenCodeApi()
         val factory = FakeFactory(FakeSession())
-        val (service, _) = newService(factory, api)
+        val (service, _) = newService(factory)
 
         service.launchNew("opencode", "opencode")
 
         assertEquals(listOf("opencode"), factory.commands)
-        assertStaysFalse("An unmanaged opencode tab talked to its server") {
-            api.healthCalls > 0 || api.creations.isNotEmpty()
-        }
+        assertFalse(Files.exists(environment.stateDirectory))
+        assertFalse(Files.exists(environment.bundledDirectory))
         assertNull(savedTabs().single().agentSessionId)
     }
 
-    fun testAnOpenCodeTabClosedBeforeItsServerAnsweredCreatesNoSession() {
-        configureApp("opencode", "opencode")
-        val api = RecordingOpenCodeApi(healthyFromCall = RecordingOpenCodeApi.NEVER_HEALTHY)
-        val (service, _) = newService(FakeFactory(FakeSession()), api)
-        service.launchNew("opencode", "opencode")
+    fun testAnOpenCodeCommandThatCarriesItsOwnTuiConfigIsLaunchedUntouched() {
+        val command = "OPENCODE_TUI_CONFIG=/Users/falleng0d/own-tui.json opencode"
+        configureApp("opencode", command)
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
 
-        service.closeActiveTui()
-        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        service.launchNew("opencode", command)
 
-        assertStaysFalse("A closed opencode tab still created a session") { api.creations.isNotEmpty() }
-        assertTrue(savedTabs().isEmpty())
-    }
-
-    fun testClosingAnOpenCodeTabDiscardsASessionNobodyPromptedIn() {
-        configureApp("opencode", "opencode")
-        val api = RecordingOpenCodeApi(messages = 0)
-        val (service, _) = newService(FakeFactory(FakeSession()), api)
-        service.launchNew("opencode", "opencode")
-        awaitRecordedAgentSessionId()
-
-        service.closeActiveTui()
-        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
-
-        assertEquals(listOf(CREATED_OPENCODE_SESSION), awaitDiscardedSessions(api))
-    }
-
-    fun testAnOpenCodeTabWhoseProcessEndsKeepsItsSession() {
-        configureApp("opencode", "opencode")
-        val api = RecordingOpenCodeApi(messages = 0)
-        val session = FakeSession()
-        val (service, _) = newService(FakeFactory(session), api)
-        service.launchNew("opencode", "opencode")
-        awaitRecordedAgentSessionId()
-
-        session.terminate()
-        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
-
-        assertStaysFalse("An opencode session was discarded without the user closing its tab") {
-            api.deletions.isNotEmpty()
-        }
+        assertEquals(listOf(command), factory.commands)
+        assertFalse(Files.exists(environment.stateDirectory))
+        assertFalse(Files.exists(environment.bundledDirectory))
+        assertNull(savedTabs().single().agentSessionId)
     }
 
     fun testACodexTabWhoseProcessEndsKeepsItsHookState() {
@@ -677,44 +674,13 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertTrue(Files.exists(stateFile))
     }
 
-    private fun newService(
-        sessionFactory: TerminalSessionFactory,
-        openCodeApi: OpenCodeApi? = null,
-    ): Pair<TuiAppLaunchService, FakeHost> {
+    private fun newService(sessionFactory: TerminalSessionFactory): Pair<TuiAppLaunchService, FakeHost> {
         val service = TuiAppLaunchService(project, testCoroutineScope(testRootDisposable))
         val host = FakeHost()
         service.host = host
         service.sessionFactory = sessionFactory
         service.agentSessionEnvironment = { environment }
-        if (openCodeApi != null) {
-            service.agentSessionStrategies = { _, _ -> openCodeStrategyFor(openCodeApi) }
-        }
         return service to host
-    }
-
-    private fun openCodeStrategyFor(api: OpenCodeApi): OpenCodeSessionStrategy = OpenCodeSessionStrategy(
-        freePort = { OPENCODE_PORT },
-        apiFactory = { api },
-        pollIntervalMillis = 5,
-        startupTimeoutMillis = 5_000,
-    )
-
-    private fun awaitRecordedAgentSessionId(): String {
-        PlatformTestUtil.waitWithEventsDispatching(
-            "The tab never recorded the session its agent server created",
-            { savedTabs().singleOrNull()?.agentSessionId != null },
-            AGENT_SESSION_TIMEOUT_SECONDS,
-        )
-        return requireNotNull(savedTabs().single().agentSessionId)
-    }
-
-    private fun awaitDiscardedSessions(api: RecordingOpenCodeApi): List<String> {
-        PlatformTestUtil.waitWithEventsDispatching(
-            "The empty agent session was never discarded",
-            { api.deletions.isNotEmpty() },
-            AGENT_SESSION_TIMEOUT_SECONDS,
-        )
-        return api.deletions
     }
 
     private fun awaitDeletedFile(file: Path) {
@@ -723,15 +689,6 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
             { !Files.exists(file) },
             AGENT_SESSION_TIMEOUT_SECONDS,
         )
-    }
-
-    private fun assertStaysFalse(message: String, condition: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + QUIET_MILLIS
-        while (System.currentTimeMillis() < deadline) {
-            assertFalse(message, condition())
-            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
-            Thread.sleep(QUIET_POLL_MILLIS)
-        }
     }
 
     private fun configureApp(name: String, command: String) {
@@ -783,6 +740,21 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
     private fun ompSessionArguments(tabUuid: String): String =
         "--session-dir ${ShellWords.quote(ompSessionDirectory(tabUuid).toString())} " +
             "--hook ${ShellWords.quote(ompFollowSessionExtension().toString())}"
+
+    private fun openCodeStateFile(tabUuid: String): Path =
+        environment.stateDirectory.resolve("opencode").resolve("$tabUuid.json")
+
+    private fun openCodeTuiConfig(): Path = environment.bundledDirectory
+        .resolve("opencode")
+        .resolve("tui.json")
+
+    private fun openCodeSessionTracker(): Path = environment.bundledDirectory
+        .resolve("opencode")
+        .resolve("tuilaunch-session-tracker.js")
+
+    private fun openCodeVariables(tabUuid: String): String =
+        "OPENCODE_TUI_CONFIG=${ShellWords.quote(openCodeTuiConfig().toString())} " +
+            "TUILAUNCH_OPENCODE_STATE=${ShellWords.quote(openCodeStateFile(tabUuid).toString())}"
 
     private fun write(file: Path, content: String) {
         Files.createDirectories(file.parent)

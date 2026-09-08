@@ -8,9 +8,30 @@ class AgentCommand private constructor(
     val userSelectsASession: Boolean,
     val chainsOtherCommands: Boolean,
     val loadsATrustedExtension: Boolean,
+    val setsASessionVariableItself: Boolean,
+    private val programStart: Int,
 ) {
     val isManageable: Boolean
-        get() = kind != null && !userSelectsASession && !chainsOtherCommands
+        get() = kind != null && !userSelectsASession && !chainsOtherCommands && !setsASessionVariableItself
+
+    fun withEnvironment(assignments: Map<String, String>): AgentCommand {
+        if (assignments.isEmpty()) return this
+        val prefix = assignments.entries.joinToString(" ") { (name, value) ->
+            "$name=${ShellWords.quote(value)}"
+        } + " "
+        val decorated = command.substring(0, programStart) + prefix + command.substring(programStart)
+        return AgentCommand(
+            command = decorated,
+            tokens = ShellWords.split(decorated),
+            kind = kind,
+            wrappedByHeadroom = wrappedByHeadroom,
+            userSelectsASession = userSelectsASession,
+            chainsOtherCommands = chainsOtherCommands,
+            loadsATrustedExtension = loadsATrustedExtension,
+            setsASessionVariableItself = setsASessionVariableItself,
+            programStart = programStart + prefix.length,
+        )
+    }
 
     fun withArguments(extra: List<String>): String {
         if (extra.isEmpty()) return command
@@ -46,16 +67,24 @@ class AgentCommand private constructor(
 
         private val TRUSTED_EXTENSION_FLAGS = mapOf(AgentCliKind.OMP to listOf("--trusted-extension"))
 
+        private val SESSION_VARIABLES = mapOf(
+            AgentCliKind.OPENCODE to listOf(
+                OpenCodeSessionStrategy.TUI_CONFIG_VARIABLE,
+                OpenCodeSessionStrategy.STATE_FILE_VARIABLE,
+            ),
+        )
+
         fun parse(command: String): AgentCommand {
-            val tokens = ShellWords.split(command)
-            val programIndex = programIndexIn(tokens)
-            val wrappedByHeadroom = isHeadroomWrapAt(tokens, programIndex)
+            val tokens = ShellWords.tokenize(command)
+            val texts = tokens.map { it.text }
+            val programIndex = programIndexIn(texts)
+            val wrappedByHeadroom = isHeadroomWrapAt(texts, programIndex)
             val cliIndex = if (wrappedByHeadroom) programIndex + 2 else programIndex
-            val kind = tokens.getOrNull(cliIndex)?.let { AgentCliKind.forProgramName(ShellWords.baseName(it)) }
-            val arguments = if (kind == null) emptyList() else tokens.drop(cliIndex + 1)
+            val kind = texts.getOrNull(cliIndex)?.let { AgentCliKind.forProgramName(ShellWords.baseName(it)) }
+            val arguments = if (kind == null) emptyList() else texts.drop(cliIndex + 1)
             return AgentCommand(
                 command = command,
-                tokens = tokens,
+                tokens = texts,
                 kind = kind,
                 wrappedByHeadroom = wrappedByHeadroom,
                 userSelectsASession = kind != null &&
@@ -63,6 +92,9 @@ class AgentCommand private constructor(
                 chainsOtherCommands = kind != null && chainsOtherCommands(command, arguments),
                 loadsATrustedExtension = kind != null &&
                     anyArgumentMatches(arguments, TRUSTED_EXTENSION_FLAGS[kind].orEmpty()),
+                setsASessionVariableItself = kind != null &&
+                    anyAssignmentMatches(texts.take(programIndex), SESSION_VARIABLES[kind].orEmpty()),
+                programStart = tokens.getOrNull(programIndex)?.start ?: command.length,
             )
         }
 
@@ -95,5 +127,8 @@ class AgentCommand private constructor(
                     argument == flag || (flag.startsWith("-") && argument.startsWith("$flag="))
                 }
             }
+
+        private fun anyAssignmentMatches(prefix: List<String>, names: List<String>): Boolean =
+            prefix.any { token -> names.any { token.startsWith("$it=") } }
     }
 }

@@ -1,103 +1,81 @@
 package com.github.atm1020.tuilaunch.resume
 
-import com.intellij.openapi.diagnostic.thisLogger
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import com.google.gson.JsonParser
+import com.intellij.openapi.util.SystemInfo
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
 
 class OpenCodeSessionStrategy(
-    private val freePort: () -> Int,
-    private val apiFactory: (Int) -> OpenCodeApi = { port -> HttpOpenCodeApi(port) },
-    private val pollIntervalMillis: Long = DEFAULT_POLL_INTERVAL_MILLIS,
-    private val startupTimeoutMillis: Long = DEFAULT_STARTUP_TIMEOUT_MILLIS,
+    private val stateDirectory: Path,
+    private val bundledDirectory: Path,
+    private val theShellTakesAnEnvironmentPrefix: Boolean = !SystemInfo.isWindows,
 ) : AgentSessionStrategy {
-    @Volatile
-    var lastPort: Int? = null
-        private set
 
-    override fun launchArguments(tab: TabIdentity): List<String> {
-        val port = freePort()
-        lastPort = port
-        return listOf(PORT_FLAG, port.toString(), HOSTNAME_FLAG, LOOPBACK_HOSTNAME)
+    override fun prepareLaunch(tab: TabIdentity) {
+        if (!theShellTakesAnEnvironmentPrefix) return
+        BundledIntegrationFiles.ensure(TUI_CONFIG_RESOURCE, tuiConfigFile())
+        BundledIntegrationFiles.ensure(SESSION_TRACKER_RESOURCE, sessionTrackerFile())
+        AgentStateFiles.createDirectoryFor(stateFile(tab))
     }
+
+    override fun launchArguments(tab: TabIdentity): List<String> = emptyList()
 
     override fun restoreArguments(tab: TabIdentity, remembered: RememberedSession): List<String> {
-        val serverArguments = launchArguments(tab)
-        val sessionId = remembered.agentSessionId?.takeIf { it.isNotBlank() } ?: return serverArguments
-        return serverArguments + listOf(SESSION_FLAG, sessionId)
+        if (!theShellTakesAnEnvironmentPrefix) return emptyList()
+        val reported = readSessionId(stateFile(tab)) ?: return emptyList()
+        return listOf(SESSION_FLAG, reported)
     }
 
-    override suspend fun afterLaunch(tab: TabIdentity, remembered: RememberedSession): String? {
-        if (!remembered.agentSessionId.isNullOrBlank()) return null
-        val port = lastPort ?: return null
-        val api = apiFactory(port)
-        try {
-            if (!theServerStarted(api)) {
-                thisLogger().info(
-                    "OpenCode did not answer on port $port within $startupTimeoutMillis ms; " +
-                        "this tab will not remember a session"
-                )
-                return null
-            }
-            return try {
-                val sessionId = api.createSession(tab.projectPath, tab.tabUuid)
-                api.selectSession(sessionId)
-                sessionId
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (failure: Exception) {
-                thisLogger().info("Could not open an OpenCode session on port $port: ${describe(failure)}")
-                null
-            }
-        } finally {
-            release(api)
-        }
+    override fun launchEnvironment(tab: TabIdentity): Map<String, String> {
+        if (!theShellTakesAnEnvironmentPrefix) return emptyMap()
+        return linkedMapOf(
+            TUI_CONFIG_VARIABLE to tuiConfigFile().toAbsolutePath().toString(),
+            STATE_FILE_VARIABLE to stateFile(tab).toAbsolutePath().toString(),
+        )
     }
 
     override suspend fun cleanUp(tab: TabIdentity, remembered: RememberedSession) {
-        val sessionId = remembered.agentSessionId?.takeIf { it.isNotBlank() } ?: return
-        val port = lastPort ?: return
-        val api = apiFactory(port)
-        try {
-            if (api.messageCount(sessionId) == 0) api.deleteSession(sessionId)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Exception) {
-            thisLogger().debug("Left the OpenCode session $sessionId on port $port in place", failure)
-        } finally {
-            release(api)
+        AgentStateFiles.delete(stateFile(tab))
+    }
+
+    fun stateFile(tab: TabIdentity): Path =
+        stateDirectory.resolve(DIRECTORY_NAME).resolve("${tab.tabUuid}$STATE_FILE_SUFFIX")
+
+    fun tuiConfigFile(): Path = bundledDirectory.resolve(BUNDLED_SUBDIRECTORY).resolve(TUI_CONFIG_FILE_NAME)
+
+    fun sessionTrackerFile(): Path =
+        bundledDirectory.resolve(BUNDLED_SUBDIRECTORY).resolve(SESSION_TRACKER_FILE_NAME)
+
+    fun readSessionId(stateFile: Path): String? {
+        val text = try {
+            if (!Files.isRegularFile(stateFile)) return null
+            Files.readString(stateFile)
+        } catch (_: IOException) {
+            return null
         }
+        val root = try {
+            JsonParser.parseString(text)
+        } catch (_: RuntimeException) {
+            return null
+        }
+        if (!root.isJsonObject) return null
+        val reported = root.asJsonObject.nonBlankString(SESSION_ID_FIELD) ?: return null
+        return reported.takeIf { SESSION_ID.matches(it) }
     }
-
-    private suspend fun release(api: OpenCodeApi) {
-        withContext(NonCancellable + Dispatchers.IO) { api.close() }
-    }
-
-    private suspend fun theServerStarted(api: OpenCodeApi): Boolean =
-        withTimeoutOrNull(startupTimeoutMillis) {
-            while (!isHealthy(api)) delay(pollIntervalMillis)
-            true
-        } == true
-
-    private suspend fun isHealthy(api: OpenCodeApi): Boolean = try {
-        api.health()
-    } catch (cancellation: CancellationException) {
-        throw cancellation
-    } catch (_: Exception) {
-        false
-    }
-
-    private fun describe(failure: Throwable): String = failure.message ?: failure.javaClass.simpleName
 
     companion object {
-        const val PORT_FLAG = "--port"
-        const val HOSTNAME_FLAG = "--hostname"
+        const val DIRECTORY_NAME = "opencode"
         const val SESSION_FLAG = "--session"
-        const val LOOPBACK_HOSTNAME = "127.0.0.1"
-        const val DEFAULT_POLL_INTERVAL_MILLIS = 500L
-        const val DEFAULT_STARTUP_TIMEOUT_MILLIS = 90_000L
+        const val TUI_CONFIG_VARIABLE = "OPENCODE_TUI_CONFIG"
+        const val STATE_FILE_VARIABLE = "TUILAUNCH_OPENCODE_STATE"
+        const val BUNDLED_SUBDIRECTORY = "opencode"
+        const val TUI_CONFIG_FILE_NAME = "tui.json"
+        const val SESSION_TRACKER_FILE_NAME = "tuilaunch-session-tracker.js"
+        const val TUI_CONFIG_RESOURCE = "/integrations/opencode/$TUI_CONFIG_FILE_NAME"
+        const val SESSION_TRACKER_RESOURCE = "/integrations/opencode/$SESSION_TRACKER_FILE_NAME"
+        private const val STATE_FILE_SUFFIX = ".json"
+        private const val SESSION_ID_FIELD = "sessionId"
+        private val SESSION_ID = Regex("^ses_[0-9A-Za-z]{26}$")
     }
 }
