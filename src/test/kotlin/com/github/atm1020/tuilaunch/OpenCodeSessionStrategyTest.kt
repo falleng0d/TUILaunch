@@ -90,6 +90,7 @@ class OpenCodeSessionStrategyTest {
         val environment = AgentSessionEnvironment(
             homeDirectory = Path.of("/tmp/tuilaunch-test-home"),
             stateDirectory = Path.of("/tmp/tuilaunch-test-state"),
+            bundledDirectory = Path.of("/tmp/tuilaunch-test-integrations"),
         )
 
         val strategy = AgentSessionStrategies.forKind(AgentCliKind.OPENCODE, environment, freePort = { 45123 })

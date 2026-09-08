@@ -182,18 +182,21 @@ depends on the CLI:
   through it and tells the TUI to show it, and a reopened tab comes back with `--session <session id>`. When you
   close such a tab and nobody ever prompted in its session, TUILaunch asks the server to delete it again; if the
   server is already gone the empty session simply stays.
-- **omp** — the launch points omp at a session directory of the tab's own with `--session-dir`, and a reopened tab
-  resumes the newest session file found there with `--resume <file>`.
+- **omp** — the launch points omp at a session directory of the tab's own with `--session-dir` and loads a small
+  extension of TUILaunch's own with `--hook`, which records the session omp is in inside that same directory. A
+  reopened tab resumes the recorded session with `--resume <file>`, and the newest session file of the directory
+  when there is no record yet.
 
 Arguments TUILaunch adds are appended after ` -- ` when the command goes through `headroom wrap`, so headroom
 forwards them to the CLI instead of claiming them for itself.
 
-Because claude and codex report the session they are in themselves, switching sessions inside the TUI is
+Because claude, codex and omp report the session they are in themselves, switching sessions inside the TUI is
 followed: pick another conversation with claude's `/resume`, start an empty one with `/clear`, or do the same in
-codex with `/resume`, `/new` or `/fork`, and the reopened tab comes back to the session you switched to instead
-of the one it was launched with. claude reports the switch as it happens; codex reports it with the first
-message you send in the new session, so a session you switched to and never typed in is not followed. A codex
-`/side` or `/btw` excursion is never followed either, because those conversations cannot be resumed at all.
+codex or omp with `/resume`, `/new` or `/fork`, and the reopened tab comes back to the session you switched to
+instead of the one it was launched with. claude and omp report the switch as it happens, omp also after every
+turn and after a `/branch`, a `/rewind` or a hop through `/tree`; codex reports it with the first message you
+send in the new session, so a session you switched to and never typed in is not followed. A codex `/side` or
+`/btw` excursion is never followed either, because those conversations cannot be resumed at all.
 
 A tab you never typed in comes back fresh: claude, codex and omp write their conversation with the first
 message, so there is nothing to resume — a report that names a transcript which was never written is ignored —
@@ -210,6 +213,15 @@ append what codex hands them to
 and per prompt, and claude's hook writes the same kind of report to `.../claude/<tab id>.json`. Neither hook
 prints anything or looks at anything else. Those files are deleted when you close the tab, and files left
 behind by tabs that are gone are deleted when the project is reopened.
+
+The omp extension is one `.js` file that TUILaunch keeps in
+`<IDE system directory>/TUILaunch/integrations/omp/`, writes there when it is missing or out of date and passes
+with `--hook <file>`, omp's own flag for loading an extension from a path. Nothing under `~/.omp` is written or
+read: the extension stays inert unless the session directory it is handed belongs to a TUILaunch tab, and the
+only thing it writes is a `tuilaunch-active.json` inside that tab's own session directory. You can switch it off
+from omp's side with `disabledExtensions: ["extension-module:tuilaunch-follow-session"]`. A command that carries
+`--trusted-extension` is launched without the hook, because omp refuses those two flags together; such a tab
+comes back to the newest session file of its directory instead.
 
 claude runs no hook at all, from any settings file, until you have accepted its workspace trust dialog for the
 project, which is why the first launch of a tab also pins the tab's identifier with `--session-id`: the tab
@@ -419,6 +431,9 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - claude holds back the hooks of every settings file, including the ones passed inline with `--settings`, until the user has accepted the workspace trust dialog for the folder or a parent of it, so the first launch of a session cannot rely on its hook having run and has to pin the id with `--session-id` as well.
 - claude adds the stdout of a `SessionStart` hook to the model's context, so such a hook has to print nothing at all; `cat > "$0"` in the exec form (`"command": "/bin/sh", "args": ["-c", …, "<path>"]`) writes the payload without a shell parsing the path and without echoing it, while `tee` would feed it back to the model.
 - `omp --resume <path>` silently creates an empty session at that path when the file does not exist, so a resume argument must only ever be a file that was found on disk.
+- `omp --hook <path>` is an alias of `--extension`/`-e <path>` and is rejected as a usage error when the same command also carries `--trusted-extension`, which is an exact allowlist that suppresses every other extension, so a command carrying that flag has to be launched with no hook of ours at all.
+- A `-e`/`--hook` path also gets its own directory scanned for `skills/`, `hooks/`, `tools/`, `commands/`, `rules/`, `prompts/` and `.mcp.json`, so a bundled extension has to sit alone in a directory of its own or unrelated files next to it are loaded with it.
+- The first session of an omp process is written lazily, with its first assistant message, so the session path an extension reads at `session_start` can name a file that does not exist yet and every recorded path has to be checked on disk before it is resumed.
 - A bare `opencode` opens no TCP port at all, and its embedded server needs a moment after the process starts, so `GET /global/health` answering `{"healthy":true}` on the port passed as `--port <port> --hostname 127.0.0.1` is the only signal that it is ready to be asked anything.
 - opencode writes its session row only with the first prompt and no flag can pick the id, so a tab's session has to be created through `POST /session?directory=<cwd>` and handed to the running TUI with `POST /tui/select-session`; `GET /session/<id>/message` is what tells a session nobody prompted in apart from one worth keeping.
 - `ContentManager.addContent(Content, int)` inserts at that index and reads -1 as "append", which is the only supported way to put a tab back at the strip position it had.

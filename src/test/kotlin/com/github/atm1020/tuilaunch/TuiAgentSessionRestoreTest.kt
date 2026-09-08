@@ -23,6 +23,7 @@ private const val CLAUDE_REPORTED_SESSION = "5c2a7f88-40b6-4d19-b3e7-9a1c0d6f4e2
 private const val CODEX_TRANSCRIPT_PATH = "/Users/falleng0d/.codex/sessions/2026/09/08/rollout.jsonl"
 private const val OLDER_OMP_SESSION = "2026-09-07T21-15-03-123Z_019a4f3c7b217cd09e553f1b2a6d8c47.jsonl"
 private const val NEWEST_OMP_SESSION = "2026-09-08T09-02-11-000Z_019a52118c334de1af664e2c3b7e9d58.jsonl"
+private const val OMP_SESSION_ID = "019a4f3c7b217cd09e553f1b2a6d8c47"
 private const val OPENCODE_PORT = 45123
 private const val AGENT_SESSION_TIMEOUT_SECONDS = 30
 private const val QUIET_MILLIS = 200L
@@ -194,7 +195,61 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertEquals(CODEX_SESSION_ID, savedTabs().single().agentSessionId)
     }
 
-    fun testAnOmpTabResumesTheNewestSessionFileOfItsOwnDirectory() {
+    fun testAFreshOmpTabLoadsTheBundledExtension() {
+        configureApp("omp", "omp")
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("omp", "omp")
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf("omp ${ompSessionArguments(tabUuid)}"), factory.commands)
+        assertTrue(Files.isRegularFile(ompFollowSessionExtension()))
+        assertNull(savedTabs().single().agentSessionId)
+    }
+
+    fun testAWrappedOmpTabTakesTheBundledExtensionThroughHeadroom() {
+        configureApp("omp", "headroom wrap omp --no-serena")
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("omp", "headroom wrap omp --no-serena")
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(
+            listOf("headroom wrap omp --no-serena -- ${ompSessionArguments(tabUuid)}"),
+            factory.commands,
+        )
+        assertTrue(Files.isRegularFile(ompFollowSessionExtension()))
+    }
+
+    fun testAnOmpTabResumesTheSessionItsExtensionReported() {
+        configureApp("omp", "headroom wrap omp")
+        val directory = ompSessionDirectory(TAB_UUID)
+        val reported = directory.resolve(OLDER_OMP_SESSION)
+        write(reported, "{}")
+        write(directory.resolve(NEWEST_OMP_SESSION), "{}")
+        write(
+            directory.resolve("tuilaunch-active.json"),
+            """{"sessionFile":"$reported","sessionId":"$OMP_SESSION_ID"}""",
+        )
+        saveTab(TuiSessionRecord("omp", "omp", true, TAB_UUID, agentCliKind = "OMP"))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+
+        assertEquals(
+            listOf(
+                "headroom wrap omp -- ${ompSessionArguments(TAB_UUID)} " +
+                    "--resume ${ShellWords.quote(reported.toString())}"
+            ),
+            factory.commands,
+        )
+        assertEquals(OMP_SESSION_ID, savedTabs().single().agentSessionId)
+    }
+
+    fun testAnOmpTabWithoutAReportResumesTheNewestSessionFileOfItsOwnDirectory() {
         configureApp("omp", "headroom wrap omp")
         val directory = ompSessionDirectory(TAB_UUID)
         write(directory.resolve(OLDER_OMP_SESSION), "{}")
@@ -208,8 +263,26 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         assertEquals(
             listOf(
-                "headroom wrap omp -- --session-dir ${ShellWords.quote(directory.toString())} " +
+                "headroom wrap omp -- ${ompSessionArguments(TAB_UUID)} " +
                     "--resume ${ShellWords.quote(newest.toString())}"
+            ),
+            factory.commands,
+        )
+        assertNull(savedTabs().single().agentSessionId)
+    }
+
+    fun testAnOmpCommandLoadingATrustedExtensionKeepsItsOwnExtensionList() {
+        configureApp("omp", "omp --trusted-extension /Users/falleng0d/own.js")
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("omp", "omp --trusted-extension /Users/falleng0d/own.js")
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(
+            listOf(
+                "omp --trusted-extension /Users/falleng0d/own.js " +
+                    "--session-dir ${ShellWords.quote(ompSessionDirectory(tabUuid).toString())}"
             ),
             factory.commands,
         )
@@ -702,6 +775,14 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
     private fun ompSessionDirectory(tabUuid: String): Path = environment.ompRoot
         .resolve("sessions")
         .resolve("--tuilaunch-${project.locationHash}-$tabUuid--")
+
+    private fun ompFollowSessionExtension(): Path = environment.bundledDirectory
+        .resolve("omp")
+        .resolve("tuilaunch-follow-session.js")
+
+    private fun ompSessionArguments(tabUuid: String): String =
+        "--session-dir ${ShellWords.quote(ompSessionDirectory(tabUuid).toString())} " +
+            "--hook ${ShellWords.quote(ompFollowSessionExtension().toString())}"
 
     private fun write(file: Path, content: String) {
         Files.createDirectories(file.parent)

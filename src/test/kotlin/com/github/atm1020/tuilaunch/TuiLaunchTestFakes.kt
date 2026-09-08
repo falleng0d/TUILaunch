@@ -338,6 +338,7 @@ internal fun temporaryAgentSessionEnvironment(): AgentSessionEnvironment {
     return AgentSessionEnvironment(
         homeDirectory = root.resolve("home"),
         stateDirectory = root.resolve("state"),
+        bundledDirectory = root.resolve("integrations"),
         claudeConfigDir = root.resolve("claude").toString(),
         piCodingAgentDir = root.resolve("omp").toString(),
     )

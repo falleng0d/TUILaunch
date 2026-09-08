@@ -7,6 +7,7 @@ class AgentCommand private constructor(
     val wrappedByHeadroom: Boolean,
     val userSelectsASession: Boolean,
     val chainsOtherCommands: Boolean,
+    val loadsATrustedExtension: Boolean,
 ) {
     val isManageable: Boolean
         get() = kind != null && !userSelectsASession && !chainsOtherCommands
@@ -43,6 +44,8 @@ class AgentCommand private constructor(
             ),
         )
 
+        private val TRUSTED_EXTENSION_FLAGS = mapOf(AgentCliKind.OMP to listOf("--trusted-extension"))
+
         fun parse(command: String): AgentCommand {
             val tokens = ShellWords.split(command)
             val programIndex = programIndexIn(tokens)
@@ -55,8 +58,11 @@ class AgentCommand private constructor(
                 tokens = tokens,
                 kind = kind,
                 wrappedByHeadroom = wrappedByHeadroom,
-                userSelectsASession = kind != null && selectsASession(kind, arguments),
+                userSelectsASession = kind != null &&
+                    anyArgumentMatches(arguments, SESSION_SELECTORS.getValue(kind)),
                 chainsOtherCommands = kind != null && chainsOtherCommands(command, arguments),
+                loadsATrustedExtension = kind != null &&
+                    anyArgumentMatches(arguments, TRUSTED_EXTENSION_FLAGS[kind].orEmpty()),
             )
         }
 
@@ -83,13 +89,11 @@ class AgentCommand private constructor(
             ShellWords.baseName(tokens.getOrNull(index).orEmpty()) == HEADROOM_PROGRAM &&
                 tokens.getOrNull(index + 1) == HEADROOM_WRAP_SUBCOMMAND
 
-        private fun selectsASession(kind: AgentCliKind, arguments: List<String>): Boolean {
-            val selectors = SESSION_SELECTORS.getValue(kind)
-            return arguments.any { argument ->
-                selectors.any { selector ->
-                    argument == selector || (selector.startsWith("-") && argument.startsWith("$selector="))
+        private fun anyArgumentMatches(arguments: List<String>, flags: List<String>): Boolean =
+            arguments.any { argument ->
+                flags.any { flag ->
+                    argument == flag || (flag.startsWith("-") && argument.startsWith("$flag="))
                 }
             }
-        }
     }
 }

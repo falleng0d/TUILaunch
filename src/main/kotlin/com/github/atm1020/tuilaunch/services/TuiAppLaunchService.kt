@@ -16,6 +16,7 @@ import com.github.atm1020.tuilaunch.resume.AgentSessionStrategy
 import com.github.atm1020.tuilaunch.resume.AgentStateFiles
 import com.github.atm1020.tuilaunch.resume.ClaudeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
+import com.github.atm1020.tuilaunch.resume.OmpSessionStrategy
 import com.github.atm1020.tuilaunch.resume.RememberedSession
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
@@ -48,6 +49,7 @@ const val TUI_TOOL_WINDOW_ID = "TUILaunch"
 private const val SUBMIT_KEY_CHAR = '\r'
 private const val PLUGIN_STATE_DIRECTORY = "TUILaunch"
 private const val AGENT_SESSION_STATE_DIRECTORY = "agent-sessions"
+private const val BUNDLED_INTEGRATIONS_DIRECTORY = "integrations"
 private const val EARLY_EXIT_RELAUNCH_WINDOW_MILLIS = 15_000L
 
 internal fun uniqueSessionTitle(base: String, taken: Set<String>): String {
@@ -77,12 +79,17 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     var promptBoxCompletions: PromptBoxCopilotStarter = PromptBoxCopilotStarter()
     var agentSessionEnvironment: () -> AgentSessionEnvironment = {
         AgentSessionEnvironment.fromSystem(
-            Path.of(
+            stateDirectory = Path.of(
                 PathManager.getSystemPath(),
                 PLUGIN_STATE_DIRECTORY,
                 AGENT_SESSION_STATE_DIRECTORY,
                 project.locationHash,
-            )
+            ),
+            bundledDirectory = Path.of(
+                PathManager.getSystemPath(),
+                PLUGIN_STATE_DIRECTORY,
+                BUNDLED_INTEGRATIONS_DIRECTORY,
+            ),
         )
     }
     var agentSessionStrategies: (AgentCliKind, AgentSessionEnvironment) -> AgentSessionStrategy =
@@ -555,6 +562,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val tab = TabIdentity(intent.tabUuid, projectPath, project.locationHash)
         val strategy = agentSessionStrategies(kind, agentSessionEnvironment())
         val remembered = rememberedSessionOf(intent, kind)
+        if (strategy is OmpSessionStrategy) strategy.hookAllowed = !parsed.loadsATrustedExtension
         strategy.prepareLaunch(tab)
         val arguments = when (intent) {
             is LaunchIntent.Fresh -> strategy.launchArguments(tab)
@@ -593,7 +601,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         AgentCliKind.CLAUDE -> claudeSessionId(strategy, tab, intent)
         AgentCliKind.CODEX -> codexSessionIdOnRestore(strategy, tab, intent)
         AgentCliKind.OPENCODE -> remembered.agentSessionId
-        AgentCliKind.OMP -> null
+        AgentCliKind.OMP -> ompSessionIdOnRestore(strategy, tab, intent)
     }
 
     private fun claudeSessionId(
@@ -614,6 +622,16 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         if (intent !is LaunchIntent.Restore) return null
         val codex = strategy as? CodexSessionStrategy ?: return null
         return codex.readSessionId(codex.stateFile(tab))
+    }
+
+    private fun ompSessionIdOnRestore(
+        strategy: AgentSessionStrategy,
+        tab: TabIdentity,
+        intent: LaunchIntent,
+    ): String? {
+        if (intent !is LaunchIntent.Restore) return null
+        val omp = strategy as? OmpSessionStrategy ?: return null
+        return omp.readSessionId(omp.activeSessionFile(tab))
     }
 
     private fun onSessionTerminated(host: IdeToolWindowHost, tab: OpenTab) {

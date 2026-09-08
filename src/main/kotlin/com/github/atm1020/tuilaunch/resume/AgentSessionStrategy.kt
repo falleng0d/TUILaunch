@@ -85,6 +85,7 @@ object AgentStateFiles {
 data class AgentSessionEnvironment(
     val homeDirectory: Path,
     val stateDirectory: Path,
+    val bundledDirectory: Path,
     val claudeConfigDir: String? = null,
     val piCodingAgentDir: String? = null,
 ) {
@@ -101,12 +102,14 @@ data class AgentSessionEnvironment(
         const val CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
         const val PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
 
-        fun fromSystem(stateDirectory: Path): AgentSessionEnvironment = AgentSessionEnvironment(
-            homeDirectory = Path.of(System.getProperty("user.home")),
-            stateDirectory = stateDirectory,
-            claudeConfigDir = System.getenv(CLAUDE_CONFIG_DIR),
-            piCodingAgentDir = System.getenv(PI_CODING_AGENT_DIR),
-        )
+        fun fromSystem(stateDirectory: Path, bundledDirectory: Path): AgentSessionEnvironment =
+            AgentSessionEnvironment(
+                homeDirectory = Path.of(System.getProperty("user.home")),
+                stateDirectory = stateDirectory,
+                bundledDirectory = bundledDirectory,
+                claudeConfigDir = System.getenv(CLAUDE_CONFIG_DIR),
+                piCodingAgentDir = System.getenv(PI_CODING_AGENT_DIR),
+            )
     }
 }
 
@@ -120,7 +123,7 @@ object AgentSessionStrategies {
         AgentCliKind.CLAUDE -> ClaudeSessionStrategy(environment.claudeHome, environment.stateDirectory)
         AgentCliKind.CODEX -> CodexSessionStrategy(environment.stateDirectory)
         AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(freePort, openCodeApi)
-        AgentCliKind.OMP -> OmpSessionStrategy(environment.ompRoot)
+        AgentCliKind.OMP -> OmpSessionStrategy(environment.ompRoot, environment.bundledDirectory)
     }
 
     fun allocateFreePort(): Int = ServerSocket(0).use { it.localPort }

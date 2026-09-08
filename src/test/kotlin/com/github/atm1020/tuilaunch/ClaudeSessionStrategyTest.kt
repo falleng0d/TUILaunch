@@ -259,6 +259,7 @@ class ClaudeSessionStrategyTest {
         val environment = AgentSessionEnvironment(
             homeDirectory = temporaryFolder.newFolder("home").toPath(),
             stateDirectory = temporaryFolder.newFolder("state").toPath(),
+            bundledDirectory = temporaryFolder.newFolder("integrations").toPath(),
             claudeConfigDir = temporaryFolder.newFolder("claude-config").toString(),
         )
         val strategy = AgentSessionStrategies.forKind(AgentCliKind.CLAUDE, environment) as ClaudeSessionStrategy
@@ -280,6 +281,7 @@ class ClaudeSessionStrategyTest {
         val environment = AgentSessionEnvironment(
             homeDirectory = home,
             stateDirectory = temporaryFolder.newFolder("plain-state").toPath(),
+            bundledDirectory = temporaryFolder.newFolder("plain-integrations").toPath(),
             claudeConfigDir = "  ",
         )
 

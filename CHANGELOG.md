@@ -14,6 +14,14 @@
   and a codex `/side` or `/btw` excursion is ignored because those conversations cannot be resumed. A tab
   whose CLI reported nothing yet still falls back to the conversation of its own tab identifier, so a tab you
   never typed in comes back fresh.
+- A reopened `omp` tab comes back to the session you were last in as well. Its launch loads a small extension of
+  the plugin's own with `--hook`, kept in `<IDE system directory>/TUILaunch/integrations/omp/` and written there
+  when it is missing or out of date, which records the session omp is in inside the tab's own session directory
+  as you switch with `/new`, `/resume`, `/fork`, `/branch` or `/tree` and after every turn. Nothing under
+  `~/.omp` is written. A tab whose extension recorded nothing resumes the session file of its directory that was
+  changed last, rather than the one whose name sorts highest, so a session you resumed and kept working in is
+  picked again. A command that carries `--trusted-extension` is launched without the hook, because omp refuses
+  those two flags together.
 
 ## [0.10.0] - 2026-09-08
 

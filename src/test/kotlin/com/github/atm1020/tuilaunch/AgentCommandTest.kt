@@ -135,6 +135,34 @@ class AgentCommandTest {
     }
 
     @Test
+    fun aTrustedExtensionIsDetectedInEverySpelling() {
+        for (command in listOf(
+            "omp --trusted-extension /x/y.ts",
+            "omp --trusted-extension=/x/y.ts",
+            "omp --model opus --trusted-extension /x/y.ts",
+            "headroom wrap omp --trusted-extension /x",
+            "headroom wrap omp --no-serena -- --trusted-extension /x",
+        )) {
+            assertTrue(command, AgentCommand.parse(command).loadsATrustedExtension)
+            assertFalse(command, AgentCommand.parse(command).userSelectsASession)
+            assertTrue(command, AgentCommand.parse(command).isManageable)
+        }
+    }
+
+    @Test
+    fun anOrdinaryExtensionIsNotATrustedOne() {
+        for (command in listOf(
+            "omp -e foo.ts",
+            "omp --hook /x/y.js",
+            "omp",
+            "claude --trusted-extension /x/y.ts",
+            "lazygit --trusted-extension /x/y.ts",
+        )) {
+            assertFalse(command, AgentCommand.parse(command).loadsATrustedExtension)
+        }
+    }
+
+    @Test
     fun theFlagEqualsValueSpellingSelectsASession() {
         assertTrue(AgentCommand.parse("claude --session-id=abc").userSelectsASession)
         assertTrue(AgentCommand.parse("omp --resume=/tmp/a.jsonl").userSelectsASession)
