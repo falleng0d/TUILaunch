@@ -19,6 +19,7 @@ import com.github.atm1020.tuilaunch.ui.COPILOT_STATUS_NAME
 import com.github.atm1020.tuilaunch.ui.DETECTING_COPILOT_SERVER_TEXT
 import com.github.atm1020.tuilaunch.ui.FOCUS_PROMPT_FILE_LABEL
 import com.github.atm1020.tuilaunch.ui.FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL
+import com.github.atm1020.tuilaunch.ui.HIDE_PROMPT_BOX_AFTER_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.JETBRAINS_AI_COMPLETION_SOURCE_ITEM
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_SIZE_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_VISIBILITY_PER_APP_LABEL
@@ -65,6 +66,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             rememberPromptBoxVisibilityPerApp = false
             rememberPromptBoxSizePerApp = false
             focusTuiAfterPromptBoxSend = false
+            hidePromptBoxAfterSend = false
             promptBoxCompletionSource = PromptBoxCompletionSource.JETBRAINS_AI
             copilotLanguageServerPath = ""
             copilotPromptHistoryContext = true
@@ -929,6 +931,70 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     fun testAnUntouchedPanelIsUnmodifiedWithTheFocusTuiAfterSendFlagOn() {
         TuiLauncherSettings.getInstance().state.focusTuiAfterPromptBoxSend = true
+
+        val configurable = configuration()
+        configurable.createComponent()
+
+        assertFalse(configurable.isModified())
+    }
+
+    fun testTheHidePromptBoxAfterSendCheckBoxIsPresentAndOffByDefault() {
+        val component = configuration().createComponent() as JPanel
+
+        assertFalse(findCheckBox(component, HIDE_PROMPT_BOX_AFTER_SEND_LABEL)!!.isSelected)
+    }
+
+    fun testTurningTheHidePromptBoxAfterSendFlagOnIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, HIDE_PROMPT_BOX_AFTER_SEND_LABEL)!!.isSelected = true
+        configurable.apply()
+
+        assertTrue(settings.state.hidePromptBoxAfterSend)
+        assertFalse(settings.state.focusTuiAfterPromptBoxSend)
+    }
+
+    fun testTurningTheHidePromptBoxAfterSendFlagBackOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.hidePromptBoxAfterSend = true
+
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, HIDE_PROMPT_BOX_AFTER_SEND_LABEL)!!
+        assertTrue(checkbox.isSelected)
+
+        checkbox.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.hidePromptBoxAfterSend)
+    }
+
+    fun testTogglingTheHidePromptBoxAfterSendFlagMarksThePanelModified() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, HIDE_PROMPT_BOX_AFTER_SEND_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresTheHidePromptBoxAfterSendCheckBox() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, HIDE_PROMPT_BOX_AFTER_SEND_LABEL)!!
+
+        checkbox.doClick()
+        configurable.reset()
+
+        assertFalse(checkbox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testAnUntouchedPanelIsUnmodifiedWithTheHidePromptBoxAfterSendFlagOn() {
+        TuiLauncherSettings.getInstance().state.hidePromptBoxAfterSend = true
 
         val configurable = configuration()
         configurable.createComponent()

@@ -27,6 +27,7 @@ internal class PromptBoxSender(
     private val sendToSession: (text: String, submit: Boolean) -> Boolean,
     private val focusSession: () -> Unit,
     private val promptDocument: () -> Document? = promptFileDocumentSupplier(project),
+    private val hideBox: () -> Unit = {},
 ) {
 
     fun send(box: PromptBox) {
@@ -43,7 +44,14 @@ internal class PromptBoxSender(
         appendToThePromptFile(prompt, settings.appendPromptSeparatorOnSend)
         box.clear()
         box.historyReset()
-        if (settings.focusTuiAfterPromptBoxSend) focusSession() else box.requestFocus()
+        when {
+            settings.hidePromptBoxAfterSend -> {
+                hideBox()
+                focusSession()
+            }
+            settings.focusTuiAfterPromptBoxSend -> focusSession()
+            else -> box.requestFocus()
+        }
     }
 
     private fun appendToThePromptFile(prompt: String, leaveOpenSlot: Boolean) {

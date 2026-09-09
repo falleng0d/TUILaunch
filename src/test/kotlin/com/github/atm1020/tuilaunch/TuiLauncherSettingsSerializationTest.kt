@@ -165,6 +165,23 @@ class TuiLauncherSettingsSerializationTest {
     }
 
     @Test
+    fun `the prompt box stays open after a send by default`() {
+        val state = TuiLauncherSettings.State()
+
+        assertFalse(state.hidePromptBoxAfterSend)
+        assertFalse(optionNames(state).contains("hidePromptBoxAfterSend"))
+    }
+
+    @Test
+    fun `hiding the prompt box after a send survives serialization`() {
+        val restored = roundTrip(TuiLauncherSettings.State(hidePromptBoxAfterSend = true))
+
+        assertTrue(restored.hidePromptBoxAfterSend)
+        assertFalse(restored.focusTuiAfterPromptBoxSend)
+        assertFalse(restored.promptBoxVisible)
+    }
+
+    @Test
     fun `the prefix key for focusing the prompt box starts unset`() {
         val state = TuiLauncherSettings.State()
 

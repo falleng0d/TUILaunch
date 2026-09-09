@@ -31,6 +31,7 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
     private var submitPromptOnSendBeforeTest = true
     private var appendPromptSeparatorBeforeTest = true
     private var focusTuiAfterSendBeforeTest = false
+    private var hidePromptBoxAfterSendBeforeTest = false
     private var stripTrailingSpacesBeforeTest = EditorSettingsExternalizable.STRIP_TRAILING_SPACES_CHANGED
     private var removeTrailingBlankLinesBeforeTest = false
     private var ensureNewLineAtEofBeforeTest = false
@@ -45,6 +46,7 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
         submitPromptOnSendBeforeTest = settingsState.submitPromptOnSend
         appendPromptSeparatorBeforeTest = settingsState.appendPromptSeparatorOnSend
         focusTuiAfterSendBeforeTest = settingsState.focusTuiAfterPromptBoxSend
+        hidePromptBoxAfterSendBeforeTest = settingsState.hidePromptBoxAfterSend
         settingsState.apply {
             tuiApps.clear()
             restoreOpenTabs = false
@@ -55,6 +57,7 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
             submitPromptOnSend = false
             appendPromptSeparatorOnSend = false
             focusTuiAfterPromptBoxSend = false
+            hidePromptBoxAfterSend = false
         }
         promptBoxFocusRequest = { box -> focusedBoxes.add(box) }
         promptBoxHoldsFocus = { false }
@@ -69,6 +72,7 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
             settingsState.submitPromptOnSend = submitPromptOnSendBeforeTest
             settingsState.appendPromptSeparatorOnSend = appendPromptSeparatorBeforeTest
             settingsState.focusTuiAfterPromptBoxSend = focusTuiAfterSendBeforeTest
+            settingsState.hidePromptBoxAfterSend = hidePromptBoxAfterSendBeforeTest
             editorSettings.stripTrailingSpaces = stripTrailingSpacesBeforeTest
             editorSettings.isRemoveTrailingBlankLines = removeTrailingBlankLinesBeforeTest
             editorSettings.isEnsureNewLineAtEOF = ensureNewLineAtEofBeforeTest
@@ -88,7 +92,11 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
         return (splitter.secondComponent as PromptBoxPanel).promptBox
     }
 
-    private fun boxSending(session: FakeSession, promptDocument: () -> Document?): PromptBox {
+    private fun boxSending(
+        session: FakeSession,
+        promptDocument: () -> Document?,
+        hideBox: () -> Unit = {},
+    ): PromptBox {
         val terminal = session.asTerminalSession()
         val sender = PromptBoxSender(
             project = project,
@@ -97,6 +105,7 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
             },
             focusSession = { terminal.requestFocus() },
             promptDocument = promptDocument,
+            hideBox = hideBox,
         )
         val disposable = Disposer.newDisposable("PromptBoxSenderTest")
         boxDisposables.add(disposable)
@@ -266,10 +275,87 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
         assertEquals(focusCountBeforeTheSend + 1, session.focusCount)
     }
 
+    fun testAfterASendTheBoxIsHiddenBeforeTheSessionTakesTheKeyboardWhenTheSettingIsOn() {
+        settingsState.hidePromptBoxAfterSend = true
+        val session = FakeSession()
+        var hideRequests = 0
+        var sessionFocusCountWhenHidden = -1
+        val box = boxSending(session, { null }) {
+            hideRequests++
+            sessionFocusCountWhenHidden = session.focusCount
+        }
+        box.text = "Fix the bug"
+
+        box.send()
+
+        assertEquals(1, hideRequests)
+        assertEquals(0, sessionFocusCountWhenHidden)
+        assertEquals(1, session.focusCount)
+        assertEmpty(focusedBoxes)
+    }
+
+    fun testAfterASendTheBoxIsLeftOpenWhileTheSettingIsOff() {
+        val session = FakeSession()
+        var hideRequests = 0
+        val box = boxSending(session, { null }) { hideRequests++ }
+        box.text = "Fix the bug"
+
+        box.send()
+
+        assertEquals(0, hideRequests)
+        assertEquals(0, session.focusCount)
+        assertEquals(listOf(box), focusedBoxes)
+    }
+
+    fun testHidingTheBoxAfterASendWinsOverMovingTheFocusToTheTui() {
+        settingsState.hidePromptBoxAfterSend = true
+        settingsState.focusTuiAfterPromptBoxSend = true
+        val session = FakeSession()
+        var hideRequests = 0
+        val box = boxSending(session, { null }) { hideRequests++ }
+        box.text = "Fix the bug"
+
+        box.send()
+
+        assertEquals(1, hideRequests)
+        assertEquals(1, session.focusCount)
+        assertEmpty(focusedBoxes)
+    }
+
+    fun testARefusedSendLeavesTheBoxOpenWhileTheHideSettingIsOn() {
+        settingsState.hidePromptBoxAfterSend = true
+        val session = FakeSession(terminalAcceptsText = false)
+        var hideRequests = 0
+        val box = boxSending(session, { null }) { hideRequests++ }
+        box.text = "Fix the bug"
+
+        box.send()
+
+        assertEquals(0, hideRequests)
+        assertEquals(0, session.focusCount)
+        assertEmpty(focusedBoxes)
+        assertEquals("Fix the bug", box.text)
+    }
+
+    fun testABlankBoxIsLeftOpenWhileTheHideSettingIsOn() {
+        settingsState.hidePromptBoxAfterSend = true
+        val session = FakeSession()
+        var hideRequests = 0
+        val box = boxSending(session, promptDocument = { null }) { hideRequests++ }
+        box.text = "\n  \n"
+
+        box.send()
+
+        assertEmpty(session.sentText)
+        assertEquals(0, hideRequests)
+        assertEquals(0, session.focusCount)
+        assertEmpty(focusedBoxes)
+    }
+
     fun testTheInjectedPromptDocumentIsTheOneTheSendAppendsTo() {
         myFixture.configureByText("PROMPT.md", "---\n\nfirst prompt\n")
         val session = FakeSession()
-        val box = boxSending(session) { myFixture.editor.document }
+        val box = boxSending(session, promptDocument = { myFixture.editor.document })
         box.text = "second prompt"
 
         box.send()
@@ -281,7 +367,7 @@ class PromptBoxSenderTest : BasePlatformTestCase() {
 
     fun testAPromptWithNowhereToBeRecordedIsStillSentAndClearsTheBox() {
         val session = FakeSession()
-        val box = boxSending(session) { null }
+        val box = boxSending(session, promptDocument = { null })
         box.text = "Fix the bug"
 
         box.send()

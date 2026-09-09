@@ -44,6 +44,7 @@ class PromptBoxHistoryNavigationTest : BasePlatformTestCase() {
     private var submitPromptOnSendBeforeTest = true
     private var appendPromptSeparatorBeforeTest = true
     private var focusTuiAfterSendBeforeTest = false
+    private var hidePromptBoxAfterSendBeforeTest = false
 
     override fun setUp() {
         super.setUp()
@@ -51,9 +52,11 @@ class PromptBoxHistoryNavigationTest : BasePlatformTestCase() {
         submitPromptOnSendBeforeTest = settingsState.submitPromptOnSend
         appendPromptSeparatorBeforeTest = settingsState.appendPromptSeparatorOnSend
         focusTuiAfterSendBeforeTest = settingsState.focusTuiAfterPromptBoxSend
+        hidePromptBoxAfterSendBeforeTest = settingsState.hidePromptBoxAfterSend
         settingsState.submitPromptOnSend = false
         settingsState.appendPromptSeparatorOnSend = false
         settingsState.focusTuiAfterPromptBoxSend = false
+        settingsState.hidePromptBoxAfterSend = false
         promptBoxFocusRequest = { }
         promptBoxHoldsFocus = { false }
     }
@@ -66,6 +69,7 @@ class PromptBoxHistoryNavigationTest : BasePlatformTestCase() {
             settingsState.submitPromptOnSend = submitPromptOnSendBeforeTest
             settingsState.appendPromptSeparatorOnSend = appendPromptSeparatorBeforeTest
             settingsState.focusTuiAfterPromptBoxSend = focusTuiAfterSendBeforeTest
+            settingsState.hidePromptBoxAfterSend = hidePromptBoxAfterSendBeforeTest
         } finally {
             super.tearDown()
         }

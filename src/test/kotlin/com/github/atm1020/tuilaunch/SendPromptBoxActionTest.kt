@@ -35,6 +35,7 @@ class SendPromptBoxActionTest : BasePlatformTestCase() {
             submitPromptOnSend = false
             appendPromptSeparatorOnSend = false
             focusTuiAfterPromptBoxSend = false
+            hidePromptBoxAfterSend = false
         }
         promptBoxFocusRequest = { }
         promptBoxHoldsFocus = { false }

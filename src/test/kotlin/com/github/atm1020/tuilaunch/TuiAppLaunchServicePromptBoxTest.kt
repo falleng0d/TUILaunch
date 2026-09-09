@@ -51,6 +51,7 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
             promptBoxPercent = 30
             rememberPromptBoxVisibilityPerApp = false
             rememberPromptBoxSizePerApp = false
+            hidePromptBoxAfterSend = false
         }
     }
 
@@ -421,6 +422,87 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
         assertSame(open.tabs[0], host.activeTab())
         assertEmpty(focusedBoxes)
         assertEquals(sessionFocusCountsBeforeSwitching, open.sessions.map { it.focusCount })
+    }
+
+    fun testASendWithTheHideSettingOnHidesTheBoxAndLeavesTheKeyboardInThatTabsSession() {
+        val session = FakeSession()
+        val (service, host) = newService(listOf(session))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        state().hidePromptBoxAfterSend = true
+        val handle = host.tabs.single()
+        val box = promptBoxOf(host, handle)
+        box.text = "Fix the bug"
+        focusedBoxes.clear()
+        val sessionFocusCountBeforeTheSend = session.focusCount
+
+        box.send()
+
+        assertEquals(listOf("Fix the bug"), session.sentText)
+        assertFalse(promptBoxIsVisibleIn(host, handle))
+        assertFalse(state().promptBoxVisible)
+        assertEmpty(focusedBoxes)
+        assertEquals(sessionFocusCountBeforeTheSend + 1, session.focusCount)
+    }
+
+    fun testASendFromABoxHoldingTheKeyboardAsksThatTabsSessionForItOnce() {
+        val session = FakeSession()
+        val (service, host) = newService(listOf(session))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        state().hidePromptBoxAfterSend = true
+        val handle = host.tabs.single()
+        val box = promptBoxOf(host, handle)
+        box.text = "Fix the bug"
+        theBoxHoldingFocus = box
+        focusedBoxes.clear()
+        val sessionFocusCountBeforeTheSend = session.focusCount
+
+        box.send()
+
+        assertFalse(promptBoxIsVisibleIn(host, handle))
+        assertEmpty(focusedBoxes)
+        assertEquals(sessionFocusCountBeforeTheSend + 1, session.focusCount)
+    }
+
+    fun testATabLaunchedAfterASendThatHidTheBoxOpensWithItHidden() {
+        val (service, host) = newService(listOf(FakeSession(), FakeSession()))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        state().hidePromptBoxAfterSend = true
+        val box = promptBoxOf(host, host.tabs.single())
+        box.text = "Fix the bug"
+
+        box.send()
+        service.launchNew("claude", "claude")
+
+        assertEquals(2, host.tabs.size)
+        assertFalse(promptBoxIsVisibleIn(host, host.tabs.last()))
+        assertNull(promptBoxPanelOf(host, host.tabs.last()).promptBox.installedEditor)
+    }
+
+    fun testInPerAppModeASendThatHidesTheBoxOnlyReachesTabsOfThatApp() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        open.service.setPromptBoxVisible(true)
+        state().rememberPromptBoxVisibilityPerApp = true
+        state().hidePromptBoxAfterSend = true
+        val claudeBox = promptBoxOf(host, open.tabs[0])
+        claudeBox.text = "Fix the bug"
+        focusedBoxes.clear()
+        val sessionFocusCountsBeforeTheSend = open.sessions.map { it.focusCount }
+
+        claudeBox.send()
+
+        assertEquals(listOf("Fix the bug"), open.sessions[0].sentText)
+        assertFalse(promptBoxIsVisibleIn(host, open.tabs[0]))
+        assertTrue(promptBoxIsVisibleIn(host, open.tabs[1]))
+        assertEquals(false, appConfig("claude").promptBoxVisible)
+        assertNull(appConfig("codex").promptBoxVisible)
+        assertTrue(state().promptBoxVisible)
+        assertEmpty(focusedBoxes)
+        assertEquals(sessionFocusCountsBeforeTheSend[0] + 1, open.sessions[0].focusCount)
+        assertEquals(sessionFocusCountsBeforeTheSend[1], open.sessions[1].focusCount)
     }
 
     fun testShowingTheBoxStartsTheCopilotServerWhileCopilotIsTheCompletionSource() {

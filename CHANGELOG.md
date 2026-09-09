@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Hide the prompt box after sending from it** closes the box as soon as a prompt has been sent from it and puts
+  the cursor in that tab's session, so the terminal has the whole tab between prompts. The box closes the way the
+  toggle closes it, so it stays closed for the next tab that opens with that visibility and the **Toggle Prompt Box**
+  button, or the `TUILauncher.FocusPromptBox` action once it has a shortcut, is what brings it back.
+
 ### Fixed
 
 - <kbd>Escape</kbd> in the prompt box hands the keyboard to the terminal without the app running there also seeing an

@@ -76,7 +76,10 @@ box is emptied for the next prompt. Sending follows the same settings as the pla
 text, and **Add a new prompt separator to PROMPT.md after sending** decides whether the file is left with a fresh
 empty slot. Nothing is written to the file and the box is not emptied when the session refuses the text. The cursor
 stays in the box after a send, like a chat input, unless **Move focus to the TUI after sending from the prompt box**
-is turned on.
+is turned on. Turn on **Hide the prompt box after sending from it** and a send closes the box the way the toggle
+closes it, with the cursor landing in that tab's session, so the terminal has the whole tab between prompts. The box
+stays closed for every tab that shares its visibility and for the next tab that opens with that visibility, so the
+**Toggle Prompt Box** button, or `TUILauncher.FocusPromptBox` once you give it a shortcut, is what brings it back.
 
 <kbd>Up</kbd> on the first row and <kbd>Down</kbd> on the last row walk the prompts already recorded in `PROMPT.md`
 the way a shell walks its command history; anywhere else inside a longer prompt both keys just move the cursor. A

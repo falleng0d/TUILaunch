@@ -385,14 +385,23 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     fun setPromptBoxVisible(visible: Boolean) {
         val host = hostWithListeners() ?: return
         val tab = activeOrLastOpenTab(host) ?: return
-        promptBoxPreferences.rememberVisibility(tab.appName, visible)
         val promptBoxHadFocus = tab.promptBox.hasFocus()
-        tabsSharingPromptBoxVisibilityWith(tab).forEach { showPromptBox(it, visible) }
+        rememberAndShowPromptBox(tab, visible)
         if (visible) {
             tab.promptBox.requestFocus()
         } else if (promptBoxHadFocus) {
             tab.session.requestFocus()
         }
+    }
+
+    private fun rememberAndShowPromptBox(tab: OpenTab, visible: Boolean) {
+        promptBoxPreferences.rememberVisibility(tab.appName, visible)
+        tabsSharingPromptBoxVisibilityWith(tab).forEach { showPromptBox(it, visible) }
+    }
+
+    private fun hidePromptBoxOf(sessionId: String) {
+        val tab = tabsNotClosing()[sessionId] ?: return
+        rememberAndShowPromptBox(tab, false)
     }
 
     fun togglePromptBox() {
@@ -517,7 +526,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                 val promptBox = PromptBox(
                     project = project,
                     parentDisposable = disposable,
-                    sender = promptBoxSenderFor(session),
+                    sender = promptBoxSenderFor(sessionId, session),
                     focusSession = { session.requestFocus() },
                     spendKeyPress = session::spendKeyPress,
                     existingPromptDocument = existingPromptDocument,
@@ -703,11 +712,12 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         return TabIdentity(tab.tabUuid, projectPath, project.locationHash)
     }
 
-    private fun promptBoxSenderFor(session: TerminalSession): PromptBoxSender = PromptBoxSender(
+    private fun promptBoxSenderFor(sessionId: String, session: TerminalSession): PromptBoxSender = PromptBoxSender(
         project = project,
         sendToSession = { text, submit -> sendTo(session, text, submit) },
         focusSession = { session.requestFocus() },
         promptDocument = promptDocument,
+        hideBox = { hidePromptBoxOf(sessionId) },
     )
 
     private fun newTabLayout(
