@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-09-09
+
 ### Added
 
 - **Hide the prompt box after sending from it** closes the box as soon as a prompt has been sent from it and puts
@@ -338,7 +340,8 @@
      - Sessions are managed in their own TUILaunch tool window.
 - Added tmux-like prefix keybindings inside TUI terminals.
 
-[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/atm1020/TUILaunch/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/atm1020/TUILaunch/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/atm1020/TUILaunch/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/atm1020/TUILaunch/compare/v0.9.0...v0.10.0
