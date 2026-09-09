@@ -27,6 +27,7 @@ import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.event.KeyAdapter
@@ -217,10 +218,9 @@ class TuiLauncherConfiguration internal constructor(
     private fun createSessionAndKeybindingsPanel(): JComponent =
         JPanel(BorderLayout(0, 6)).apply {
             add(
-                JPanel().apply {
-                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                    add(createSessionOptionsPanel())
-                    add(createPromptBoxCompletionsPanel())
+                JPanel(BorderLayout()).apply {
+                    add(createSessionOptionsPanel(), BorderLayout.NORTH)
+                    add(createPromptBoxCompletionsPanel(), BorderLayout.CENTER)
                 },
                 BorderLayout.NORTH,
             )
@@ -256,17 +256,23 @@ class TuiLauncherConfiguration internal constructor(
         promptBoxSizePerAppCheckBox = promptBoxSizeCheckBox
         focusTuiAfterPromptBoxSendCheckBox = focusTuiAfterSendCheckBox
         hidePromptBoxAfterSendCheckBox = hideAfterSendCheckBox
+        val sessionOptions = listOf(
+            restoreCheckBox,
+            agentSessionsCheckBox,
+            submitCheckBox,
+            separatorCheckBox,
+            focusPromptCheckBox,
+            promptBoxVisibilityCheckBox,
+            promptBoxSizeCheckBox,
+            focusTuiAfterSendCheckBox,
+            hideAfterSendCheckBox,
+        )
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(restoreCheckBox)
-            add(agentSessionsCheckBox)
-            add(submitCheckBox)
-            add(separatorCheckBox)
-            add(focusPromptCheckBox)
-            add(promptBoxVisibilityCheckBox)
-            add(promptBoxSizeCheckBox)
-            add(focusTuiAfterSendCheckBox)
-            add(hideAfterSendCheckBox)
+            sessionOptions.forEach { checkBox ->
+                checkBox.alignmentX = Component.LEFT_ALIGNMENT
+                add(checkBox)
+            }
         }
     }
 

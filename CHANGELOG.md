@@ -13,6 +13,13 @@
 
 ### Fixed
 
+- The session checkboxes in **Settings > Tools > TUI Launcher** sit under the app table again instead of being pushed
+  towards the right edge of the page, far enough over on a wide page that their labels ran off it. The checkbox column and the **Prompt box
+  completions** group were stacked in one vertical box, and such a box lines its children up on a shared alignment
+  point instead of on the left edge; the column is the only one of the two that cannot stretch, because a checkbox is
+  never given more width than its own label needs, so it was the one that ended up at that point. The two now sit in a
+  border layout, which places both at the left whatever the page width, and each checkbox is pinned to the left edge of
+  the column as well.
 - <kbd>Escape</kbd> in the prompt box hands the keyboard to the terminal without the app running there also seeing an
   escape. That press was only meant to move the cursor, but AWT replays a key press to whichever component ends up
   with the keyboard, so the box now tells the terminal the press is used up before asking for the keyboard, and the

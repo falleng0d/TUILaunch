@@ -21,6 +21,7 @@ import com.github.atm1020.tuilaunch.ui.FOCUS_PROMPT_FILE_LABEL
 import com.github.atm1020.tuilaunch.ui.FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.HIDE_PROMPT_BOX_AFTER_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.JETBRAINS_AI_COMPLETION_SOURCE_ITEM
+import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_COMPLETIONS_TITLE
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_SIZE_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_VISIBILITY_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.RESTORE_AGENT_SESSIONS_LABEL
@@ -45,6 +46,7 @@ import javax.swing.JComboBox
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JTable
+import javax.swing.border.TitledBorder
 
 class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
@@ -585,6 +587,50 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         reopenTabs.doClick()
 
         assertTrue(resumeSessions.isEnabled)
+    }
+
+    fun testTheSessionOptionCheckBoxesLineUpUnderTheAppTableAtAnyPageWidth() {
+        val page = configuration().createComponent() as JPanel
+        layOutTheTree(page, PAGE_WIDTH, PAGE_HEIGHT)
+        val justWideEnoughForTheWidestOption =
+            2 * leftEdgeIn(page, appsTablePanel(page)) + widestSessionOptionWidth(page)
+
+        listOf(PAGE_WIDTH, justWideEnoughForTheWidestOption).forEach { pageWidth ->
+            layOutTheTree(page, pageWidth, PAGE_HEIGHT)
+            val tableLeft = leftEdgeIn(page, appsTablePanel(page))
+
+            assertTrue(tableLeft > 0)
+            SESSION_OPTION_LABELS.forEach { label ->
+                val checkBox = findCheckBox(page, label)!!
+                val left = leftEdgeIn(page, checkBox)
+                val message = "$label on a $pageWidth px page"
+
+                assertEquals(message, tableLeft, left)
+                assertTrue(message, left + checkBox.preferredSize.width <= pageWidth)
+            }
+        }
+    }
+
+    fun testTheAgentSessionCheckBoxIsTheOnlyIndentedSessionOption() {
+        val page = configuration().createComponent() as JPanel
+        layOutTheTree(page, PAGE_WIDTH, PAGE_HEIGHT)
+        val plainIndents = SESSION_OPTION_LABELS
+            .filterNot { it == RESTORE_AGENT_SESSIONS_LABEL }
+            .map { findCheckBox(page, it)!!.insets.left }
+        val resumeSessionsIndent = findCheckBox(page, RESTORE_AGENT_SESSIONS_LABEL)!!.insets.left
+
+        assertEquals(listOf(plainIndents.first()), plainIndents.distinct())
+        assertTrue(resumeSessionsIndent > plainIndents.first())
+    }
+
+    fun testThePromptBoxCompletionsGroupSitsAtTheLeftUnderTheSessionOptions() {
+        val page = configuration().createComponent() as JPanel
+        layOutTheTree(page, PAGE_WIDTH, PAGE_HEIGHT)
+        val completions = promptBoxCompletionsPanel(page)
+        val lastOption = findCheckBox(page, HIDE_PROMPT_BOX_AFTER_SEND_LABEL)!!
+
+        assertEquals(leftEdgeIn(page, appsTablePanel(page)), leftEdgeIn(page, completions))
+        assertTrue(topEdgeIn(page, completions) >= topEdgeIn(page, lastOption) + lastOption.height)
     }
 
     fun testTurningTheAgentSessionResumeOffIsPersisted() {
@@ -1338,6 +1384,48 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         fail("Expected ConfigurationException")
     }
 
+    private fun layOutTheTree(page: JPanel, width: Int, height: Int) {
+        page.setBounds(0, 0, width, height)
+        layOutEveryContainer(page)
+    }
+
+    private fun layOutEveryContainer(component: Component) {
+        if (component !is Container) return
+        component.doLayout()
+        component.components.forEach { layOutEveryContainer(it) }
+    }
+
+    private fun leftEdgeIn(page: JPanel, component: Component): Int {
+        var left = 0
+        var current: Component? = component
+        while (current != null && current !== page) {
+            left += current.x
+            current = current.parent
+        }
+        assertSame(page, current)
+        return left
+    }
+
+    private fun topEdgeIn(page: JPanel, component: Component): Int {
+        var top = 0
+        var current: Component? = component
+        while (current != null && current !== page) {
+            top += current.y
+            current = current.parent
+        }
+        assertSame(page, current)
+        return top
+    }
+
+    private fun widestSessionOptionWidth(page: JPanel): Int =
+        SESSION_OPTION_LABELS.maxOf { findCheckBox(page, it)!!.preferredSize.width }
+
+    private fun appsTablePanel(page: JPanel): Component =
+        generateSequence(findAppsTable(page) as Component) { it.parent }.first { it.parent === page }
+
+    private fun promptBoxCompletionsPanel(page: JPanel): Component =
+        findComponent<JPanel>(page) { (it.border as? TitledBorder)?.title == PROMPT_BOX_COMPLETIONS_TITLE }!!
+
     private fun descendantsOf(container: Container): Sequence<Component> = sequence {
         for (component in container.components) {
             yield(component)
@@ -1379,5 +1467,19 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
 
     private companion object {
         const val AUTO_DETECTION_TIMEOUT_SECONDS = 30
+        const val PAGE_WIDTH = 1200
+        const val PAGE_HEIGHT = 900
+
+        val SESSION_OPTION_LABELS = listOf(
+            RESTORE_OPEN_TABS_LABEL,
+            RESTORE_AGENT_SESSIONS_LABEL,
+            SUBMIT_PROMPT_ON_SEND_LABEL,
+            APPEND_PROMPT_SEPARATOR_LABEL,
+            FOCUS_PROMPT_FILE_LABEL,
+            PROMPT_BOX_VISIBILITY_PER_APP_LABEL,
+            PROMPT_BOX_SIZE_PER_APP_LABEL,
+            FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL,
+            HIDE_PROMPT_BOX_AFTER_SEND_LABEL,
+        )
     }
 }
