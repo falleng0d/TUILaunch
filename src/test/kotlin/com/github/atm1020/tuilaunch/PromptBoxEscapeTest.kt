@@ -21,6 +21,9 @@ import com.intellij.openapi.ui.Splitter
 import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.TestActionEvent
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
+import java.awt.event.MouseEvent
 
 class PromptBoxEscapeTest : BasePlatformTestCase() {
 
@@ -29,6 +32,7 @@ class PromptBoxEscapeTest : BasePlatformTestCase() {
     private val focusRequestOutsideThisTest = promptBoxFocusRequest
     private val focusCheckOutsideThisTest = promptBoxHoldsFocus
     private var sessionFocusCount = 0
+    private val whatTheSessionWasAskedToDo = mutableListOf<String>()
 
     override fun setUp() {
         super.setUp()
@@ -55,7 +59,17 @@ class PromptBoxEscapeTest : BasePlatformTestCase() {
     private fun standaloneBox(): PromptBox {
         val disposable = Disposer.newDisposable("PromptBoxEscapeTest")
         boxDisposables.add(disposable)
-        val box = PromptBox(project, disposable, focusSession = { sessionFocusCount++ })
+        val box = PromptBox(
+            project,
+            disposable,
+            focusSession = {
+                sessionFocusCount++
+                whatTheSessionWasAskedToDo += "take the keyboard"
+            },
+            spendKeyPress = { keyEvent ->
+                whatTheSessionWasAskedToDo += "spend the ${keyEvent.keyCode} press"
+            },
+        )
         box.installEditor()
         return box
     }
@@ -71,11 +85,20 @@ class PromptBoxEscapeTest : BasePlatformTestCase() {
         return (splitter.secondComponent as PromptBoxPanel).promptBox.also { it.installEditor() }
     }
 
-    private fun eventFor(action: AnAction, box: PromptBox?): AnActionEvent {
+    private fun eventFor(action: AnAction, box: PromptBox?, inputEvent: InputEvent? = null): AnActionEvent {
         val context = SimpleDataContext.builder().add(CommonDataKeys.PROJECT, project)
         if (box != null) context.add(PROMPT_BOX_DATA_KEY, box)
-        return TestActionEvent.createTestEvent(action, context.build())
+        return TestActionEvent.createTestEvent(action, context.build(), inputEvent)
     }
+
+    private fun escapeKeyEvent(box: PromptBox): KeyEvent = KeyEvent(
+        box.component,
+        KeyEvent.KEY_PRESSED,
+        System.currentTimeMillis(),
+        0,
+        KeyEvent.VK_ESCAPE,
+        KeyEvent.CHAR_UNDEFINED,
+    )
 
     private fun updatedPresentation(box: PromptBox?): Presentation {
         val action = PromptBoxEscapeAction()
@@ -84,9 +107,11 @@ class PromptBoxEscapeTest : BasePlatformTestCase() {
         return event.presentation
     }
 
-    private fun pressEscapeIn(box: PromptBox) {
+    private fun pressEscapeIn(box: PromptBox): KeyEvent {
         val action = PromptBoxEscapeAction()
-        action.actionPerformed(eventFor(action, box))
+        val keyEvent = escapeKeyEvent(box)
+        action.actionPerformed(eventFor(action, box, keyEvent))
+        return keyEvent
     }
 
     fun testEscapeIsEnabledWhileTheBoxOnlyHoldsText() {
@@ -140,6 +165,46 @@ class PromptBoxEscapeTest : BasePlatformTestCase() {
         assertFalse(box.editor.selectionModel.hasSelection())
         assertEquals(0, sessionFocusCount)
         assertEquals("a prompt", box.text)
+        assertEmpty(whatTheSessionWasAskedToDo)
+    }
+
+    fun testEscapeTellsTheSessionThePressIsSpentBeforeHandingItTheKeyboard() {
+        val box = standaloneBox()
+
+        pressEscapeIn(box)
+
+        assertEquals(
+            listOf("spend the ${KeyEvent.VK_ESCAPE} press", "take the keyboard"),
+            whatTheSessionWasAskedToDo,
+        )
+    }
+
+    fun testEscapeWithoutAKeyPressBehindItOnlyHandsOverTheKeyboard() {
+        val box = standaloneBox()
+        val action = PromptBoxEscapeAction()
+
+        action.actionPerformed(eventFor(action, box))
+
+        assertEquals(listOf("take the keyboard"), whatTheSessionWasAskedToDo)
+    }
+
+    fun testEscapeTriggeredBySomethingOtherThanAKeyOnlyHandsOverTheKeyboard() {
+        val box = standaloneBox()
+        val action = PromptBoxEscapeAction()
+        val click = MouseEvent(
+            box.component,
+            MouseEvent.MOUSE_CLICKED,
+            System.currentTimeMillis(),
+            0,
+            0,
+            0,
+            1,
+            false,
+        )
+
+        action.actionPerformed(eventFor(action, box, click))
+
+        assertEquals(listOf("take the keyboard"), whatTheSessionWasAskedToDo)
     }
 
     fun testEscapeWithoutASelectionHandsTheKeyboardToTheSession() {
@@ -171,5 +236,14 @@ class PromptBoxEscapeTest : BasePlatformTestCase() {
         pressEscapeIn(box)
 
         assertEquals(focusCountBeforeEscape + 1, session.focusCount)
+    }
+
+    fun testEscapeInATabsBoxSpendsThePressOnThatTabsSession() {
+        val session = FakeSession()
+        val box = boxOfALaunchedTab(session)
+
+        val keyEvent = pressEscapeIn(box)
+
+        assertEquals(listOf(keyEvent), session.spentKeyPresses)
     }
 }

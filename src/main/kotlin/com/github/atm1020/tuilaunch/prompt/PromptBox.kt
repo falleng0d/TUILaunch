@@ -104,6 +104,7 @@ internal class PromptBox(
     private val parentDisposable: Disposable,
     private val sender: PromptBoxSender? = null,
     private val focusSession: () -> Unit = {},
+    private val spendKeyPress: (KeyEvent) -> Unit = {},
     private val existingPromptDocument: () -> Document? = existingPromptFileDocumentSupplier(project),
 ) {
 
@@ -180,12 +181,13 @@ internal class PromptBox(
         browsedHistory = null
     }
 
-    fun escapeToTheSession() {
+    fun escapeToTheSession(keyEvent: KeyEvent?) {
         val selection = editorIfInstalled?.selectionModel
         if (selection != null && selection.hasSelection()) {
             selection.removeSelection()
             return
         }
+        keyEvent?.let(spendKeyPress)
         focusSession()
     }
 
@@ -362,7 +364,7 @@ internal class PromptBoxEscapeAction : DumbAwareAction() {
     }
 
     override fun actionPerformed(e: AnActionEvent) {
-        e.getData(PROMPT_BOX_DATA_KEY)?.escapeToTheSession()
+        e.getData(PROMPT_BOX_DATA_KEY)?.escapeToTheSession(e.inputEvent as? KeyEvent)
     }
 }
 

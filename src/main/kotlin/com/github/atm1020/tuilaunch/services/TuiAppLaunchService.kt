@@ -519,6 +519,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     parentDisposable = disposable,
                     sender = promptBoxSenderFor(session),
                     focusSession = { session.requestFocus() },
+                    spendKeyPress = session::spendKeyPress,
                     existingPromptDocument = existingPromptDocument,
                 )
                 val layout = newTabLayout(host, appName, session, promptBox)

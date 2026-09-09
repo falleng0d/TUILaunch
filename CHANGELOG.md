@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- <kbd>Escape</kbd> in the prompt box hands the keyboard to the terminal without the app running there also seeing an
+  escape. That press was only meant to move the cursor, but AWT replays a key press to whichever component ends up
+  with the keyboard, so the box now tells the terminal the press is used up before asking for the keyboard, and the
+  terminal ignores a key press another part of the IDE has already handled.
+
 ## [0.11.1] - 2026-09-09
 
 ### Changed

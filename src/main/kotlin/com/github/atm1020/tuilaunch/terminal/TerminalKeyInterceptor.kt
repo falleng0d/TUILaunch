@@ -40,11 +40,7 @@ class TerminalKeyInterceptor(
             return true
         }
 
-        if (!isFocusInsideTerminal(e)) {
-            prefixArmed = false
-            consumeNextTypedEvent = false
-            return false
-        }
+        if (e.isConsumed || !isFocusInsideTerminal(e)) return leaveThePressToTheIde()
 
         if (prefixArmed) {
             prefixArmed = false
@@ -77,6 +73,18 @@ class TerminalKeyInterceptor(
             return swallowHandledPress(e)
         }
 
+        return leaveThePressToTheIde()
+    }
+
+    fun spendKeyPress(event: KeyEvent) {
+        prefixArmed = false
+        lastFiredWhen = event.`when`
+        lastFiredKeyCode = event.keyCode
+        consumeNextTypedEvent = true
+    }
+
+    private fun leaveThePressToTheIde(): Boolean {
+        prefixArmed = false
         consumeNextTypedEvent = false
         return false
     }

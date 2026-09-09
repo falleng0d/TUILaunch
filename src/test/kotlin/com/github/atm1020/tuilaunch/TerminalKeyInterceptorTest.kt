@@ -250,6 +250,124 @@ class TerminalKeyInterceptorTest {
     }
 
     @Test
+    fun spentPressReturningFromTheTerminalIsSwallowed() {
+        val dispatcher = newDispatcher()
+        val escape = keyPress(KeyEvent.VK_ESCAPE, whenMs = 1_000L)
+
+        dispatcher.spendKeyPress(escape)
+        escape.consume()
+
+        assertTrue(dispatcher.dispatchKeyEvent(escape))
+        assertTrue(sentKeys.isEmpty())
+    }
+
+    @Test
+    fun spentPressIsSwallowedOnEveryDelivery() {
+        val dispatcher = newDispatcher()
+        val escape = keyPress(KeyEvent.VK_ESCAPE, whenMs = 1_000L)
+
+        dispatcher.spendKeyPress(escape)
+        escape.consume()
+
+        assertTrue(dispatcher.dispatchKeyEvent(escape))
+        assertTrue(dispatcher.dispatchKeyEvent(escape))
+        assertTrue(sentKeys.isEmpty())
+    }
+
+    @Test
+    fun aSpentPressForgetsAnArmedPrefix() {
+        val dispatcher = newDispatcher()
+        armPrefix(dispatcher)
+
+        dispatcher.spendKeyPress(keyPress(KeyEvent.VK_ESCAPE, whenMs = 1_000L))
+
+        assertFalse(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_C, whenMs = 2_000L)))
+        assertEquals(0, closeCount)
+    }
+
+    @Test
+    fun anArmedPrefixIsForgottenWhenAnotherPartOfTheIdeTakesThePress() {
+        val dispatcher = newDispatcher()
+        armPrefix(dispatcher)
+        val takenElsewhere = keyPress(KeyEvent.VK_S, KeyEvent.META_DOWN_MASK).also { it.consume() }
+
+        assertFalse(dispatcher.dispatchKeyEvent(takenElsewhere))
+
+        assertFalse(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_C)))
+        assertEquals(0, closeCount)
+    }
+
+    @Test
+    fun aTypedCharIsNotSwallowedAfterAnotherPartOfTheIdeTakesThePress() {
+        val dispatcher = newDispatcher()
+        dispatcher.spendKeyPress(keyPress(KeyEvent.VK_ESCAPE, whenMs = 1_000L))
+        val takenElsewhere = keyPress(KeyEvent.VK_S, KeyEvent.META_DOWN_MASK, whenMs = 2_000L)
+            .also { it.consume() }
+
+        assertFalse(dispatcher.dispatchKeyEvent(takenElsewhere))
+
+        assertFalse(dispatcher.dispatchKeyEvent(keyTyped('a')))
+    }
+
+    @Test
+    fun spentPressAlsoSwallowsItsTypedChar() {
+        val dispatcher = newDispatcher()
+
+        dispatcher.spendKeyPress(keyPress(KeyEvent.VK_ESCAPE, whenMs = 1_000L))
+
+        assertTrue(dispatcher.dispatchKeyEvent(keyTyped('\u001B')))
+        assertTrue(sentKeys.isEmpty())
+    }
+
+    @Test
+    fun aLaterEscapeAfterASpentPressIsStillForwarded() {
+        val dispatcher = newDispatcher()
+        dispatcher.spendKeyPress(keyPress(KeyEvent.VK_ESCAPE, whenMs = 1_000L))
+
+        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_ESCAPE, whenMs = 2_000L)))
+
+        assertEquals(1, sentKeys.size)
+    }
+
+    @Test
+    fun anUnrelatedPressAfterASpentPressStillWorks() {
+        val dispatcher = newDispatcher()
+        dispatcher.spendKeyPress(keyPress(KeyEvent.VK_ESCAPE, whenMs = 1_000L))
+
+        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_RIGHT, KeyEvent.ALT_DOWN_MASK, whenMs = 2_000L)))
+
+        assertEquals(1, nextTabCount)
+    }
+
+    @Test
+    fun anAlreadyConsumedEscapeIsNotForwarded() {
+        val dispatcher = newDispatcher()
+        val consumedElsewhere = keyPress(KeyEvent.VK_ESCAPE).also { it.consume() }
+
+        assertFalse(dispatcher.dispatchKeyEvent(consumedElsewhere))
+        assertTrue(sentKeys.isEmpty())
+    }
+
+    @Test
+    fun anAlreadyConsumedTabShortcutIsNotActedOn() {
+        val dispatcher = newDispatcher()
+        val consumedElsewhere = keyPress(KeyEvent.VK_RIGHT, KeyEvent.ALT_DOWN_MASK).also { it.consume() }
+
+        assertFalse(dispatcher.dispatchKeyEvent(consumedElsewhere))
+        assertEquals(0, nextTabCount)
+    }
+
+    @Test
+    fun anAlreadyConsumedPrefixComboDoesNotArmThePrefix() {
+        val dispatcher = newDispatcher()
+        val consumedElsewhere = keyPress(KeyEvent.VK_SPACE, KeyEvent.CTRL_DOWN_MASK).also { it.consume() }
+
+        assertFalse(dispatcher.dispatchKeyEvent(consumedElsewhere))
+        assertFalse(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_C)))
+        assertEquals(0, closeCount)
+    }
+
+    @Test
     fun nextTabShortcutWhileFocusedSwitchesTuiTabs() {
         val dispatcher = newDispatcher()
         assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_RIGHT, KeyEvent.ALT_DOWN_MASK)))

@@ -1,6 +1,7 @@
 package com.github.atm1020.tuilaunch.terminal
 
 import com.intellij.openapi.Disposable
+import java.awt.event.KeyEvent
 import javax.swing.JComponent
 
 class TerminalSession(
@@ -11,7 +12,15 @@ class TerminalSession(
     private val sendKey: (keyCode: Int, modifiers: Int, keyChar: Char) -> Unit = { _, _, _ -> },
     private val sendText: (String) -> Boolean = { false },
 ) {
+    private var keyPressSpender: (KeyEvent) -> Unit = {}
+
     fun requestFocus() = requestFocus.invoke()
+
+    fun spendKeyPressesWith(spender: (KeyEvent) -> Unit) {
+        keyPressSpender = spender
+    }
+
+    fun spendKeyPress(event: KeyEvent) = keyPressSpender(event)
 
     fun sendKey(keyCode: Int, modifiers: Int, keyChar: Char) = sendKey.invoke(keyCode, modifiers, keyChar)
 

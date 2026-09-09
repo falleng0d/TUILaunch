@@ -48,6 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import java.awt.event.KeyEvent
 import java.nio.file.Path
 import java.util.Collections
 import java.util.concurrent.CompletableFuture
@@ -284,6 +285,7 @@ internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
     var focusCount = 0
     val sentText = mutableListOf<String>()
     val sentKeys = mutableListOf<SentKey>()
+    val spentKeyPresses = mutableListOf<KeyEvent>()
     private var terminationCallback: (() -> Unit)? = null
 
     fun requestFocus() {
@@ -303,7 +305,9 @@ internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
             sentText.add(text)
             terminalAcceptsText
         },
-    )
+    ).also { session ->
+        session.spendKeyPressesWith { spentKeyPresses.add(it) }
+    }
 }
 
 internal class FakeFactory(private val sessions: List<FakeSession>) : TerminalSessionFactory {

@@ -116,6 +116,7 @@ class JediTermSessionFactory(
             onNextTab = onNextTab,
             onPreviousTab = onPreviousTab,
         )
+        session.spendKeyPressesWith(dispatcher::spendKeyPress)
         val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
         focusManager.addKeyEventDispatcher(dispatcher)
         Disposer.register(parent) { focusManager.removeKeyEventDispatcher(dispatcher) }
