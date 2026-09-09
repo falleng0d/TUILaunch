@@ -78,8 +78,10 @@ empty slot. Nothing is written to the file and the box is not emptied when the s
 stays in the box after a send, like a chat input, unless **Move focus to the TUI after sending from the prompt box**
 is turned on.
 
-<kbd>Up</kbd> on the first line and <kbd>Down</kbd> on the last line walk the prompts already recorded in `PROMPT.md`
-the way a shell walks its command history; anywhere else inside a longer prompt both keys just move the cursor.
+<kbd>Up</kbd> on the first row and <kbd>Down</kbd> on the last row walk the prompts already recorded in `PROMPT.md`
+the way a shell walks its command history; anywhere else inside a longer prompt both keys just move the cursor. A
+long line the box wrapped onto several rows counts row by row, so both keys walk it row by row before they reach the
+history, and a folded code block counts as the single row it is shown as.
 <kbd>Up</kbd> shows the prompt sent last, then the one before it, and <kbd>Down</kbd> works back towards the newest
 one. Whatever you were typing is kept aside and comes back when <kbd>Down</kbd> walks past the newest prompt. Editing
 a prompt from the file turns that edit into the text kept aside while the prompt in the file stays as it is, so
@@ -366,6 +368,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - That listener is a field of `JBTerminalPanel` driven from that panel's own `handleKeyEvent`, so it only ever sees keys delivered to a terminal panel; a sibling component in the same tool window tab can bind Escape without it interfering.
 - IntelliJ delivers each `KEY_PRESSED` to a global `KeyEventDispatcher` twice; de-duplicate on (timestamp, key code) or a forwarded Escape reaches the child process twice.
 - Consuming a `KEY_PRESSED` does not suppress the matching `KEY_TYPED`, which has to be swallowed separately or its character still lands in the terminal; that only matters for printable characters, because JediTerm's `TerminalPanel.processTerminalKeyTyped` drops ISO control characters, so a typed Escape can never reach the child process.
+- `Editor.offsetToVisualLine(textLength, false)` is the last visual line of a document, and it accounts for both soft wraps and collapsed fold regions; `EditorUtil.logicalToVisualLine` answers a different question — the *first* visual line of a logical line — so it is off by the wrap count on a wrapped last line, and 262 has no line count on `EditorEx` to compare against.
 - `IdeEventQueue.dispatchKeyEvent` hands the event to AWT even after the action system consumed it, and `DefaultKeyboardFocusManager.preDispatchKeyEvent` then retargets that press to the *current* focus owner and runs every `KeyEventDispatcher` without looking at `isConsumed`, so a global dispatcher has to check that itself.
 - Requesting focus for another component of the same window enqueues the in-flight key press behind a type-ahead marker (`KeyboardFocusManager.shouldNativelyFocusHeavyweight`) and replays it once the new owner has focus, so an action that moves focus into the terminal on a key press must tell the interceptor that press is used up or the terminal receives it.
 - `NextTab`/`PreviousTab` keystrokes differ across the default, macOS and system-shortcut keymaps, so resolve them from `ActionManager` at event time rather than hardcoding them.

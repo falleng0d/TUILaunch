@@ -10,6 +10,10 @@
   escape. That press was only meant to move the cursor, but AWT replays a key press to whichever component ends up
   with the keyboard, so the box now tells the terminal the press is used up before asking for the keyboard, and the
   terminal ignores a key press another part of the IDE has already handled.
+- <kbd>Up</kbd> and <kbd>Down</kbd> inside a prompt long enough to be wrapped onto several rows now move the cursor
+  row by row instead of jumping straight to the history, because the box measures the cursor against the rows on
+  screen rather than against the lines in the text. A folded code block counts as the single row it is shown as, so
+  <kbd>Down</kbd> can now reach the history from a prompt whose last block is folded.
 
 ## [0.11.1] - 2026-09-09
 

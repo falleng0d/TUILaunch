@@ -23,9 +23,12 @@ import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.VisualPosition
+import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.JDOMUtil
+import com.intellij.testFramework.EditorTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import org.jdom.Element
 import java.awt.event.InputEvent
@@ -96,6 +99,16 @@ class PromptBoxHistoryNavigationTest : BasePlatformTestCase() {
 
     private fun moveTheCaretToLine(box: PromptBox, line: Int) {
         box.editor.caretModel.moveToOffset(box.editor.document.getLineStartOffset(line))
+    }
+
+    private fun wrapTheBoxAt(box: PromptBox, charactersPerRow: Int) {
+        assertTrue(EditorTestUtil.configureSoftWraps(box.editor, charactersPerRow))
+    }
+
+    private fun rowsOf(box: PromptBox): Int = (box.editor as EditorImpl).visibleLineCount
+
+    private fun moveTheCaretToRow(box: PromptBox, row: Int) {
+        box.editor.caretModel.moveToVisualPosition(VisualPosition(row, 0))
     }
 
     private fun arrowKeyEvent(box: PromptBox, keyCode: Int): KeyEvent = KeyEvent(
@@ -211,6 +224,58 @@ class PromptBoxHistoryNavigationTest : BasePlatformTestCase() {
 
         assertFalse(box.caretAtHistoryEdge(PromptHistoryDirection.PREVIOUS))
         assertTrue(box.caretAtHistoryEdge(PromptHistoryDirection.NEXT))
+    }
+
+    fun testAMiddleRowOfAPromptWrappedOntoSeveralRowsIsNeitherEdge() {
+        val box = boxOver(promptFile("first prompt\n"))
+        box.text = "one two three four five six seven eight nine"
+
+        wrapTheBoxAt(box, 12)
+
+        assertEquals(1, box.editor.document.lineCount)
+        assertTrue(rowsOf(box) > 2)
+
+        moveTheCaretToRow(box, 1)
+
+        assertFalse(box.caretAtHistoryEdge(PromptHistoryDirection.PREVIOUS))
+        assertFalse(box.caretAtHistoryEdge(PromptHistoryDirection.NEXT))
+    }
+
+    fun testTheFirstRowOfAWrappedPromptIsTheEdgeForUpOnly() {
+        val box = boxOver(promptFile("first prompt\n"))
+        box.text = "one two three four five six seven eight nine"
+        wrapTheBoxAt(box, 12)
+
+        moveTheCaretToRow(box, 0)
+
+        assertTrue(box.caretAtHistoryEdge(PromptHistoryDirection.PREVIOUS))
+        assertFalse(box.caretAtHistoryEdge(PromptHistoryDirection.NEXT))
+    }
+
+    fun testTheEndOfAWrappedPromptIsTheEdgeForDownOnly() {
+        val box = boxOver(promptFile("first prompt\n"))
+        box.text = "one two three four five six seven eight nine"
+        wrapTheBoxAt(box, 12)
+
+        box.editor.caretModel.moveToOffset(box.editor.document.textLength)
+
+        assertEquals(rowsOf(box) - 1, box.editor.caretModel.visualPosition.line)
+        assertFalse(box.caretAtHistoryEdge(PromptHistoryDirection.PREVIOUS))
+        assertTrue(box.caretAtHistoryEdge(PromptHistoryDirection.NEXT))
+    }
+
+    fun testAnArrowKeyOnAMiddleRowOfAWrappedPromptLeavesTheCaretMovementToTheEditor() {
+        val box = boxOver(promptFile("first prompt\n"))
+        box.text = "one two three four five six seven eight nine"
+        wrapTheBoxAt(box, 12)
+        assertTrue(rowsOf(box) > 2)
+        moveTheCaretToRow(box, 1)
+
+        val up = PromptHistoryPreviousAction()
+        val down = PromptHistoryNextAction()
+
+        assertFalse(updatedPresentation(up, box, arrowKeyEvent(box, KeyEvent.VK_UP)).isEnabled)
+        assertFalse(updatedPresentation(down, box, arrowKeyEvent(box, KeyEvent.VK_DOWN)).isEnabled)
     }
 
     fun testAnEmptyBoxIsAtBothEdgesAtOnce() {

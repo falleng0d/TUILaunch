@@ -199,12 +199,10 @@ internal class PromptBox(
 
     fun caretAtHistoryEdge(direction: PromptHistoryDirection): Boolean {
         val editor = editorIfInstalled ?: return false
-        val document = editor.document
-        if (document.lineCount == 0) return true
-        val caretLine = document.getLineNumber(editor.caretModel.offset)
+        val caretRow = editor.caretModel.visualPosition.line
         return when (direction) {
-            PromptHistoryDirection.PREVIOUS -> caretLine == 0
-            PromptHistoryDirection.NEXT -> caretLine == document.lineCount - 1
+            PromptHistoryDirection.PREVIOUS -> caretRow == 0
+            PromptHistoryDirection.NEXT -> caretRow == editor.offsetToVisualLine(editor.document.textLength, false)
         }
     }
 

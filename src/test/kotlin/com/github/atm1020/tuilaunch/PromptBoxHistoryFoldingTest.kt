@@ -1,6 +1,7 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.prompt.PromptBox
+import com.github.atm1020.tuilaunch.prompt.PromptHistoryDirection
 import com.intellij.codeInsight.folding.CodeFoldingManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.command.WriteCommandAction
@@ -202,6 +203,22 @@ class PromptBoxHistoryFoldingTest : BasePlatformTestCase() {
         assertEquals(entry, box.text)
         assertEquals(listOf("```"), collapsedRegionFirstLines(box))
         assertEquals(box.text.length, box.editor.caretModel.offset)
+    }
+
+    fun testTheRowAFoldedBlockIsShownAsCountsAsTheLastRowOfTheBox() {
+        val entry = "intro\n\n```\ncode\n```"
+        val box = boxOver("first prompt\n\n---\n\n$entry\n")
+        box.historyPrevious()
+
+        assertEquals(listOf("```"), collapsedRegionFirstLines(box))
+
+        val document = box.editor.document
+        val firstFenceLine = document.getLineNumber(document.text.indexOf("```"))
+        box.editor.caretModel.moveToOffset(document.getLineStartOffset(firstFenceLine))
+
+        assertTrue(firstFenceLine < document.lineCount - 1)
+        assertTrue(box.caretAtHistoryEdge(PromptHistoryDirection.NEXT))
+        assertFalse(box.caretAtHistoryEdge(PromptHistoryDirection.PREVIOUS))
     }
 
     fun testDownBackIntoTheDraftLeavesTheFencesTheUserTypedExpanded() {
