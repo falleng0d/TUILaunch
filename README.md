@@ -79,7 +79,8 @@ stays in the box after a send, like a chat input, unless **Move focus to the TUI
 is turned on. Turn on **Hide the prompt box after sending from it** and a send closes the box the way the toggle
 closes it, with the cursor landing in that tab's session, so the terminal has the whole tab between prompts. The box
 stays closed for every tab that shares its visibility and for the next tab that opens with that visibility, so the
-**Toggle Prompt Box** button, or `TUILauncher.FocusPromptBox` once you give it a shortcut, is what brings it back.
+**Toggle Prompt Box** button, or `TUILauncher.FocusPromptBox` once you give it a shortcut, is what brings it back and
+closes it again once the cursor is back in it.
 
 <kbd>Up</kbd> on the first row and <kbd>Down</kbd> on the last row walk the prompts already recorded in `PROMPT.md`
 the way a shell walks its command history; anywhere else inside a longer prompt both keys just move the cursor. A
@@ -108,8 +109,12 @@ showing. They come from JetBrains AI Assistant unless you pick GitHub Copilot in
 
 Three more actions ship with no shortcut and can be given one in <kbd>Settings/Preferences</kbd> > <kbd>Keymap</kbd>:
 
-- `TUILauncher.FocusPromptBox` — show the prompt box of the active TUI tab and put the cursor in it, from the editor,
-  from the terminal, or from the box itself. It is also available as a tmux-like prefix command, "Focus prompt box".
+- `TUILauncher.FocusPromptBox` — a toggle on the prompt box of the active TUI tab, from the editor, from the terminal,
+  or from the box itself: it shows the box and puts the cursor in it while the box is hidden, puts the cursor in it
+  while the box is showing without it, and closes the box the way the **Toggle Prompt Box** button closes it, with the
+  keyboard landing in that tab's terminal, while the cursor is already in it. It is also available as a tmux-like
+  prefix command, "Focus prompt box"; a prefix command is typed in the terminal, where the cursor is never in the box,
+  so that one only ever shows the box and puts the cursor in it.
 - `TUILauncher.PromptHistoryPrevious` / `TUILauncher.PromptHistoryNext` — the same history walk as <kbd>Up</kbd> and
   <kbd>Down</kbd>, from keys of your own. On macOS <kbd>Ctrl</kbd> + <kbd>P</kbd> and <kbd>Ctrl</kbd> + <kbd>N</kbd>
   already browse the history, because the box borrows the caret movement keys those are bound to.

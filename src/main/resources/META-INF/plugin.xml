@@ -122,8 +122,8 @@
              IDE keymap already binds it to, so the user assigns one in Settings | Keymap. -->
         <action id="TUILauncher.FocusPromptBox"
                 class="com.github.atm1020.tuilaunch.action.FocusPromptBoxAction"
-                text="TUILaunch Focus Prompt Box"
-                description="Show the prompt box of the active TUI session and move keyboard focus into it">
+                text="TUILaunch Toggle Prompt Box Focus"
+                description="Move keyboard focus into the prompt box of the active TUI session, showing it first when it is hidden, and hide it again when it already holds the focus">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
         <action id="TUILauncher.SendPromptBlock"

@@ -26,12 +26,13 @@ class FocusPromptBoxActionTest : BasePlatformTestCase() {
     private val focusRequestOutsideThisTest = promptBoxFocusRequest
     private val focusCheckOutsideThisTest = promptBoxHoldsFocus
     private val focusedBoxes = mutableListOf<PromptBox>()
+    private var theBoxHoldingFocus: PromptBox? = null
 
     override fun setUp() {
         super.setUp()
         resetPromptBoxSettings()
         promptBoxFocusRequest = { box -> focusedBoxes.add(box) }
-        promptBoxHoldsFocus = { false }
+        promptBoxHoldsFocus = { box -> box === theBoxHoldingFocus }
     }
 
     override fun tearDown() {
@@ -76,10 +77,13 @@ class FocusPromptBoxActionTest : BasePlatformTestCase() {
         return service
     }
 
-    private fun promptBoxIsVisibleIn(host: FakeHost, handle: Any): Boolean {
-        val splitter = host.componentOf(handle) as Splitter
-        return (splitter.secondComponent as PromptBoxPanel).isVisible
-    }
+    private fun promptBoxPanelOf(host: FakeHost, handle: Any): PromptBoxPanel =
+        (host.componentOf(handle) as Splitter).secondComponent as PromptBoxPanel
+
+    private fun promptBoxIsVisibleIn(host: FakeHost, handle: Any): Boolean =
+        promptBoxPanelOf(host, handle).isVisible
+
+    private fun promptBoxOf(host: FakeHost, handle: Any): PromptBox = promptBoxPanelOf(host, handle).promptBox
 
     private fun eventFor(action: AnAction): AnActionEvent =
         TestActionEvent.createTestEvent(action, SimpleDataContext.getProjectContext(project))
@@ -177,6 +181,97 @@ class FocusPromptBoxActionTest : BasePlatformTestCase() {
         assertEquals(1, focusedBoxes.size)
     }
 
+    fun testFocusingABoxThatHoldsTheKeyboardHidesItAndHandsTheKeyboardToTheSession() {
+        val session = FakeSession()
+        val (service, host) = newService(listOf(session))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        val handle = host.tabs.single()
+        theBoxHoldingFocus = promptBoxOf(host, handle)
+        focusedBoxes.clear()
+        val sessionFocusCountBeforeTheCall = session.focusCount
+
+        service.focusPromptBox()
+
+        assertEquals(false, service.isPromptBoxVisible())
+        assertFalse(promptBoxIsVisibleIn(host, handle))
+        assertFalse(state().promptBoxVisible)
+        assertEmpty(focusedBoxes)
+        assertEquals(sessionFocusCountBeforeTheCall + 1, session.focusCount)
+    }
+
+    fun testATabLaunchedAfterTheFocusActionHidTheBoxOpensWithItHidden() {
+        val (service, host) = newService(listOf(FakeSession(), FakeSession()))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        theBoxHoldingFocus = promptBoxOf(host, host.tabs.single())
+
+        service.focusPromptBox()
+        service.launchNew("claude", "claude")
+
+        assertEquals(2, host.tabs.size)
+        assertFalse(promptBoxIsVisibleIn(host, host.tabs.last()))
+        assertNull(promptBoxPanelOf(host, host.tabs.last()).promptBox.installedEditor)
+    }
+
+    fun testHidingTheBoxAgainStillSendsAClosedTabBackToTheEditor() {
+        val (service, host) = newService(listOf(FakeSession()))
+        service.activeToolWindowIdProvider = { TUI_TOOL_WINDOW_ID }
+        var editorFocusCount = 0
+        service.editorFocusRequest = { editorFocusCount++ }
+        service.launchNew("claude", "claude")
+
+        service.activeToolWindowIdProvider = { "Project" }
+        service.focusPromptBox()
+        theBoxHoldingFocus = promptBoxOf(host, host.tabs.single())
+        service.activeToolWindowIdProvider = { TUI_TOOL_WINDOW_ID }
+        service.focusPromptBox()
+
+        assertEquals(false, service.isPromptBoxVisible())
+
+        service.closeActiveTui()
+
+        assertEquals(1, editorFocusCount)
+    }
+
+    fun testTheShortcutBringsBackABoxItHidWhileTheFocusOwnerIsStillTheHiddenBox() {
+        val session = FakeSession()
+        val (service, host) = newService(listOf(session))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        val handle = host.tabs.single()
+        theBoxHoldingFocus = promptBoxOf(host, handle)
+
+        service.focusPromptBox()
+        focusedBoxes.clear()
+        val sessionFocusCountAfterTheHide = session.focusCount
+        service.focusPromptBox()
+
+        assertEquals(true, service.isPromptBoxVisible())
+        assertTrue(promptBoxIsVisibleIn(host, handle))
+        assertEquals(1, focusedBoxes.size)
+        assertEquals(sessionFocusCountAfterTheHide, session.focusCount)
+    }
+
+    fun testTheShortcutRevealsAHiddenToolWindowInsteadOfHidingTheBoxItStillHolds() {
+        val session = FakeSession()
+        val (service, host) = newService(listOf(session))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        val handle = host.tabs.single()
+        theBoxHoldingFocus = promptBoxOf(host, handle)
+        host.hide()
+        focusedBoxes.clear()
+        val sessionFocusCountBeforeTheCall = session.focusCount
+
+        service.focusPromptBox()
+
+        assertTrue(host.visible)
+        assertEquals(true, service.isPromptBoxVisible())
+        assertEquals(1, focusedBoxes.size)
+        assertEquals(sessionFocusCountBeforeTheCall, session.focusCount)
+    }
+
     fun testTheActionIsDisabledWhileNoTabIsOpen() {
         theProjectServiceWithoutTabs()
         val action = FocusPromptBoxAction()
@@ -209,7 +304,7 @@ class FocusPromptBoxActionTest : BasePlatformTestCase() {
         val declared = declaredFocusPromptBoxAction()
 
         assertEquals(FocusPromptBoxAction::class.java.name, declared.getAttributeValue("class"))
-        assertEquals("TUILaunch Focus Prompt Box", declared.getAttributeValue("text"))
+        assertEquals("TUILaunch Toggle Prompt Box Focus", declared.getAttributeValue("text"))
         assertEquals(
             listOf("ToolsMenu"),
             declared.getChildren("add-to-group").map { it.getAttributeValue("group-id") },

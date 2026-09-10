@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `TUILauncher.FocusPromptBox` now closes the prompt box when the cursor is already in it, so one shortcut brings the
+  box up, puts the cursor in it and puts it away again. It closes the box the way the **Toggle Prompt Box** button
+  does, with the keyboard landing in that tab's terminal. From a tmux-like prefix command, typed in the terminal, the
+  cursor is never in the box, so that one still only shows the box and puts the cursor in it. The action is called
+  **TUILaunch Toggle Prompt Box Focus** in <kbd>Keymap</kbd> and the <kbd>Tools</kbd> menu now; a shortcut you have
+  already assigned to it keeps working, because its id is unchanged.
+
 ## [0.11.2] - 2026-09-09
 
 ### Added

@@ -505,6 +505,68 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
         assertEquals(sessionFocusCountsBeforeTheSend[1], open.sessions[1].focusCount)
     }
 
+    fun testFocusingABoxThatHoldsTheKeyboardHidesItWhileAVisibleBoxWithoutItOnlyTakesTheCursor() {
+        val session = FakeSession()
+        val (service, host) = newService(listOf(session))
+        service.launchNew("claude", "claude")
+        service.setPromptBoxVisible(true)
+        val handle = host.tabs.single()
+        focusedBoxes.clear()
+        val sessionFocusCountBeforeTheCalls = session.focusCount
+
+        service.focusPromptBox()
+
+        assertEquals(true, service.isPromptBoxVisible())
+        assertEquals(1, focusedBoxes.size)
+        assertEquals(sessionFocusCountBeforeTheCalls, session.focusCount)
+
+        theBoxHoldingFocus = promptBoxOf(host, handle)
+        service.focusPromptBox()
+
+        assertEquals(false, service.isPromptBoxVisible())
+        assertEquals(1, focusedBoxes.size)
+        assertEquals(sessionFocusCountBeforeTheCalls + 1, session.focusCount)
+    }
+
+    fun testInPerAppModeFocusingABoxThatHoldsTheKeyboardOnlyHidesTabsOfThatApp() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        open.service.setPromptBoxVisible(true)
+        state().rememberPromptBoxVisibilityPerApp = true
+        host.selectTab(open.tabs[0])
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[0])
+        focusedBoxes.clear()
+        val sessionFocusCountsBeforeTheCall = open.sessions.map { it.focusCount }
+
+        open.service.focusPromptBox()
+
+        assertFalse(promptBoxIsVisibleIn(host, open.tabs[0]))
+        assertTrue(promptBoxIsVisibleIn(host, open.tabs[1]))
+        assertEquals(false, appConfig("claude").promptBoxVisible)
+        assertTrue(state().promptBoxVisible)
+        assertEmpty(focusedBoxes)
+        assertEquals(sessionFocusCountsBeforeTheCall[0] + 1, open.sessions[0].focusCount)
+        assertEquals(sessionFocusCountsBeforeTheCall[1], open.sessions[1].focusCount)
+    }
+
+    fun testABoxHoldingTheKeyboardInAnotherTabDoesNotStopTheActiveTabsBoxFromTakingTheCursor() {
+        val open = launchTwoAppsWithTheirSessions()
+        val host = open.host
+        open.service.setPromptBoxVisible(true)
+        host.selectTab(open.tabs[0])
+        theBoxHoldingFocus = promptBoxOf(host, open.tabs[1])
+        focusedBoxes.clear()
+        val sessionFocusCountsBeforeTheCall = open.sessions.map { it.focusCount }
+
+        open.service.focusPromptBox()
+
+        assertEquals(true, open.service.isPromptBoxVisible())
+        assertTrue(promptBoxIsVisibleIn(host, open.tabs[0]))
+        assertTrue(promptBoxIsVisibleIn(host, open.tabs[1]))
+        assertEquals(listOf(promptBoxOf(host, open.tabs[0])), focusedBoxes)
+        assertEquals(sessionFocusCountsBeforeTheCall, open.sessions.map { it.focusCount })
+    }
+
     fun testShowingTheBoxStartsTheCopilotServerWhileCopilotIsTheCompletionSource() {
         val (service, _) = newService(listOf(FakeSession()))
         val backend = FakeCopilotCompletionBackend()

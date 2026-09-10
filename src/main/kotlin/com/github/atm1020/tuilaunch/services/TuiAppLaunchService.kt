@@ -412,6 +412,10 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     fun focusPromptBox() {
         val host = hostWithListeners() ?: return
         val tab = activeOrLastOpenTab(host) ?: return
+        if (host.isVisible() && promptBoxHoldsTheFocus(tab)) {
+            setPromptBoxVisible(false)
+            return
+        }
         tab.openedFromTui = isTuiFocused()
         selectTuiTab(host, tab, requestFocus = false)
         if (tab.layout.promptBoxVisible) tab.promptBox.requestFocus() else setPromptBoxVisible(true)
