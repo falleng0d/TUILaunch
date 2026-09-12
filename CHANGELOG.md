@@ -4,6 +4,34 @@
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-09-12
+
+### Added
+
+- `TUILauncher.SendFileReference` hands the file you are looking at to the agent as `@src/main/App.kt`, or as
+  `@src/main/App.kt#L113-115` when the editor has a selection. The path is relative to the project root, which is the
+  working directory the TUI was started in. It lands at the cursor in the prompt box of the active tab when that box
+  is showing, and goes straight to the terminal, unsubmitted, when it is not. It ships without a shortcut; assign one
+  under <kbd>Settings</kbd> > <kbd>Keymap</kbd>.
+
+### Fixed
+
+- Tabs no longer open on `error: unknown option '-NoExit'` when the terminal shell is PowerShell. The IDE appends its
+  own shell integration arguments after the ones the plugin passes, and PowerShell folds everything after `-Command`
+  into a single command line, so the TUI was receiving them as its own arguments.
+- Codex and OpenCode sessions come back on Windows. Both integrations reached the agent as a `VAR=value command`
+  prefix, which only a POSIX shell parses, so they were switched off there and the tab launched without session
+  management. The environment now travels as real process environment, which every shell takes.
+- The Codex hook writes its records on Windows. Codex hands a hook command to a shell of its own choosing, which is
+  PowerShell there and a POSIX shell elsewhere, so the hook is now spelled the way that shell reads it. Codex asks you
+  to trust the hook the first time it sees it.
+- A `claude-agent`, `codex-agent` or `opencode-agent` wrapper now takes the session arguments of the CLI it is named
+  after, and a program named with a Windows path or a `.cmd`, `.exe`, `.bat`, `.com` or `.ps1` extension is
+  recognised. Quote the path in the launcher configuration if it contains backslashes.
+- Closing the IDE no longer waits ten seconds on the GitHub Copilot language server. Its pipe was closed while the
+  read loop was still blocked on it, which hangs on Windows; the server process is ended first now.
+- Every launch writes one line to the log saying what it ran, or why it ran the command without session management.
+
 ### Changed
 
 - `TUILauncher.FocusPromptBox` now closes the prompt box when the cursor is already in it, so one shortcut brings the
@@ -349,7 +377,8 @@
      - Sessions are managed in their own TUILaunch tool window.
 - Added tmux-like prefix keybindings inside TUI terminals.
 
-[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/atm1020/TUILaunch/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/atm1020/TUILaunch/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/atm1020/TUILaunch/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/atm1020/TUILaunch/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/atm1020/TUILaunch/compare/v0.10.0...v0.11.0
