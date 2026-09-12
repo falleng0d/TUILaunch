@@ -9,29 +9,9 @@ class AgentCommand private constructor(
     val chainsOtherCommands: Boolean,
     val bringsItsOwnHookFlag: Boolean,
     val setsASessionVariableItself: Boolean,
-    private val programStart: Int,
 ) {
     val isManageable: Boolean
         get() = kind != null && !userSelectsASession && !chainsOtherCommands && !setsASessionVariableItself
-
-    fun withEnvironment(assignments: Map<String, String>): AgentCommand {
-        if (assignments.isEmpty()) return this
-        val prefix = assignments.entries.joinToString(" ") { (name, value) ->
-            "$name=${ShellWords.quote(value)}"
-        } + " "
-        val decorated = command.substring(0, programStart) + prefix + command.substring(programStart)
-        return AgentCommand(
-            command = decorated,
-            tokens = ShellWords.split(decorated),
-            kind = kind,
-            wrappedByHeadroom = wrappedByHeadroom,
-            userSelectsASession = userSelectsASession,
-            chainsOtherCommands = chainsOtherCommands,
-            bringsItsOwnHookFlag = bringsItsOwnHookFlag,
-            setsASessionVariableItself = setsASessionVariableItself,
-            programStart = programStart + prefix.length,
-        )
-    }
 
     fun withArguments(extra: List<String>): String {
         if (extra.isEmpty()) return command
@@ -80,8 +60,7 @@ class AgentCommand private constructor(
         )
 
         fun parse(command: String): AgentCommand {
-            val tokens = ShellWords.tokenize(command)
-            val texts = tokens.map { it.text }
+            val texts = ShellWords.split(command)
             val programIndex = programIndexIn(texts)
             val wrappedByHeadroom = isHeadroomWrapAt(texts, programIndex)
             val cliIndex = if (wrappedByHeadroom) programIndex + 2 else programIndex
@@ -99,7 +78,6 @@ class AgentCommand private constructor(
                     anyArgumentMatches(arguments, HOOK_FLAGS_THE_USER_MAY_OWN[kind].orEmpty()),
                 setsASessionVariableItself = kind != null &&
                     anyAssignmentMatches(texts.take(programIndex), SESSION_VARIABLES[kind].orEmpty()),
-                programStart = tokens.getOrNull(programIndex)?.start ?: command.length,
             )
         }
 

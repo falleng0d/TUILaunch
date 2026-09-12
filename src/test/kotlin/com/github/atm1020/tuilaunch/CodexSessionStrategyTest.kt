@@ -6,6 +6,8 @@ import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategies
 import com.github.atm1020.tuilaunch.resume.AgentStateFiles
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
+import com.github.atm1020.tuilaunch.resume.HookShell
+import com.intellij.openapi.util.SystemInfo
 import com.github.atm1020.tuilaunch.resume.ShellWords
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import kotlinx.coroutines.runBlocking
@@ -53,7 +55,7 @@ class CodexSessionStrategyTest {
 
     @Test
     fun theHookCommandReadsTheStateFileFromTheEnvironmentAndIsTheSameForEveryTab() {
-        val strategy = CodexSessionStrategy(stateDirectory())
+        val strategy = CodexSessionStrategy(stateDirectory(), HookShell.POSIX)
         val otherTab = tab.copy(tabUuid = otherTabUuid)
 
         assertEquals(
@@ -68,6 +70,25 @@ class CodexSessionStrategyTest {
         )
     }
 
+    /** Codex asks the user to trust a hook it has not seen before, so a hook that varies would ask every time. */
+    @Test
+    fun everyShellKeepsOneHookCommandForEveryTabAndEveryStateDirectory() {
+        val otherTab = tab.copy(tabUuid = otherTabUuid)
+
+        for (shell in HookShell.entries) {
+            val strategy = CodexSessionStrategy(stateDirectory(), shell)
+            val elsewhere = CodexSessionStrategy(temporaryFolder.root.toPath().resolve("elsewhere"), shell)
+
+            assertEquals(shell.name, strategy.launchArguments(tab), strategy.launchArguments(otherTab))
+            assertEquals(shell.name, strategy.launchArguments(tab), elsewhere.launchArguments(tab))
+            assertEquals(shell.name, strategy.launchArguments(tab), strategy.restoreArguments(otherTab))
+            for (argument in strategy.launchArguments(tab)) {
+                assertFalse(argument, argument.contains(tab.tabUuid))
+                assertFalse(argument, argument.contains(temporaryFolder.root.toString()))
+            }
+        }
+    }
+
     @Test
     fun theEnvironmentNamesTheStateFileOfTheTab() {
         val strategy = CodexSessionStrategy(stateDirectory())
@@ -78,16 +99,16 @@ class CodexSessionStrategyTest {
     }
 
     @Test
-    fun theLaunchCommandCarriesTheStateFileInFrontAndQuotesBothHookOverrides() {
+    fun theLaunchCommandQuotesBothHookOverridesAndNamesTheStateFileInTheEnvironment() {
         val strategy = CodexSessionStrategy(stateDirectory())
 
         assertEquals(
-            "TUILAUNCH_CODEX_STATE=${ShellWords.quote(strategy.stateFile(tab).toString())} " +
-                "codex -c '${expectedToml("SessionStart")}' " +
-                "-c '${expectedToml("UserPromptSubmit")}'",
-            AgentCommand.parse("codex")
-                .withEnvironment(strategy.launchEnvironment(tab))
-                .withArguments(strategy.launchArguments(tab)),
+            "codex -c '${expectedToml("SessionStart")}' -c '${expectedToml("UserPromptSubmit")}'",
+            AgentCommand.parse("codex").withArguments(strategy.launchArguments(tab)),
+        )
+        assertEquals(
+            mapOf("TUILAUNCH_CODEX_STATE" to strategy.stateFile(tab).toString()),
+            strategy.launchEnvironment(tab),
         )
     }
 
@@ -130,12 +151,14 @@ class CodexSessionStrategyTest {
         val command = "headroom wrap codex --no-serena --no-tokensave --dangerously-bypass-approvals-and-sandbox"
 
         assertEquals(
-            "TUILAUNCH_CODEX_STATE=${ShellWords.quote(stateFile.toString())} $command -- resume $sessionId " +
+            "$command -- resume $sessionId " +
                 "-c ${ShellWords.quote(expectedToml("SessionStart"))} " +
                 "-c ${ShellWords.quote(expectedToml("UserPromptSubmit"))}",
-            AgentCommand.parse(command)
-                .withEnvironment(strategy.restoreEnvironment(tab))
-                .withArguments(strategy.restoreArguments(tab)),
+            AgentCommand.parse(command).withArguments(strategy.restoreArguments(tab)),
+        )
+        assertEquals(
+            mapOf("TUILAUNCH_CODEX_STATE" to stateFile.toString()),
+            strategy.restoreEnvironment(tab),
         )
     }
 
@@ -336,51 +359,53 @@ class CodexSessionStrategyTest {
     }
 
     @Test
-    fun aStateFilePathTheShellWouldReadIsStillManaged() {
-        for (name in listOf("say hi", "it's here", "cost\$100", "back`tick`", """say"hi"""")) {
+    fun aStateFilePathTheShellWouldReadReachesTheAgentVerbatim() {
+        for (name in stateDirectoryNamesLegalHere()) {
             val strategy = CodexSessionStrategy(temporaryFolder.root.toPath().resolve(name))
             val stateFile = strategy.stateFile(tab)
 
             assertEquals(name, codexHookArguments(), strategy.launchArguments(tab))
             assertEquals(
                 name,
-                "TUILAUNCH_CODEX_STATE=${ShellWords.quote(stateFile.toString())} codex " +
-                    "-c ${ShellWords.quote(expectedToml("SessionStart"))} " +
+                "codex -c ${ShellWords.quote(expectedToml("SessionStart"))} " +
                     "-c ${ShellWords.quote(expectedToml("UserPromptSubmit"))}",
-                AgentCommand.parse("codex")
-                    .withEnvironment(strategy.launchEnvironment(tab))
-                    .withArguments(strategy.launchArguments(tab)),
+                AgentCommand.parse("codex").withArguments(strategy.launchArguments(tab)),
             )
             assertEquals(name, listOf(stateFile.toString()), reassembledEnvironmentOf(strategy))
         }
     }
 
     @Test
-    fun aShellThatReadsNoEnvironmentPrefixLeavesTheCommandAlone() {
-        val strategy = CodexSessionStrategy(stateDirectory(), false)
+    fun aPowershellHookAppendsTheSameRecordsWithoutPosixSyntax() {
+        val strategy = CodexSessionStrategy(stateDirectory(), HookShell.POWERSHELL)
         writeState(strategy.stateFile(tab), record(sessionId, transcriptPath))
 
         strategy.prepareLaunch(tab)
 
-        assertEquals(emptyList<String>(), strategy.launchArguments(tab))
-        assertEquals(emptyList<String>(), strategy.restoreArguments(tab))
-        assertEquals(emptyMap<String, String>(), strategy.launchEnvironment(tab))
-        assertEquals(emptyMap<String, String>(), strategy.restoreEnvironment(tab))
-        assertEquals("codex", AgentCommand.parse("codex").withArguments(strategy.launchArguments(tab)))
+        assertEquals(codexHookArguments(HookShell.POWERSHELL), strategy.launchArguments(tab))
+        assertEquals(
+            listOf("resume", sessionId) + codexHookArguments(HookShell.POWERSHELL),
+            strategy.restoreArguments(tab),
+        )
+        assertEquals(
+            mapOf("TUILAUNCH_CODEX_STATE" to strategy.stateFile(tab).toString()),
+            strategy.launchEnvironment(tab),
+        )
     }
 
     @Test
-    fun theFactoryPassesTheShellOfTheEnvironmentToTheStrategy() {
-        val posix = AgentSessionStrategies.forKind(AgentCliKind.CODEX, agentSessionEnvironment(true))
-        val windows = AgentSessionStrategies.forKind(AgentCliKind.CODEX, agentSessionEnvironment(false))
+    fun theFactoryPassesTheHookShellOfTheEnvironmentToTheStrategy() {
+        val posix = AgentSessionStrategies.forKind(AgentCliKind.CODEX, agentSessionEnvironment(HookShell.POSIX))
+        val windows =
+            AgentSessionStrategies.forKind(AgentCliKind.CODEX, agentSessionEnvironment(HookShell.POWERSHELL))
 
-        assertEquals(codexHookArguments(), posix.launchArguments(tab))
+        assertEquals(codexHookArguments(HookShell.POSIX), posix.launchArguments(tab))
+        assertEquals(codexHookArguments(HookShell.POWERSHELL), windows.launchArguments(tab))
         assertEquals(
             listOf(stateDirectory().resolve("codex").resolve("$tabUuid.jsonl").toString()),
             posix.launchEnvironment(tab).values.toList(),
         )
-        assertEquals(emptyList<String>(), windows.launchArguments(tab))
-        assertEquals(emptyMap<String, String>(), windows.launchEnvironment(tab))
+        assertEquals(posix.launchEnvironment(tab), windows.launchEnvironment(tab))
     }
 
     @Test
@@ -424,18 +449,20 @@ class CodexSessionStrategyTest {
     }
 
     private fun reassembledEnvironmentOf(strategy: CodexSessionStrategy): List<String> =
-        ShellWords.split(
-            AgentCommand.parse("codex").withEnvironment(strategy.launchEnvironment(tab)).command,
-        ).filter { it.startsWith("TUILAUNCH_CODEX_STATE=") }
-            .map { it.removePrefix("TUILAUNCH_CODEX_STATE=") }
+        strategy.launchEnvironment(tab).filterKeys { it == "TUILAUNCH_CODEX_STATE" }.values.toList()
 
-    private fun agentSessionEnvironment(theShellIsPosix: Boolean): AgentSessionEnvironment =
+    private fun agentSessionEnvironment(hookShell: HookShell): AgentSessionEnvironment =
         AgentSessionEnvironment(
             homeDirectory = temporaryFolder.root.toPath().resolve("home"),
             stateDirectory = stateDirectory(),
             bundledDirectory = temporaryFolder.root.toPath().resolve("integrations"),
-            theShellIsPosix = theShellIsPosix,
+            hookShell = hookShell,
         )
+
+    private fun stateDirectoryNamesLegalHere(): List<String> {
+        val names = listOf("say hi", "it's here", "cost\$100", "back`tick`", """say"hi"""")
+        return if (SystemInfo.isWindows) names.filterNot { name -> name.any { it in ILLEGAL_ON_WINDOWS } } else names
+    }
 
     private fun expectedToml(event: String): String = codexHookToml(event)
 
@@ -447,5 +474,9 @@ class CodexSessionStrategyTest {
     private fun writeState(stateFile: Path, content: String) {
         Files.createDirectories(stateFile.parent)
         Files.writeString(stateFile, content)
+    }
+
+    private companion object {
+        const val ILLEGAL_ON_WINDOWS = "\"<>|*?:"
     }
 }

@@ -6,6 +6,7 @@ object ShellWords {
     private const val BACKSLASH = '\\'
     private const val DOUBLE_QUOTE_ESCAPABLES = "\"\\$`"
     private val SAFE_CHARACTERS = Regex("^[A-Za-z0-9_./:=@,-]+$")
+    private val WINDOWS_EXECUTABLE_EXTENSIONS = setOf("exe", "cmd", "bat", "com", "ps1")
 
     data class Token(val start: Int, val text: String)
 
@@ -83,5 +84,9 @@ object ShellWords {
 
     fun join(values: List<String>): String = values.joinToString(" ") { quote(it) }
 
-    fun baseName(program: String): String = program.substringAfterLast('/')
+    fun baseName(program: String): String {
+        val name = program.replace(BACKSLASH, '/').substringAfterLast('/')
+        val extension = name.substringAfterLast('.', "")
+        return if (extension.lowercase() in WINDOWS_EXECUTABLE_EXTENSIONS) name.dropLast(extension.length + 1) else name
+    }
 }

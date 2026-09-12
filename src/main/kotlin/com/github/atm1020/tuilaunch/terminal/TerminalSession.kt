@@ -30,16 +30,17 @@ class TerminalSession(
 }
 
 interface TerminalSessionFactory {
-    fun create(parent: Disposable, command: String): TerminalSession
+    fun create(parent: Disposable, command: String, environment: Map<String, String> = emptyMap()): TerminalSession
 
     fun createAsync(
         parent: Disposable,
         command: String,
+        environment: Map<String, String> = emptyMap(),
         onCreated: (TerminalSession) -> Unit,
         onFailed: (Throwable) -> Unit,
     ) {
         try {
-            onCreated(create(parent, command))
+            onCreated(create(parent, command, environment))
         } catch (throwable: Throwable) {
             onFailed(throwable)
         }

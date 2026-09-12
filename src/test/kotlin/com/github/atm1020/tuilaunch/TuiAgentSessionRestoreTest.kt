@@ -217,7 +217,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         assertEquals(
             listOf(
-                "${codexVariable(TAB_UUID)} codex resume $CODEX_SESSION_ID " +
+                "codex resume $CODEX_SESSION_ID " +
                     ShellWords.join(codexHookArguments()),
             ),
             factory.commands,
@@ -235,7 +235,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val tabUuid = requireNotNull(savedTabs().single().tabUuid)
         assertEquals(
             listOf(
-                "${codexVariable(tabUuid)} headroom wrap codex --no-serena -- " +
+                "headroom wrap codex --no-serena -- " +
                     ShellWords.join(codexHookArguments()),
             ),
             factory.commands,
@@ -257,7 +257,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         assertEquals(
             listOf(
-                "${codexVariable(TAB_UUID)} codex resume $CODEX_LATER_SESSION_ID " +
+                "codex resume $CODEX_LATER_SESSION_ID " +
                     ShellWords.join(codexHookArguments()),
             ),
             factory.commands,
@@ -482,7 +482,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         awaitDeletedFile(stateFile)
         val relaunchedTabUuid = savedTabs().single().tabUuid!!
         assertTrue(relaunchedTabUuid, relaunchedTabUuid != TAB_UUID)
-        assertTrue(factory.commands.last(), factory.commands.last().contains(relaunchedTabUuid))
+        assertEquals(codexEnvironment(relaunchedTabUuid), factory.environments.last())
     }
 
     fun testATabTheUserClosedIsNotStartedAgainWhenItsProcessEnds() {
@@ -608,6 +608,28 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         awaitDeletedFile(stateFile)
     }
 
+    fun testTheTrackerVariablesReachTheTerminalAsRealEnvironmentVariables() {
+        configureApp("opencode", "opencode")
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("opencode", "opencode")
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf(openCodeEnvironment(tabUuid)), factory.environments)
+    }
+
+    fun testTheCodexStateFileReachesTheTerminalAsARealEnvironmentVariable() {
+        configureApp("codex", "codex")
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("codex", "codex")
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf(codexEnvironment(tabUuid)), factory.environments)
+    }
+
     fun testAFreshOpenCodeTabCarriesTheTrackerVariablesAndNoArguments() {
         configureApp("opencode", "opencode")
         val factory = FakeFactory(FakeSession())
@@ -616,7 +638,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         service.launchNew("opencode", "opencode")
 
         val tabUuid = requireNotNull(savedTabs().single().tabUuid)
-        assertEquals(listOf("${openCodeVariables(tabUuid)} opencode"), factory.commands)
+        assertEquals(listOf("opencode"), factory.commands)
         assertTrue(Files.isRegularFile(openCodeTuiConfig()))
         assertTrue(Files.isRegularFile(openCodeSessionTracker()))
         assertTrue(Files.isDirectory(openCodeStateFile(tabUuid).parent))
@@ -632,7 +654,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         val tabUuid = requireNotNull(savedTabs().single().tabUuid)
         assertEquals(
-            listOf("${openCodeVariables(tabUuid)} headroom wrap opencode --no-serena"),
+            listOf("headroom wrap opencode --no-serena"),
             factory.commands,
         )
     }
@@ -647,7 +669,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         service.restoreSavedTabs()
 
         assertEquals(
-            listOf("${openCodeVariables(TAB_UUID)} opencode --session $OPENCODE_SESSION_ID"),
+            listOf("opencode --session $OPENCODE_SESSION_ID"),
             factory.commands,
         )
         assertEquals(OPENCODE_SESSION_ID, savedTabs().single().agentSessionId)
@@ -664,7 +686,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         assertEquals(
             listOf(
-                "${openCodeVariables(TAB_UUID)} headroom wrap opencode --no-serena " +
+                "headroom wrap opencode --no-serena " +
                     "-- --session $OPENCODE_SESSION_ID"
             ),
             factory.commands,
@@ -679,7 +701,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
         service.restoreSavedTabs()
 
-        assertEquals(listOf("${openCodeVariables(TAB_UUID)} opencode"), factory.commands)
+        assertEquals(listOf("opencode"), factory.commands)
         assertNull(savedTabs().single().agentSessionId)
         assertEquals("OPENCODE", savedTabs().single().agentCliKind)
     }
@@ -713,8 +735,8 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertTrue(relaunchedTabUuid, relaunchedTabUuid != TAB_UUID)
         assertEquals(
             listOf(
-                "${openCodeVariables(TAB_UUID)} opencode --session $OPENCODE_SESSION_ID",
-                "${openCodeVariables(relaunchedTabUuid)} opencode",
+                "opencode --session $OPENCODE_SESSION_ID",
+                "opencode",
             ),
             factory.commands,
         )
@@ -731,7 +753,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         sessions[0].terminate()
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
-        assertEquals(listOf("${openCodeVariables(TAB_UUID)} opencode"), factory.commands)
+        assertEquals(listOf("opencode"), factory.commands)
         assertTrue(savedTabs().toString(), savedTabs().isEmpty())
     }
 
@@ -823,8 +845,8 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
     private fun codexStateFile(tabUuid: String): Path =
         environment.stateDirectory.resolve("codex").resolve("$tabUuid.jsonl")
 
-    private fun codexVariable(tabUuid: String): String =
-        "TUILAUNCH_CODEX_STATE=${ShellWords.quote(codexStateFile(tabUuid).toString())}"
+    private fun codexEnvironment(tabUuid: String): Map<String, String> =
+        mapOf("TUILAUNCH_CODEX_STATE" to codexStateFile(tabUuid).toString())
 
     private fun codexHookRecord(sessionId: String = CODEX_SESSION_ID): String =
         """{"session_id":"$sessionId","transcript_path":"$CODEX_TRANSCRIPT_PATH","source":"startup"}""" + "\n"
@@ -858,9 +880,10 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         .resolve("opencode")
         .resolve("tuilaunch-session-tracker.js")
 
-    private fun openCodeVariables(tabUuid: String): String =
-        "OPENCODE_TUI_CONFIG=${ShellWords.quote(openCodeTuiConfig().toString())} " +
-            "TUILAUNCH_OPENCODE_STATE=${ShellWords.quote(openCodeStateFile(tabUuid).toString())}"
+    private fun openCodeEnvironment(tabUuid: String): Map<String, String> = mapOf(
+        "OPENCODE_TUI_CONFIG" to openCodeTuiConfig().toString(),
+        "TUILAUNCH_OPENCODE_STATE" to openCodeStateFile(tabUuid).toString(),
+    )
 
     private fun write(file: Path, content: String) {
         Files.createDirectories(file.parent)

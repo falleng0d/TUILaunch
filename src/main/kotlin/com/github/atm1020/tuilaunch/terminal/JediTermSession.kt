@@ -34,14 +34,15 @@ class JediTermSessionFactory(
     private val onNextTab: () -> Unit = {},
     private val onPreviousTab: () -> Unit = {},
 ) : TerminalSessionFactory {
-    override fun create(parent: Disposable, command: String): TerminalSession {
+    override fun create(parent: Disposable, command: String, environment: Map<String, String>): TerminalSession {
         val shellPath = TerminalProjectOptionsProvider.getInstance(project).shellPath
-        return create(parent, command, shellPath)
+        return create(parent, command, environment, shellPath)
     }
 
     override fun createAsync(
         parent: Disposable,
         command: String,
+        environment: Map<String, String>,
         onCreated: (TerminalSession) -> Unit,
         onFailed: (Throwable) -> Unit,
     ) {
@@ -50,7 +51,7 @@ class JediTermSessionFactory(
                 val shellPath = TerminalProjectOptionsProvider.getInstance(project).shellPath
                 invokeLater {
                     if ((parent as? CheckedDisposable)?.isDisposed != true) {
-                        onCreated(create(parent, command, shellPath))
+                        onCreated(create(parent, command, environment, shellPath))
                     }
                 }
             } catch (throwable: Throwable) {
@@ -59,13 +60,19 @@ class JediTermSessionFactory(
         }
     }
 
-    private fun create(parent: Disposable, command: String, shellPath: String): TerminalSession {
+    private fun create(
+        parent: Disposable,
+        command: String,
+        environment: Map<String, String>,
+        shellPath: String,
+    ): TerminalSession {
         val runner = LocalTerminalDirectRunner.createTerminalRunner(project)
         val workingDir = project.basePath ?: System.getProperty("user.home")
         val baseShellCommand = LocalTerminalStartCommandBuilder.convertShellPathToCommand(shellPath)
         val options = ShellStartupOptions.Builder()
             .shellCommand(baseShellCommand + runCommandArgs(baseShellCommand.first(), command))
             .workingDirectory(workingDir)
+            .envVariables(environment)
             .build()
         val widget = runner.startShellTerminalWidget(parent, options, false)
         val jediTermWidget = JBTerminalWidget.asJediTermWidget(widget)

@@ -13,26 +13,21 @@ import java.nio.file.StandardOpenOption
 
 class CodexSessionStrategy(
     private val stateDirectory: Path,
-    private val theShellTakesAnEnvironmentPrefix: Boolean = !SystemInfo.isWindows,
+    private val hookShell: HookShell = HookShell.current(),
 ) : AgentSessionStrategy {
     override fun prepareLaunch(tab: TabIdentity) {
-        if (!theShellTakesAnEnvironmentPrefix) return
         AgentStateFiles.createDirectoryFor(stateFile(tab))
     }
 
     override fun launchArguments(tab: TabIdentity): List<String> = hookArguments()
 
     override fun restoreArguments(tab: TabIdentity): List<String> {
-        val hookArguments = hookArguments()
-        if (hookArguments.isEmpty()) return emptyList()
-        val sessionId = readSessionId(stateFile(tab)) ?: return hookArguments
-        return listOf(RESUME_SUBCOMMAND, sessionId) + hookArguments
+        val sessionId = readSessionId(stateFile(tab)) ?: return hookArguments()
+        return listOf(RESUME_SUBCOMMAND, sessionId) + hookArguments()
     }
 
-    override fun launchEnvironment(tab: TabIdentity): Map<String, String> {
-        if (!theShellTakesAnEnvironmentPrefix) return emptyMap()
-        return linkedMapOf(STATE_FILE_VARIABLE to stateFile(tab).toAbsolutePath().toString())
-    }
+    override fun launchEnvironment(tab: TabIdentity): Map<String, String> =
+        linkedMapOf(STATE_FILE_VARIABLE to stateFile(tab).toAbsolutePath().toString())
 
     override suspend fun cleanUp(tab: TabIdentity) {
         AgentStateFiles.delete(stateFile(tab))
@@ -41,15 +36,12 @@ class CodexSessionStrategy(
     fun stateFile(tab: TabIdentity): Path =
         stateDirectory.resolve(DIRECTORY_NAME).resolve("${tab.tabUuid}$STATE_FILE_SUFFIX")
 
-    fun hookArguments(): List<String> {
-        if (!theShellTakesAnEnvironmentPrefix) return emptyList()
-        return listOf(
-            CONFIG_OVERRIDE,
-            hookToml(SESSION_START_EVENT),
-            CONFIG_OVERRIDE,
-            hookToml(USER_PROMPT_SUBMIT_EVENT),
-        )
-    }
+    fun hookArguments(): List<String> = listOf(
+        CONFIG_OVERRIDE,
+        hookToml(SESSION_START_EVENT),
+        CONFIG_OVERRIDE,
+        hookToml(USER_PROMPT_SUBMIT_EVENT),
+    )
 
     fun readSessionId(stateFile: Path): String? =
         recordsIn(newestBytesOf(stateFile)).asReversed().firstNotNullOfOrNull { resumableSessionIdIn(it) }
@@ -118,14 +110,13 @@ class CodexSessionStrategy(
     )
 
     private fun hookToml(event: String): String =
-        """hooks.$event=[{hooks=[{type="command",command="$HOOK_COMMAND",async=true,timeout=5}]}]"""
+        """hooks.$event=[{hooks=[{type="command",command="${hookShell.appendStdinTo(STATE_FILE_VARIABLE)}",async=true,timeout=5}]}]"""
 
     companion object {
         const val DIRECTORY_NAME = "codex"
         const val CONFIG_OVERRIDE = "-c"
         const val RESUME_SUBCOMMAND = "resume"
         const val STATE_FILE_VARIABLE = "TUILAUNCH_CODEX_STATE"
-        private const val HOOK_COMMAND = "{ cat; echo; } >> \\\"\$$STATE_FILE_VARIABLE\\\""
         private const val STATE_FILE_SUFFIX = ".jsonl"
         private const val SESSION_ID_FIELD = "session_id"
         private const val TRANSCRIPT_PATH_FIELD = "transcript_path"

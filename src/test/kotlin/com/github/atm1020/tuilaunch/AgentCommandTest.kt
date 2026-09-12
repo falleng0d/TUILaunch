@@ -171,13 +171,6 @@ class AgentCommandTest {
     }
 
     @Test
-    fun aDecoratedCommandKeepsTheHookFlagItAlreadyHad() {
-        val decorated = AgentCommand.parse("claude --settings /x/team.json").withEnvironment(mapOf("A" to "b"))
-
-        assertTrue(decorated.bringsItsOwnHookFlag)
-    }
-
-    @Test
     fun theFlagEqualsValueSpellingSelectsASession() {
         assertTrue(AgentCommand.parse("claude --session-id=abc").userSelectsASession)
         assertTrue(AgentCommand.parse("omp --resume=/tmp/a.jsonl").userSelectsASession)
@@ -243,92 +236,6 @@ class AgentCommandTest {
     }
 
     @Test
-    fun withEnvironmentPutsTheAssignmentsBeforeThePlainProgram() {
-        val parsed = AgentCommand.parse("opencode")
-
-        assertEquals(
-            "OPENCODE_TUI_CONFIG=/tmp/tui.json TUILAUNCH_OPENCODE_STATE='/tmp/a b/state.json' opencode",
-            parsed.withEnvironment(trackerEnvironment("/tmp/a b/state.json")).command,
-        )
-    }
-
-    @Test
-    fun withEnvironmentPutsTheAssignmentsBeforeHeadroom() {
-        val parsed = AgentCommand.parse("headroom wrap opencode --no-serena")
-
-        assertEquals(
-            "OPENCODE_TUI_CONFIG=/tmp/tui.json TUILAUNCH_OPENCODE_STATE=/tmp/state.json " +
-                "headroom wrap opencode --no-serena",
-            parsed.withEnvironment(trackerEnvironment()).command,
-        )
-    }
-
-    @Test
-    fun withEnvironmentFollowsTheAssignmentsTheCommandAlreadyHas() {
-        assertEquals(
-            "FOO=1 env OPENCODE_TUI_CONFIG=/tmp/tui.json TUILAUNCH_OPENCODE_STATE=/tmp/state.json opencode",
-            AgentCommand.parse("FOO=1 env opencode").withEnvironment(trackerEnvironment()).command,
-        )
-        assertEquals(
-            """FOO='a b' env BAR=2  OPENCODE_TUI_CONFIG=/tmp/tui.json """ +
-                """TUILAUNCH_OPENCODE_STATE=/tmp/state.json headroom wrap opencode""",
-            AgentCommand.parse("""FOO='a b' env BAR=2  headroom wrap opencode""")
-                .withEnvironment(trackerEnvironment()).command,
-        )
-    }
-
-    @Test
-    fun withEnvironmentFindsAProgramThatIsQuotedEscapedOrIndented() {
-        val variables = "OPENCODE_TUI_CONFIG=/tmp/tui.json TUILAUNCH_OPENCODE_STATE=/tmp/state.json"
-
-        assertEquals(
-            """FOO=1 $variables "/opt/my dir/opencode"""",
-            AgentCommand.parse("""FOO=1 "/opt/my dir/opencode"""").withEnvironment(trackerEnvironment()).command,
-        )
-        assertEquals(
-            """$variables /opt/my\ dir/opencode""",
-            AgentCommand.parse("""/opt/my\ dir/opencode""").withEnvironment(trackerEnvironment()).command,
-        )
-        assertEquals(
-            "  $variables opencode",
-            AgentCommand.parse("  opencode").withEnvironment(trackerEnvironment()).command,
-        )
-    }
-
-    @Test
-    fun withEnvironmentOfNothingKeepsTheCommandAsItIs() {
-        val command = "headroom wrap opencode --no-serena"
-
-        assertEquals(command, AgentCommand.parse(command).withEnvironment(emptyMap()).command)
-    }
-
-    @Test
-    fun argumentsStillGoThroughThePassThroughAfterTheEnvironmentIsAdded() {
-        val decorated = AgentCommand.parse("headroom wrap opencode --no-serena")
-            .withEnvironment(trackerEnvironment())
-
-        assertEquals(
-            "OPENCODE_TUI_CONFIG=/tmp/tui.json TUILAUNCH_OPENCODE_STATE=/tmp/state.json " +
-                "headroom wrap opencode --no-serena -- --session ses_9f1c2d",
-            decorated.withArguments(listOf("--session", "ses_9f1c2d")),
-        )
-        assertEquals(
-            "OPENCODE_TUI_CONFIG=/tmp/tui.json TUILAUNCH_OPENCODE_STATE=/tmp/state.json opencode --session x",
-            AgentCommand.parse("opencode").withEnvironment(trackerEnvironment())
-                .withArguments(listOf("--session", "x")),
-        )
-    }
-
-    @Test
-    fun aDecoratedCommandStaysTheManageableCommandItWas() {
-        val decorated = AgentCommand.parse("opencode").withEnvironment(trackerEnvironment())
-
-        assertEquals(AgentCliKind.OPENCODE, decorated.kind)
-        assertTrue(decorated.isManageable)
-        assertFalse(decorated.userSelectsASession)
-    }
-
-    @Test
     fun aCommandThatSetsTheTrackerVariablesItselfIsNotManageable() {
         for (command in listOf(
             "OPENCODE_TUI_CONFIG=/tmp/tui.json opencode",
@@ -361,20 +268,6 @@ class AgentCommandTest {
     fun aCommandCarryingTheStateVariableOfAnotherCliStaysManageable() {
         assertTrue(AgentCommand.parse("TUILAUNCH_OPENCODE_STATE=/tmp/state.json codex").isManageable)
         assertTrue(AgentCommand.parse("TUILAUNCH_CODEX_STATE=/tmp/state.jsonl opencode").isManageable)
-    }
-
-    @Test
-    fun theCodexEnvironmentGoesInFrontOfTheProgram() {
-        assertEquals(
-            "TUILAUNCH_CODEX_STATE='/tmp/a b/state.jsonl' headroom wrap codex --no-serena",
-            AgentCommand.parse("headroom wrap codex --no-serena")
-                .withEnvironment(mapOf("TUILAUNCH_CODEX_STATE" to "/tmp/a b/state.jsonl")).command,
-        )
-        assertEquals(
-            "TUILAUNCH_CODEX_STATE='/tmp/it'\\''s/state.jsonl' codex",
-            AgentCommand.parse("codex")
-                .withEnvironment(mapOf("TUILAUNCH_CODEX_STATE" to "/tmp/it's/state.jsonl")).command,
-        )
     }
 
     @Test
@@ -441,9 +334,4 @@ class AgentCommandTest {
             assertFalse(command, AgentCommand.parse(command).chainsOtherCommands)
         }
     }
-
-    private fun trackerEnvironment(stateFile: String = "/tmp/state.json"): Map<String, String> = linkedMapOf(
-        "OPENCODE_TUI_CONFIG" to "/tmp/tui.json",
-        "TUILAUNCH_OPENCODE_STATE" to stateFile,
-    )
 }

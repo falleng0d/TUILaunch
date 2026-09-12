@@ -1,16 +1,13 @@
 package com.github.atm1020.tuilaunch.resume
 
-import com.intellij.openapi.util.SystemInfo
 import java.nio.file.Path
 
 class OpenCodeSessionStrategy(
     private val stateDirectory: Path,
     private val bundledDirectory: Path,
-    private val theShellTakesAnEnvironmentPrefix: Boolean = !SystemInfo.isWindows,
 ) : AgentSessionStrategy {
 
     override fun prepareLaunch(tab: TabIdentity) {
-        if (!theShellTakesAnEnvironmentPrefix) return
         BundledIntegrationFiles.ensure(TUI_CONFIG_RESOURCE, tuiConfigFile())
         BundledIntegrationFiles.ensure(SESSION_TRACKER_RESOURCE, sessionTrackerFile())
         AgentStateFiles.createDirectoryFor(stateFile(tab))
@@ -19,13 +16,11 @@ class OpenCodeSessionStrategy(
     override fun launchArguments(tab: TabIdentity): List<String> = emptyList()
 
     override fun restoreArguments(tab: TabIdentity): List<String> {
-        if (!theShellTakesAnEnvironmentPrefix) return emptyList()
         val reported = readSessionId(stateFile(tab)) ?: return emptyList()
         return listOf(SESSION_FLAG, reported)
     }
 
     override fun launchEnvironment(tab: TabIdentity): Map<String, String> {
-        if (!theShellTakesAnEnvironmentPrefix) return emptyMap()
         if (!BundledIntegrationFiles.areOnDisk(tuiConfigFile(), sessionTrackerFile())) return emptyMap()
         return linkedMapOf(
             TUI_CONFIG_VARIABLE to tuiConfigFile().toAbsolutePath().toString(),

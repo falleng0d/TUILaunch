@@ -139,6 +139,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 
     private data class AgentLaunch(
         val command: String,
+        val environment: Map<String, String> = emptyMap(),
         val commandWasDecorated: Boolean,
         val agentSessionWasRequested: Boolean,
         val agentSessionId: String?,
@@ -535,6 +536,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         sessionFactory.createAsync(
             parent = disposable,
             command = agentLaunch.command,
+            environment = agentLaunch.environment,
             onCreated = { session ->
                 if (pendingLaunchesBySessionId.remove(sessionId)?.disposable !== disposable || disposable.isDisposed) {
                     return@createAsync
@@ -592,11 +594,16 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             cliKind = null,
             strategy = null,
         )
-        if (!agentSessionsAreResumed()) return plainLaunch
-        val projectPath = project.basePath ?: return plainLaunch
+        if (!agentSessionsAreResumed()) {
+            return plainLaunch.alsoLog(command, "restoring agent sessions is turned off in the settings")
+        }
+        val projectPath = project.basePath ?: return plainLaunch.alsoLog(command, "the project has no base path")
         val parsed = AgentCommand.parse(command)
         val kind = parsed.kind
-        if (kind == null || !parsed.isManageable) return plainLaunch
+        if (kind == null) {
+            return plainLaunch.alsoLog(command, "none of ${parsed.tokens} names an agent CLI this plugin knows")
+        }
+        if (!parsed.isManageable) return plainLaunch.alsoLog(command, whyItCannotBeManaged(parsed))
         val tab = TabIdentity(intent.tabUuid, projectPath, project.locationHash)
         val strategy = agentSessionStrategies(kind, agentSessionEnvironment(), !parsed.bringsItsOwnHookFlag)
         strategy.prepareLaunch(tab)
@@ -608,15 +615,32 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             is LaunchIntent.Fresh -> strategy.launchEnvironment(tab)
             is LaunchIntent.Restore -> strategy.restoreEnvironment(tab)
         }
-        if (arguments.isEmpty() && environment.isEmpty()) return plainLaunch
+        if (arguments.isEmpty() && environment.isEmpty()) {
+            return plainLaunch.alsoLog(command, "the $kind strategy had nothing to add")
+        }
+        val decorated = parsed.withArguments(arguments)
+        thisLogger().info("TUILaunch runs $kind as: $decorated with ${environment.keys}")
         return AgentLaunch(
-            command = parsed.withEnvironment(environment).withArguments(arguments),
+            command = decorated,
+            environment = environment,
             commandWasDecorated = true,
             agentSessionWasRequested = arguments.any { it in RESUME_ARGUMENTS },
             agentSessionId = agentSessionIdFor(kind, strategy, tab, intent),
             cliKind = kind.name,
             strategy = strategy,
         )
+    }
+
+    private fun AgentLaunch.alsoLog(command: String, reason: String): AgentLaunch {
+        thisLogger().info("TUILaunch runs '$command' without session management because $reason")
+        return this
+    }
+
+    private fun whyItCannotBeManaged(parsed: AgentCommand): String = when {
+        parsed.userSelectsASession -> "the command already picks a session itself"
+        parsed.chainsOtherCommands -> "the command chains other commands"
+        parsed.setsASessionVariableItself -> "the command already sets a session variable itself"
+        else -> "the command cannot be managed"
     }
 
     private fun agentSessionsAreResumed(): Boolean {

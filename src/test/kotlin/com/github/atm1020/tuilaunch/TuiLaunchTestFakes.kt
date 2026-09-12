@@ -13,6 +13,7 @@ import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategy
+import com.github.atm1020.tuilaunch.resume.HookShell
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
@@ -68,15 +69,20 @@ internal fun claudeHookSettings(stateFile: Path): String =
         """"cat > \"$CLAUDE_STATE_FILE_ARGUMENT.tmp\" && mv \"$CLAUDE_STATE_FILE_ARGUMENT.tmp\" """ +
         """\"$CLAUDE_STATE_FILE_ARGUMENT\"","$stateFile"],"timeout":5}]}]}}"""
 
-internal fun codexHookToml(event: String): String =
-    """hooks.$event=[{hooks=[{type="command",command="{ cat; echo; } >> \"${'$'}TUILAUNCH_CODEX_STATE\"",""" +
-        "async=true,timeout=5}]}]"
+internal fun codexHookCommand(shell: HookShell): String = when (shell) {
+    HookShell.POSIX -> """{ cat; echo; } >> \"${'$'}TUILAUNCH_CODEX_STATE\""""
+    HookShell.POWERSHELL ->
+        """[IO.File]::AppendAllText(${'$'}env:TUILAUNCH_CODEX_STATE, [Console]::In.ReadToEnd() + [Environment]::NewLine)"""
+}
 
-internal fun codexHookArguments(): List<String> = listOf(
+internal fun codexHookToml(event: String, shell: HookShell = HookShell.current()): String =
+    """hooks.$event=[{hooks=[{type="command",command="${codexHookCommand(shell)}",async=true,timeout=5}]}]"""
+
+internal fun codexHookArguments(shell: HookShell = HookShell.current()): List<String> = listOf(
     "-c",
-    codexHookToml("SessionStart"),
+    codexHookToml("SessionStart", shell),
     "-c",
-    codexHookToml("UserPromptSubmit"),
+    codexHookToml("UserPromptSubmit", shell),
 )
 
 private class GhostTextProvider : InlineCompletionProvider {
@@ -313,11 +319,13 @@ internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
 internal class FakeFactory(private val sessions: List<FakeSession>) : TerminalSessionFactory {
     private var index = 0
     val commands = mutableListOf<String>()
+    val environments = mutableListOf<Map<String, String>>()
 
     constructor(session: FakeSession) : this(listOf(session))
 
-    override fun create(parent: Disposable, command: String): TerminalSession {
+    override fun create(parent: Disposable, command: String, environment: Map<String, String>): TerminalSession {
         commands.add(command)
+        environments.add(environment)
         return sessions[index++].asTerminalSession()
     }
 }
@@ -328,19 +336,23 @@ internal class DeferredFactory(private val sessions: List<FakeSession>) : Termin
     private var index = 0
     var createCount = 0
     val commands = mutableListOf<String>()
+    val environments = mutableListOf<Map<String, String>>()
 
     constructor(session: FakeSession) : this(listOf(session))
 
-    override fun create(parent: Disposable, command: String): TerminalSession = error("Use async creation")
+    override fun create(parent: Disposable, command: String, environment: Map<String, String>): TerminalSession =
+        error("Use async creation")
 
     override fun createAsync(
         parent: Disposable,
         command: String,
+        environment: Map<String, String>,
         onCreated: (TerminalSession) -> Unit,
         onFailed: (Throwable) -> Unit,
     ) {
         createCount++
         commands.add(command)
+        environments.add(environment)
         this.onCreated = onCreated
         this.onFailed = onFailed
     }

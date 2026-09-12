@@ -109,6 +109,7 @@ data class AgentSessionEnvironment(
     val claudeConfigDir: String? = null,
     val piCodingAgentDir: String? = null,
     val theShellIsPosix: Boolean = !SystemInfo.isWindows,
+    val hookShell: HookShell = HookShell.current(),
 ) {
     val claudeHome: Path
         get() = overriddenDirectory(claudeConfigDir) ?: homeDirectory.resolve(".claude")
@@ -148,13 +149,12 @@ object AgentSessionStrategies {
 
         AgentCliKind.CODEX -> CodexSessionStrategy(
             stateDirectory = environment.stateDirectory,
-            theShellTakesAnEnvironmentPrefix = environment.theShellIsPosix,
+            hookShell = environment.hookShell,
         )
 
         AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(
             stateDirectory = environment.stateDirectory,
             bundledDirectory = environment.bundledDirectory,
-            theShellTakesAnEnvironmentPrefix = environment.theShellIsPosix,
         )
 
         AgentCliKind.OMP -> OmpSessionStrategy(

@@ -139,19 +139,6 @@ class OpenCodeSessionStrategyTest {
         assertEquals(emptyMap<String, String>(), strategy.restoreEnvironment(tab))
     }
 
-    @Test
-    fun aShellThatReadsNoEnvironmentPrefixLeavesTheCommandAlone() {
-        val strategy = OpenCodeSessionStrategy(stateDirectory(), bundledDirectory(), false)
-        writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
-
-        strategy.prepareLaunch(tab)
-
-        assertEquals(emptyMap<String, String>(), strategy.launchEnvironment(tab))
-        assertEquals(emptyMap<String, String>(), strategy.restoreEnvironment(tab))
-        assertEquals(emptyList<String>(), strategy.restoreArguments(tab))
-        assertFalse(Files.exists(strategy.tuiConfigFile()))
-        assertFalse(Files.exists(strategy.sessionTrackerFile()))
-    }
 
     @Test
     fun theEnvironmentPointsOpenCodeAtTheBundledConfigAndTheTabStateFile() {
@@ -271,15 +258,17 @@ class OpenCodeSessionStrategyTest {
         strategy.prepareLaunch(tab)
         writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
 
-        val expectedConfig = ShellWords.quote(strategy.tuiConfigFile().toString())
-        val expectedState = ShellWords.quote(strategy.stateFile(tab).toString())
-
         assertEquals(
-            "OPENCODE_TUI_CONFIG=$expectedConfig TUILAUNCH_OPENCODE_STATE=$expectedState " +
-                "headroom wrap opencode --no-serena -- --session $REPORTED_SESSION_ID",
+            "headroom wrap opencode --no-serena -- --session $REPORTED_SESSION_ID",
             AgentCommand.parse("headroom wrap opencode --no-serena")
-                .withEnvironment(strategy.restoreEnvironment(tab))
                 .withArguments(strategy.restoreArguments(tab)),
+        )
+        assertEquals(
+            mapOf(
+                "OPENCODE_TUI_CONFIG" to strategy.tuiConfigFile().toString(),
+                "TUILAUNCH_OPENCODE_STATE" to strategy.stateFile(tab).toString(),
+            ),
+            strategy.restoreEnvironment(tab),
         )
     }
 
