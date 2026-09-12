@@ -16,9 +16,15 @@ import org.jetbrains.plugins.terminal.TerminalProjectOptionsProvider
 import org.jetbrains.plugins.terminal.runner.LocalTerminalStartCommandBuilder
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
-import java.io.File
 
 private const val SEND_AS_USER_INPUT = true
+
+/**
+ * The IDE appends its shell integration arguments (`-NoExit -ExecutionPolicy Bypass -File ...`) after ours,
+ * and PowerShell folds everything following `-Command` into one command line, so the TUI would receive them
+ * as its own arguments. A trailing comment hides them.
+ */
+private const val POWERSHELL_COMMENT = "#"
 private const val BRACKETED_PASTE_START = "\u001B[200~"
 private const val BRACKETED_PASTE_END = "\u001B[201~"
 
@@ -92,13 +98,6 @@ class JediTermSessionFactory(
         return session
     }
 
-    private fun runCommandArgs(shellExe: String, command: String): List<String> =
-        when (File(shellExe).name.removeSuffix(".exe").lowercase()) {
-            "cmd" -> listOf("/c", command)
-            "powershell", "pwsh" -> listOf("-Command", command)
-            else -> listOf("-c", command)
-        }
-
     private fun installKeyInterceptor(session: TerminalSession, parent: Disposable) {
         val state = TuiLauncherSettings.getInstance().state
         val prefixEnabled = state.tmuxKeybindingsEnabled && state.escapeKeyCode != null
@@ -132,6 +131,13 @@ class JediTermSessionFactory(
         else -> KeyEvent.CTRL_DOWN_MASK
     }
 }
+
+internal fun runCommandArgs(shellExe: String, command: String): List<String> =
+    when (shellExe.replace('\\', '/').substringAfterLast('/').removeSuffix(".exe").lowercase()) {
+        "cmd" -> listOf("/c", command)
+        "powershell", "pwsh" -> listOf("-Command", command, POWERSHELL_COMMENT)
+        else -> listOf("-c", command)
+    }
 
 internal fun bracketedPastePayload(text: String): String {
     val payload = withoutPasteMarkers(text)
