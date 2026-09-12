@@ -85,6 +85,10 @@ class JsonRpcConnection(
         }
     }
 
+    /**
+     * Destroy the server process before calling this. Closing a pipe that the read loop is blocked on
+     * hangs on Windows, and only the process exiting releases that read.
+     */
     fun close() {
         if (!closed.compareAndSet(false, true)) return
         outgoing.close()

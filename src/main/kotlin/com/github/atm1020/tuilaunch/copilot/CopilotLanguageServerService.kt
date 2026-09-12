@@ -335,8 +335,8 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
             try {
                 awaitCancellation()
             } finally {
-                started.connection.close()
                 started.process.destroy()
+                started.connection.close()
             }
         }
 
@@ -383,8 +383,8 @@ class CopilotLanguageServerService @NonInjectable internal constructor(
     private fun discard(unwanted: Session) {
         if (session === unwanted) session = null
         unwanted.cancelWatchers()
-        unwanted.connection.close()
         unwanted.process.destroy()
+        unwanted.connection.close()
     }
 
     private fun scheduleRetry(reason: String) {
