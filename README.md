@@ -107,8 +107,12 @@ accepts the suggestion, <kbd>Escape</kbd> dismisses it, a second <kbd>Escape</kb
 terminal, and <kbd>Up</kbd> and <kbd>Down</kbd> move the cursor instead of browsing the history while a suggestion is
 showing. They come from JetBrains AI Assistant unless you pick GitHub Copilot instead.
 
-Three more actions ship with no shortcut and can be given one in <kbd>Settings/Preferences</kbd> > <kbd>Keymap</kbd>:
+Four more actions ship with no shortcut and can be given one in <kbd>Settings/Preferences</kbd> > <kbd>Keymap</kbd>:
 
+- `TUILauncher.SendFileReference` — hand the file you are looking at to the agent as `@src/main/App.kt`, or as
+  `@src/main/App.kt#L113-115` when the editor has a selection. The path is relative to the project root, which is the
+  working directory the TUI was started in. It lands at the cursor in the prompt box of the active tab when that box is
+  showing, and goes straight to the terminal, unsubmitted, when it is not.
 - `TUILauncher.FocusPromptBox` — a toggle on the prompt box of the active TUI tab, from the editor, from the terminal,
   or from the box itself: it shows the box and puts the cursor in it while the box is hidden, puts the cursor in it
   while the box is showing without it, and closes the box the way the **Toggle Prompt Box** button closes it, with the
@@ -269,6 +273,7 @@ TUILaunch registers global actions that can be bound in the IDE keymap or called
 - `TUILauncher.ToggleToolWindow` — show or hide the `TUILaunch` tool window.
 - `TUILauncher.ToggleToolWindowAndFocus` — show and focus the tool window, or hide it.
 - `TUILauncher.CloseActiveTui` — close the selected TUI tab.
+- `TUILauncher.SendFileReference` — send the active file, and the selected line range, as an `@path` reference.
 - `TUILauncher.NextTuiTab` / `TUILauncher.PreviousTuiTab` — switch TUI tabs and focus the terminal.
 - `TUILauncher.NextTuiTabWithoutFocus` / `TUILauncher.PreviousTuiTabWithoutFocus` — switch TUI tabs without moving keyboard focus into the terminal.
 

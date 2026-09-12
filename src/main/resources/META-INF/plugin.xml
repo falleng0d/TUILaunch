@@ -126,6 +126,12 @@
                 description="Move keyboard focus into the prompt box of the active TUI session, showing it first when it is hidden, and hide it again when it already holds the focus">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
+        <action id="TUILauncher.SendFileReference"
+                class="com.github.atm1020.tuilaunch.action.SendFileReferenceAction"
+                text="TUILaunch Send File Reference"
+                description="Send the active file as @path, with #Lstart-end when the editor has a selection, to the prompt box or the active TUI session">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
         <action id="TUILauncher.SendPromptBlock"
                 class="com.github.atm1020.tuilaunch.action.SendPromptBlockUnderCaretAction"
                 text="TUILaunch Send Prompt Block"

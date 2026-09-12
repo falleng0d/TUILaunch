@@ -369,6 +369,18 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         return sendTo(tab.session, text, submit)
     }
 
+    fun sendFileReference(reference: String): Boolean {
+        val host = hostWithListeners() ?: return false
+        val tab = activeOrLastOpenTab(host) ?: return false
+        if (tab.layout.promptBoxVisible) {
+            tab.promptBox.insertAtCaret(reference)
+            tab.promptBox.requestFocus()
+            return true
+        }
+        selectTuiTab(host, tab, requestFocus = false)
+        return sendTo(tab.session, "$reference ", submit = false)
+    }
+
     private fun sendTo(session: TerminalSession, text: String, submit: Boolean): Boolean {
         if (!session.sendText(text)) return false
         if (submit) session.sendKey(KeyEvent.VK_ENTER, 0, SUBMIT_KEY_CHAR)

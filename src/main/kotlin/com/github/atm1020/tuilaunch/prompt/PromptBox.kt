@@ -210,6 +210,17 @@ internal class PromptBox(
         if (editorIfInstalled != null) text = ""
     }
 
+    fun insertAtCaret(snippet: String) {
+        val editor = installEditor()
+        val document = editor.document
+        val offset = editor.caretModel.offset.coerceIn(0, document.textLength)
+        val inserted = referenceInsertion(document.charsSequence, offset, snippet)
+        WriteCommandAction.writeCommandAction(project).withName(PROMPT_BOX_EDIT_NAME).run<RuntimeException> {
+            document.insertString(offset, inserted)
+        }
+        editor.caretModel.moveToOffset(offset + inserted.length)
+    }
+
     fun requestFocus() {
         installEditor()
         promptBoxFocusRequest(this)
