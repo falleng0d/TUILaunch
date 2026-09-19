@@ -200,7 +200,9 @@ depends on the CLI:
 - **opencode** — no flag can choose the id here either, so the launch puts
   `OPENCODE_TUI_CONFIG=<bundled tui.json>` and `TUILAUNCH_OPENCODE_STATE=<state file>` in front of the command,
   which loads a small TUI plugin of TUILaunch's own. That plugin records the session the TUI is showing, and a
-  reopened tab comes back with `--session <session id>`.
+  reopened tab comes back with `--session <session id>`. The tab is also pointed at the project's shared server
+  with `attach http://127.0.0.1:<port> --dir <project>`, described under
+  **One OpenCode server for the whole project** below.
 - **omp** — the launch points omp at a session directory of the tab's own with `--session-dir` and loads a small
   extension of TUILaunch's own with `--hook`, which records the session omp is in inside that same directory. A
   reopened tab resumes the recorded session with `--resume <file>`, and the session file of the directory that
@@ -257,6 +259,30 @@ plugin off, ours with them.
 Open the same project in two IDE windows at once and both of them restore the same agent sessions, which none of
 the CLIs support — codex in particular needs the previous writer to be gone before a session can be resumed — so
 use one IDE window per project while relying on this feature.
+
+#### One OpenCode server for the whole project
+
+Plain `opencode` starts a server of its own inside every TUI process, so every OpenCode tab of a project carries
+one and they share nothing. TUILaunch instead starts one `opencode serve` on a free loopback port when the first
+OpenCode tab of a project window opens, points every tab of that window at it with
+`attach http://127.0.0.1:<port> --dir <project>`, and ends it a few seconds after the last of those tabs closes,
+so a tab that is reopened right away finds it still running. Two project windows get one server each.
+
+The tab is only launched once the server answers `GET /global/health`, so the terminal appears when `attach` can
+reach it; if it never answers, the tab falls back to the command you configured and runs on its own. That server
+is started by the IDE rather than by the terminal's shell, so `opencode` has to be on the IDE's own `PATH` — a
+shim that only exists inside your interactive shell leaves every tab on the fallback. A server that dies while
+tabs are still attached is started again on the port it had, which is the address those tabs keep reconnecting
+to, up to three times in a row before TUILaunch gives up and leaves the tabs to you; attaching a new tab gives it
+those three attempts again. The port is never remembered across restarts. The pid, the port and the pid of the
+IDE that started it are written to `agent-sessions/<project>/opencode-server.json` only so that a server left
+behind by a crashed IDE is ended before a new one starts; a server whose IDE is still running is left alone,
+which is what keeps a second window of the same project from ending the first one's server.
+
+Turn it off with **Run one OpenCode server per project and attach every tab to it** if you want a process per tab
+again, or if your opencode build has no `attach` command. It is on by default, sits under **Resume the agent
+session when a TUI tab is reopened** because it only applies while that one and **Reopen TUI tabs when the
+project is opened** are both on, and has no effect on any other CLI.
 
 
 ### Focus and tab actions
@@ -478,6 +504,10 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `api.route.current` is a live getter with no change event behind it, so the session the opencode TUI shows can only be followed by polling.
 - opencode `--continue` starts on the placeholder session id `dummy`, so only an id matching `ses_` followed by 26 alphanumerics is a session worth recording.
 - `opencode --session <id>` validates the id before the TUI starts and exits 1 when that session is gone, which is what lets the early-exit relaunch catch it, while `OPENCODE_ROUTE` only shows a toast and exits 0.
+- `opencode serve --port 0` listens on 4096 rather than on a port the operating system picks, so the plugin allocates the port itself with `ServerSocket(0)` and passes it explicitly.
+- An `opencode attach` TUI whose server is gone reconnects to the same address for ever with backoff and never exits, so a server that dies while tabs are attached has to be started again on the port it had; the tabs then reconnect on their own.
+- `opencode attach <url> --dir <path>` runs `process.chdir` before anything loads and every request carries that directory, so one server serves any number of directories and the tab has to name its own.
+- Everything named `<name>.json` inside `agent-sessions/<project>/opencode/` is deleted on project open unless `<name>` is a tab that came back, so a record that is not per tab — the running server's pid and port — has to live outside that directory.
 - A launch command is handed to the terminal's own shell, and `cmd /c` and `powershell -Command` neither read a leading `NAME=value` as an assignment nor treat `'` as quoting, so on Windows a codex or opencode tab can get no environment prefix and a claude tab can get no inline `--settings` document.
 - `ContentManager.addContent(Content, int)` inserts at that index and reads -1 as "append", which is the only supported way to put a tab back at the strip position it had.
 - A tab the plugin closes itself and a tab the user closes from the strip both arrive as one `contentRemoved` carrying no reason, so the only way to tell them apart is bookkeeping done before calling `removeContent`; project close fires no event at all and a drag is marked with `Content.TEMPORARY_REMOVED_KEY`.

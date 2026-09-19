@@ -1,6 +1,7 @@
 package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.resume.AgentCommand
+import com.github.atm1020.tuilaunch.resume.HttpOpenCodeHealthProbe
 import com.github.atm1020.tuilaunch.resume.OpenCodeHealthProbe
 import com.github.atm1020.tuilaunch.resume.OpenCodeServerProcess
 import com.github.atm1020.tuilaunch.resume.OpenCodeServerProcessFactory
@@ -20,6 +21,8 @@ import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Collections
@@ -29,6 +32,8 @@ import java.util.concurrent.atomic.AtomicLong
 private const val FIRST_TAB = "6cd3a1f0-1c5a-4b4e-9f26-6b4a1c5e7d01"
 private const val SECOND_TAB = "6cd3a1f0-1c5a-4b4e-9f26-6b4a1c5e7d02"
 private const val FIRST_PORT = 45001
+private const val IDE_PID = 777L
+private const val ANOTHER_IDE_PID = 778L
 private const val WAIT_MILLIS = 10_000L
 
 class OpenCodeServerTest {
@@ -40,6 +45,7 @@ class OpenCodeServerTest {
     private val processes = FakeServerProcesses()
     private val health = FakeHealthProbe()
     private val killedPids = Collections.synchronizedList(mutableListOf<Long>())
+    private val runningPids = Collections.synchronizedSet(mutableSetOf(IDE_PID))
     private val nextPort = AtomicInteger(FIRST_PORT)
 
     @After
@@ -181,6 +187,7 @@ class OpenCodeServerTest {
         val record = Files.readString(stateFile())
         assertTrue(record, record.contains("\"port\":$FIRST_PORT"))
         assertTrue(record, record.contains("\"pid\":${processes.started.single().pid}"))
+        assertTrue(record, record.contains("\"ide\":$IDE_PID"))
 
         server.release(FIRST_TAB)
 
@@ -189,8 +196,7 @@ class OpenCodeServerTest {
 
     @Test
     fun `a server left by an earlier run is ended before a new one starts`() {
-        Files.createDirectories(stateFile().parent)
-        Files.writeString(stateFile(), """{"pid":4242,"port":1234}""")
+        writeServerRecord(ide = ANOTHER_IDE_PID)
         val server = newServer()
 
         runBlocking { server.acquire(FIRST_TAB, AgentCommand.parse("opencode")) }
@@ -198,6 +204,89 @@ class OpenCodeServerTest {
         awaitUntil("The server was never started again") { processes.started.size == 2 }
 
         assertEquals(listOf(4242L), killedPids.toList())
+    }
+
+    @Test
+    fun `the server of an IDE that is still running is left alone`() {
+        writeServerRecord(ide = IDE_PID)
+        val server = newServer()
+
+        runBlocking { server.acquire(FIRST_TAB, AgentCommand.parse("opencode")) }
+
+        assertEquals(emptyList<Long>(), killedPids.toList())
+    }
+
+    @Test
+    fun `a record without an owner is left alone`() {
+        Files.createDirectories(stateFile().parent)
+        Files.writeString(stateFile(), """{"pid":4242,"port":1234}""")
+        val server = newServer()
+
+        runBlocking { server.acquire(FIRST_TAB, AgentCommand.parse("opencode")) }
+
+        assertEquals(emptyList<Long>(), killedPids.toList())
+    }
+
+    @Test
+    fun `a tab that opens during the grace after the last one keeps the server`() {
+        val server = newServer(releaseGraceMs = 300L)
+        runBlocking { server.acquire(FIRST_TAB, AgentCommand.parse("opencode")) }
+
+        server.release(FIRST_TAB)
+        val address = runBlocking { server.acquire(SECOND_TAB, AgentCommand.parse("opencode")) }
+
+        Thread.sleep(500)
+        assertEquals("http://127.0.0.1:$FIRST_PORT", address)
+        assertEquals(1, processes.started.size)
+        assertFalse(processes.started.single().isTerminated)
+    }
+
+    @Test
+    fun `a wrapped command starts the server through its wrapper`() {
+        val server = newServer()
+
+        runBlocking { server.acquire(FIRST_TAB, AgentCommand.parse("headroom wrap opencode --no-serena")) }
+
+        assertEquals(
+            listOf(
+                "headroom", "wrap", "opencode", "--no-serena", "--",
+                "serve", "--port", "$FIRST_PORT", "--hostname", "127.0.0.1",
+            ),
+            processes.started.single().tokens,
+        )
+    }
+
+    @Test
+    fun `closing the project ends the server`() {
+        val projectScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val server = newServer(ownScope = projectScope)
+        runBlocking { server.acquire(FIRST_TAB, AgentCommand.parse("opencode")) }
+
+        projectScope.cancel()
+
+        awaitUntil("The project scope never ended the server") { processes.started.single().isTerminated }
+        assertTrue(Files.exists(stateFile()))
+    }
+
+    @Test
+    fun `the health probe takes only a healthy answer`() {
+        val answers = FakeHealthEndpoint()
+        HttpOpenCodeHealthProbe().use { probe ->
+            assertTrue(runBlocking { probe.answers(answers.address) })
+
+            answers.body = """{"healthy":false}"""
+            assertFalse(runBlocking { probe.answers(answers.address) })
+
+            answers.body = "not json at all"
+            assertFalse(runBlocking { probe.answers(answers.address) })
+
+            answers.body = """{"healthy":true}"""
+            answers.status = 500
+            assertFalse(runBlocking { probe.answers(answers.address) })
+        }
+        answers.stop()
+
+        assertFalse(runBlocking { HttpOpenCodeHealthProbe().use { it.answers(answers.address) } })
     }
 
     @Test
@@ -226,22 +315,32 @@ class OpenCodeServerTest {
     private fun newServer(
         restartDelaysMs: List<Long> = listOf(0L),
         startupTimeoutMs: Long = WAIT_MILLIS,
+        releaseGraceMs: Long = 0L,
+        ownScope: CoroutineScope = scope,
     ): OpenCodeServerService = OpenCodeServerService(
-        scope = scope,
+        scope = ownScope,
         processes = processes,
         health = health,
         freePort = { nextPort.getAndIncrement() },
         endTheServerWithPid = { pid -> killedPids.add(pid) },
+        theProcessIsRunning = { pid -> pid in runningPids },
+        idePid = IDE_PID,
         stateFile = stateFile(),
         workingDirectory = workingDirectory().toString(),
         restartDelaysMs = restartDelaysMs,
         pollIntervalMs = 5L,
         startupTimeoutMs = startupTimeoutMs,
         stopGraceMs = 100L,
+        releaseGraceMs = releaseGraceMs,
     )
 
     private fun stateFile(): Path =
-        temporaryFolder.root.toPath().resolve("state").resolve("opencode").resolve("server.json")
+        temporaryFolder.root.toPath().resolve("state").resolve("opencode-server.json")
+
+    private fun writeServerRecord(ide: Long) {
+        Files.createDirectories(stateFile().parent)
+        Files.writeString(stateFile(), """{"pid":4242,"port":1234,"ide":$ide}""")
+    }
 
     private fun workingDirectory(): Path = temporaryFolder.root.toPath()
 
@@ -253,6 +352,29 @@ class OpenCodeServerTest {
         }
         fail(message)
     }
+}
+
+private class FakeHealthEndpoint {
+    private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+
+    @Volatile
+    var body = """{"healthy":true,"version":"1.18.30"}"""
+
+    @Volatile
+    var status = 200
+
+    val address: String get() = "http://127.0.0.1:${server.address.port}"
+
+    init {
+        server.createContext(OpenCodeServerService.HEALTH_PATH) { exchange ->
+            val bytes = body.toByteArray()
+            exchange.sendResponseHeaders(status, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+    }
+
+    fun stop() = server.stop(0)
 }
 
 private class FakeHealthProbe : OpenCodeHealthProbe {
@@ -313,7 +435,6 @@ private class FakeServerProcess(
 
     override fun onTerminated(listener: () -> Unit) {
         listeners.add(listener)
-        if (isTerminated) listener()
     }
 
     override fun destroy() {

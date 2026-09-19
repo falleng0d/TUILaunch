@@ -42,6 +42,7 @@ import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.awt.event.KeyEvent
@@ -89,7 +90,13 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             bundledDirectory = AgentSessionEnvironment.bundledDirectory(),
         )
     }
-    var openCodeServer: () -> OpenCodeServer? = { OpenCodeServerService.getInstance(project) }
+    var openCodeServer: () -> OpenCodeServer? = {
+        if (TuiLauncherSettings.getInstance().state.shareOpenCodeServer) {
+            OpenCodeServerService.getInstance(project)
+        } else {
+            null
+        }
+    }
     var agentSessionStrategies: (AgentCliKind, AgentSessionEnvironment, Boolean) -> AgentSessionStrategy =
         { kind, environment, hookAllowed ->
             AgentSessionStrategies.forKind(kind, environment, hookAllowed) { openCodeServer() }
@@ -565,19 +572,32 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         }
         val setup = pending.setup
         scope.launch {
-            setup.strategy.prepareLaunchInBackground(setup.tab, setup.parsed)
+            prepareInBackground(setup)
             onTheEventThread {
-                if (pendingLaunchesBySessionId[sessionId]?.disposable !== disposable || disposable.isDisposed) {
-                    setup.strategy.tabClosed(setup.tab)
+                val theLaunchIsStillOurs = pendingLaunchesBySessionId[sessionId]?.disposable === disposable
+                if (theLaunchIsStillOurs && !disposable.isDisposed) {
+                    startTheSession(pending)
                     return@onTheEventThread
                 }
-                startTheSession(pending)
+                if (theLaunchIsStillOurs) pendingLaunchesBySessionId.remove(sessionId)
+                releaseTheServerOf(pending)
+                pending.onFailed?.invoke()
             }
         }
     }
 
+    private suspend fun prepareInBackground(setup: AgentSetup) {
+        try {
+            setup.strategy.prepareLaunchInBackground(setup.tab, setup.parsed)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            thisLogger().warn("Could not prepare the ${setup.kind} launch of '${setup.parsed.command}'", failure)
+        }
+    }
+
     private fun onTheEventThread(work: () -> Unit) {
-        ApplicationManager.getApplication().invokeLater(work, ModalityState.any())
+        ApplicationManager.getApplication().invokeLater(work, ModalityState.nonModal())
     }
 
     private fun startTheSession(pending: PendingTab) {

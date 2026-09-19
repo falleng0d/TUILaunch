@@ -49,6 +49,7 @@ private const val NESTED_CHECKBOX_INDENT = 20
 
 internal const val RESTORE_OPEN_TABS_LABEL = "Reopen TUI tabs when the project is opened"
 internal const val RESTORE_AGENT_SESSIONS_LABEL = "Resume the agent session when a TUI tab is reopened"
+internal const val SHARE_OPENCODE_SERVER_LABEL = "Run one OpenCode server per project and attach every tab to it"
 internal const val SUBMIT_PROMPT_ON_SEND_LABEL = "Send the prompt immediately instead of only typing it"
 internal const val APPEND_PROMPT_SEPARATOR_LABEL = "Add a new prompt separator to PROMPT.md after sending"
 internal const val FOCUS_PROMPT_FILE_LABEL = "Focus PROMPT.md again after sending"
@@ -101,6 +102,7 @@ class TuiLauncherConfiguration internal constructor(
     private var tmuxKeybindingsEnabledCheckBox: JBCheckBox? = null
     private var restoreOpenTabsCheckBox: JBCheckBox? = null
     private var restoreAgentSessionsCheckBox: JBCheckBox? = null
+    private var shareOpenCodeServerCheckBox: JBCheckBox? = null
     private var submitPromptOnSendCheckBox: JBCheckBox? = null
     private var appendPromptSeparatorCheckBox: JBCheckBox? = null
     private var focusPromptFileCheckBox: JBCheckBox? = null
@@ -233,6 +235,10 @@ class TuiLauncherConfiguration internal constructor(
             JBCheckBox(RESTORE_AGENT_SESSIONS_LABEL, settings.state.restoreAgentSessions).apply {
                 border = JBUI.Borders.emptyLeft(NESTED_CHECKBOX_INDENT)
             }
+        val openCodeServerCheckBox =
+            JBCheckBox(SHARE_OPENCODE_SERVER_LABEL, settings.state.shareOpenCodeServer).apply {
+                border = JBUI.Borders.emptyLeft(2 * NESTED_CHECKBOX_INDENT)
+            }
         val submitCheckBox = JBCheckBox(SUBMIT_PROMPT_ON_SEND_LABEL, settings.state.submitPromptOnSend)
         val separatorCheckBox =
             JBCheckBox(APPEND_PROMPT_SEPARATOR_LABEL, settings.state.appendPromptSeparatorOnSend)
@@ -247,8 +253,10 @@ class TuiLauncherConfiguration internal constructor(
             JBCheckBox(HIDE_PROMPT_BOX_AFTER_SEND_LABEL, settings.state.hidePromptBoxAfterSend)
         restoreOpenTabsCheckBox = restoreCheckBox
         restoreAgentSessionsCheckBox = agentSessionsCheckBox
-        restoreCheckBox.addActionListener { updateRestoreAgentSessionsEnabled() }
-        updateRestoreAgentSessionsEnabled()
+        shareOpenCodeServerCheckBox = openCodeServerCheckBox
+        restoreCheckBox.addActionListener { updateSessionOptionsEnabled() }
+        agentSessionsCheckBox.addActionListener { updateSessionOptionsEnabled() }
+        updateSessionOptionsEnabled()
         submitPromptOnSendCheckBox = submitCheckBox
         appendPromptSeparatorCheckBox = separatorCheckBox
         focusPromptFileCheckBox = focusPromptCheckBox
@@ -259,6 +267,7 @@ class TuiLauncherConfiguration internal constructor(
         val sessionOptions = listOf(
             restoreCheckBox,
             agentSessionsCheckBox,
+            openCodeServerCheckBox,
             submitCheckBox,
             separatorCheckBox,
             focusPromptCheckBox,
@@ -276,8 +285,11 @@ class TuiLauncherConfiguration internal constructor(
         }
     }
 
-    private fun updateRestoreAgentSessionsEnabled() {
-        restoreAgentSessionsCheckBox?.isEnabled = restoreOpenTabsCheckBox?.isSelected == true
+    private fun updateSessionOptionsEnabled() {
+        val tabsComeBack = restoreOpenTabsCheckBox?.isSelected == true
+        restoreAgentSessionsCheckBox?.isEnabled = tabsComeBack
+        shareOpenCodeServerCheckBox?.isEnabled =
+            tabsComeBack && restoreAgentSessionsCheckBox?.isSelected == true
     }
 
     private fun createPromptBoxCompletionsPanel(): JComponent {
@@ -623,6 +635,7 @@ class TuiLauncherConfiguration internal constructor(
         tmuxKeybindingsEnabledCheckBox?.isSelected = settings.state.tmuxKeybindingsEnabled
         restoreOpenTabsCheckBox?.isSelected = settings.state.restoreOpenTabs
         restoreAgentSessionsCheckBox?.isSelected = settings.state.restoreAgentSessions
+        shareOpenCodeServerCheckBox?.isSelected = settings.state.shareOpenCodeServer
         submitPromptOnSendCheckBox?.isSelected = settings.state.submitPromptOnSend
         appendPromptSeparatorCheckBox?.isSelected = settings.state.appendPromptSeparatorOnSend
         focusPromptFileCheckBox?.isSelected = settings.state.focusPromptFileAfterSend
@@ -641,7 +654,7 @@ class TuiLauncherConfiguration internal constructor(
         refreshShortcutBindings()
         updateCopilotServerHint()
         updateCopilotComponentsEnabled()
-        updateRestoreAgentSessionsEnabled()
+        updateSessionOptionsEnabled()
         updateTmuxShortcutComponentsEnabled()
     }
 
@@ -654,6 +667,7 @@ class TuiLauncherConfiguration internal constructor(
         tmuxKeybindingsEnabledCheckBox = null
         restoreOpenTabsCheckBox = null
         restoreAgentSessionsCheckBox = null
+        shareOpenCodeServerCheckBox = null
         submitPromptOnSendCheckBox = null
         appendPromptSeparatorCheckBox = null
         focusPromptFileCheckBox = null
@@ -681,6 +695,7 @@ class TuiLauncherConfiguration internal constructor(
         tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true,
         restoreOpenTabs = restoreOpenTabsCheckBox?.isSelected == true,
         restoreAgentSessions = restoreAgentSessionsCheckBox?.isSelected == true,
+        shareOpenCodeServer = shareOpenCodeServerCheckBox?.isSelected == true,
         submitPromptOnSend = submitPromptOnSendCheckBox?.isSelected == true,
         appendPromptSeparatorOnSend = appendPromptSeparatorCheckBox?.isSelected == true,
         focusPromptFileAfterSend = focusPromptFileCheckBox?.isSelected == true,
@@ -709,6 +724,7 @@ class TuiLauncherConfiguration internal constructor(
         settings.state.tmuxKeybindingsEnabled = tmuxKeybindingsEnabledCheckBox?.isSelected == true
         settings.state.restoreOpenTabs = restoreOpenTabsCheckBox?.isSelected == true
         settings.state.restoreAgentSessions = restoreAgentSessionsCheckBox?.isSelected == true
+        settings.state.shareOpenCodeServer = shareOpenCodeServerCheckBox?.isSelected == true
         settings.state.submitPromptOnSend = submitPromptOnSendCheckBox?.isSelected == true
         settings.state.appendPromptSeparatorOnSend = appendPromptSeparatorCheckBox?.isSelected == true
         settings.state.focusPromptFileAfterSend = focusPromptFileCheckBox?.isSelected == true

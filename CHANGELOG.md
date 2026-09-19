@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Every OpenCode tab of a project window now attaches to one `opencode serve` that TUILaunch starts on a free loopback
+  port, instead of starting a server of its own inside its own TUI process. The first OpenCode tab starts it, the rest
+  join it with `attach http://127.0.0.1:<port> --dir <project>`, and it ends when the last of those tabs closes. The
+  tab only opens once the server answers, a server that dies while tabs are attached is started again on the same port
+  so the attached TUIs reconnect to it, and a server a crashed IDE left behind is ended before a new one starts.
+  Reopening a tab, following a session switch inside the TUI and the relaunch of a tab whose session is gone all keep
+  working as they did. A server that cannot be started leaves the tab on the command you configured.
+
+### Added
+
+- **Run one OpenCode server per project and attach every tab to it**, under **Resume the agent session when a TUI tab
+  is reopened** because it only applies while that option is on. It is on by default; turn it off to go back to one
+  server per tab, which is what an opencode build without an `attach` command needs.
+
 ## [0.11.3] - 2026-09-12
 
 ### Added

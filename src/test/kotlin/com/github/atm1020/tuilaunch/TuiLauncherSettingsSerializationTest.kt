@@ -148,6 +148,22 @@ class TuiLauncherSettingsSerializationTest {
     }
 
     @Test
+    fun `every OpenCode tab shares one server by default`() {
+        val state = TuiLauncherSettings.State()
+
+        assertTrue(state.shareOpenCodeServer)
+        assertFalse(optionNames(state).contains("shareOpenCodeServer"))
+    }
+
+    @Test
+    fun `giving every OpenCode tab a server of its own survives serialization`() {
+        val restored = roundTrip(TuiLauncherSettings.State(shareOpenCodeServer = false))
+
+        assertFalse(restored.shareOpenCodeServer)
+        assertTrue(restored.restoreAgentSessions)
+    }
+
+    @Test
     fun `the prompt box keeps the keyboard after a send by default`() {
         val state = TuiLauncherSettings.State()
 

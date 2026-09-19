@@ -14,6 +14,7 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 
 private const val TAB_UUID = "b7c1e0d4-3a52-4f19-8c7d-2e6f5a9b1c30"
 private const val CODEX_SESSION_ID = "019a4f3c-7b21-7cd0-9e55-3f1b2a6d8c47"
@@ -39,6 +40,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
             tuiApps.clear()
             restoreOpenTabs = true
             restoreAgentSessions = true
+            shareOpenCodeServer = true
             promptBoxVisible = false
         }
         TuiOpenTabsService.getInstance(project).replaceTabs(emptyList())
@@ -50,6 +52,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
                 tuiApps.clear()
                 restoreOpenTabs = false
                 restoreAgentSessions = true
+                shareOpenCodeServer = true
             }
             TuiOpenTabsService.getInstance(project).replaceTabs(emptyList())
         } finally {
@@ -514,6 +517,8 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val orphan = codexStateFile(goneTabUuid)
         val claudeOrphan = claudeStateFile(goneTabUuid)
         val openCodeOrphan = openCodeStateFile(goneTabUuid)
+        val serverRecord = environment.stateDirectory.resolve("opencode-server.json")
+        write(serverRecord, """{"pid":4242,"port":1234,"ide":1}""")
         write(kept, codexHookRecord())
         write(orphan, codexHookRecord())
         write(claudeOrphan, """{"session_id":"$CLAUDE_REPORTED_SESSION"}""")
@@ -527,6 +532,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         awaitDeletedFile(claudeOrphan)
         awaitDeletedFile(openCodeOrphan)
         assertTrue(Files.exists(kept))
+        assertTrue(Files.exists(serverRecord))
     }
 
     fun testACodexTabThatEndsTwiceAfterAReopenIsNotStartedAThirdTime() {
@@ -650,6 +656,37 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertTrue(Files.isRegularFile(openCodeSessionTracker()))
         assertTrue(Files.isDirectory(openCodeStateFile(tabUuid).parent))
         assertNull(savedTabs().single().agentSessionId)
+    }
+
+    fun testAnOpenCodeTabIsOnlyLaunchedOnceItsServerAnswers() {
+        configureApp("opencode", "opencode")
+        val gate = CountDownLatch(1)
+        openCodeServer = FakeOpenCodeServer(gate = gate)
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("opencode", "opencode")
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(emptyList<String>(), factory.commands)
+
+        gate.countDown()
+        awaitCommands(factory, 1)
+
+        assertEquals(listOf("opencode ${openCodeAttach()}"), factory.commands)
+    }
+
+    fun testTheSharedServerSettingOffLaunchesOpenCodeOnItsOwn() {
+        TuiLauncherSettings.getInstance().state.shareOpenCodeServer = false
+        configureApp("opencode", "opencode")
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory, theServerIsInjected = false)
+
+        service.launchNew("opencode", "opencode")
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf("opencode"), factory.commands)
+        assertEquals(listOf(openCodeEnvironment(tabUuid)), factory.environments)
     }
 
     fun testAnOpenCodeTabWithTheSharedServerOffIsLaunchedAsItAlwaysWas() {
@@ -910,13 +947,16 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertTrue(Files.exists(stateFile))
     }
 
-    private fun newService(sessionFactory: TerminalSessionFactory): Pair<TuiAppLaunchService, FakeHost> {
+    private fun newService(
+        sessionFactory: TerminalSessionFactory,
+        theServerIsInjected: Boolean = true,
+    ): Pair<TuiAppLaunchService, FakeHost> {
         val service = TuiAppLaunchService(project, testCoroutineScope(testRootDisposable))
         val host = FakeHost()
         service.host = host
         service.sessionFactory = sessionFactory
         service.agentSessionEnvironment = { environment }
-        service.openCodeServer = { openCodeServer }
+        if (theServerIsInjected) service.openCodeServer = { openCodeServer }
         return service to host
     }
 

@@ -22,6 +22,7 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         var tmuxKeybindingsEnabled: Boolean = true,
         var restoreOpenTabs: Boolean = true,
         var restoreAgentSessions: Boolean = true,
+        var shareOpenCodeServer: Boolean = true,
         var submitPromptOnSend: Boolean = true,
         var appendPromptSeparatorOnSend: Boolean = true,
         var focusPromptFileAfterSend: Boolean = true,

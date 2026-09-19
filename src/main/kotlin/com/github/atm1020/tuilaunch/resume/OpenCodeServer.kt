@@ -75,6 +75,8 @@ fun endTheProcessWithPid(pid: Long) {
     handle.destroy()
 }
 
+fun aProcessIsRunning(pid: Long): Boolean = ProcessHandle.of(pid).map { it.isAlive }.orElse(false)
+
 private fun looksLikeAnOpenCodeServer(handle: ProcessHandle): Boolean {
     val info = handle.info()
     val description = info.commandLine().orElse(null) ?: info.command().orElse(null) ?: return false
@@ -88,12 +90,15 @@ class OpenCodeServerService @NonInjectable internal constructor(
     private val health: OpenCodeHealthProbe,
     private val freePort: () -> Int,
     private val endTheServerWithPid: (Long) -> Unit,
+    private val theProcessIsRunning: (Long) -> Boolean,
+    private val idePid: Long,
     private val stateFile: Path,
     private val workingDirectory: String?,
     private val restartDelaysMs: List<Long>,
     private val pollIntervalMs: Long,
     private val startupTimeoutMs: Long,
     private val stopGraceMs: Long,
+    private val releaseGraceMs: Long,
 ) : OpenCodeServer {
 
     constructor(project: Project, scope: CoroutineScope) : this(
@@ -102,14 +107,16 @@ class OpenCodeServerService @NonInjectable internal constructor(
         health = HttpOpenCodeHealthProbe(),
         freePort = ::allocateFreePort,
         endTheServerWithPid = ::endTheProcessWithPid,
+        theProcessIsRunning = ::aProcessIsRunning,
+        idePid = ProcessHandle.current().pid(),
         stateFile = AgentSessionEnvironment.stateDirectoryFor(project.locationHash)
-            .resolve(OpenCodeSessionStrategy.DIRECTORY_NAME)
             .resolve(SERVER_STATE_FILE_NAME),
         workingDirectory = project.basePath,
         restartDelaysMs = DEFAULT_RESTART_DELAYS_MS,
         pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
         startupTimeoutMs = DEFAULT_STARTUP_TIMEOUT_MS,
         stopGraceMs = DEFAULT_STOP_GRACE_MS,
+        releaseGraceMs = DEFAULT_RELEASE_GRACE_MS,
     )
 
     private class RunningServer(val port: Int, val process: OpenCodeServerProcess)
@@ -139,10 +146,14 @@ class OpenCodeServerService @NonInjectable internal constructor(
 
     override fun release(tabUuid: String) {
         scope.launch {
+            val theLastTabIsGone = transitions.withLock {
+                if (!attachedTabs.remove(tabUuid)) return@launch
+                attachedTabs.isEmpty()
+            }
+            if (!theLastTabIsGone) return@launch
+            delay(releaseGraceMs)
             transitions.withLock {
-                if (!attachedTabs.remove(tabUuid)) return@withLock
-                if (attachedTabs.isNotEmpty()) return@withLock
-                stopTheServer()
+                if (attachedTabs.isEmpty()) stopTheServer()
             }
         }
     }
@@ -176,6 +187,11 @@ class OpenCodeServerService @NonInjectable internal constructor(
         running = started
         process.onTerminated { restartAfterACrash(started) }
         rememberTheRunningServer(process.pid, port)
+        if (process.isTerminated) {
+            thisLogger().warn("The OpenCode server on port $port ended before it could answer")
+            stopTheServer()
+            return null
+        }
         if (!theServerAnswers(started)) {
             thisLogger().warn("OpenCode did not answer on ${addressOf(port)} within $startupTimeoutMs ms")
             stopTheServer()
@@ -234,7 +250,6 @@ class OpenCodeServerService @NonInjectable internal constructor(
         val current = running
         running = null
         port = null
-        restartAttempts = 0
         forgetTheRunningServer()
         if (current == null || current.process.isTerminated) return
         current.process.destroy()
@@ -249,17 +264,24 @@ class OpenCodeServerService @NonInjectable internal constructor(
 
     private suspend fun killAServerLeftByAnEarlierRun() {
         if (aServerFromAnEarlierRunWasHandled) return
+        val record = withContext(Dispatchers.IO) { AgentStateFiles.readJsonObject(stateFile) }
         aServerFromAnEarlierRunWasHandled = true
-        val record = withContext(Dispatchers.IO) { AgentStateFiles.readJsonObject(stateFile) } ?: return
-        val pid = record.get(PID_FIELD)?.takeIf { it.isJsonPrimitive }?.asLong ?: return
+        if (record == null) return
+        val owner = longField(record, IDE_FIELD) ?: return
+        if (withContext(Dispatchers.IO) { theProcessIsRunning(owner) }) return
+        val pid = longField(record, PID_FIELD) ?: return
         withContext(Dispatchers.IO) { endTheServerWithPid(pid) }
     }
+
+    private fun longField(record: JsonObject, field: String): Long? =
+        record.get(field)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asLong
 
     private suspend fun rememberTheRunningServer(pid: Long?, port: Int) {
         if (pid == null) return
         val record = JsonObject().apply {
             addProperty(PID_FIELD, pid)
             addProperty(PORT_FIELD, port)
+            addProperty(IDE_FIELD, idePid)
         }
         withContext(Dispatchers.IO) {
             try {
@@ -281,10 +303,6 @@ class OpenCodeServerService @NonInjectable internal constructor(
             health.close()
         } catch (_: Exception) {
         }
-        try {
-            Files.deleteIfExists(stateFile)
-        } catch (_: IOException) {
-        }
     }
 
     private fun serveArguments(port: Int): List<String> =
@@ -304,16 +322,18 @@ class OpenCodeServerService @NonInjectable internal constructor(
         const val HOSTNAME_FLAG = "--hostname"
         const val LOOPBACK_HOSTNAME = "127.0.0.1"
         const val HEALTH_PATH = "/global/health"
-        const val SERVER_STATE_FILE_NAME = "server.json"
+        const val SERVER_STATE_FILE_NAME = "opencode-server.json"
 
         val DEFAULT_RESTART_DELAYS_MS: List<Long> = listOf(1_000L, 4_000L, 16_000L)
 
         const val DEFAULT_POLL_INTERVAL_MS = 250L
         const val DEFAULT_STARTUP_TIMEOUT_MS = 90_000L
         const val DEFAULT_STOP_GRACE_MS = 2_000L
+        const val DEFAULT_RELEASE_GRACE_MS = 3_000L
 
         private const val PID_FIELD = "pid"
         private const val PORT_FIELD = "port"
+        private const val IDE_FIELD = "ide"
         private val ASSIGNMENT = Regex("^[A-Za-z_][A-Za-z0-9_]*=")
 
         fun getInstance(project: Project): OpenCodeServerService = project.service()
@@ -338,7 +358,7 @@ class HttpOpenCodeHealthProbe : OpenCodeHealthProbe {
     }
 
     override fun close() {
-        client.close()
+        client.shutdownNow()
     }
 
     private fun theBodySaysHealthy(body: String): Boolean {
@@ -410,7 +430,5 @@ private class ProcessHandlerOpenCodeServer(
 
     override fun destroy() = handler.destroyProcess()
 
-    override fun kill() {
-        handler.process.destroyForcibly()
-    }
+    override fun kill() = handler.killProcess()
 }

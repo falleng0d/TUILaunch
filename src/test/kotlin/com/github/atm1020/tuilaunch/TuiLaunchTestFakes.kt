@@ -55,6 +55,7 @@ import java.awt.event.KeyEvent
 import java.nio.file.Path
 import java.util.Collections
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.KeyStroke
@@ -270,7 +271,10 @@ internal class RecordingSessionStrategy(
     }
 }
 
-internal class FakeOpenCodeServer(private val address: String? = FAKE_OPENCODE_ADDRESS) : OpenCodeServer {
+internal class FakeOpenCodeServer(
+    private val address: String? = FAKE_OPENCODE_ADDRESS,
+    private val gate: CountDownLatch? = null,
+) : OpenCodeServer {
 
     private val attached = mutableSetOf<String>()
     private val commands = Collections.synchronizedList(mutableListOf<String>())
@@ -285,7 +289,12 @@ internal class FakeOpenCodeServer(private val address: String? = FAKE_OPENCODE_A
 
     val attachedTabs: Set<String> get() = synchronized(attached) { attached.toSet() }
 
-    override suspend fun acquire(tabUuid: String, command: AgentCommand): String? = synchronized(attached) {
+    override suspend fun acquire(tabUuid: String, command: AgentCommand): String? {
+        gate?.await()
+        return attach(tabUuid, command)
+    }
+
+    private fun attach(tabUuid: String, command: AgentCommand): String? = synchronized(attached) {
         commands.add(command.command)
         if (address == null) return@synchronized null
         if (attached.isEmpty()) starts++

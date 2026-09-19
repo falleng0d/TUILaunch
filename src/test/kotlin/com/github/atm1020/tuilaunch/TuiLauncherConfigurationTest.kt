@@ -26,6 +26,7 @@ import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_SIZE_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_VISIBILITY_PER_APP_LABEL
 import com.github.atm1020.tuilaunch.ui.RESTORE_AGENT_SESSIONS_LABEL
 import com.github.atm1020.tuilaunch.ui.RESTORE_OPEN_TABS_LABEL
+import com.github.atm1020.tuilaunch.ui.SHARE_OPENCODE_SERVER_LABEL
 import com.github.atm1020.tuilaunch.ui.SUBMIT_PROMPT_ON_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.TuiLauncherConfiguration
 import com.intellij.openapi.application.ApplicationManager
@@ -60,6 +61,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             tmuxKeybindingsEnabled = true
             restoreOpenTabs = false
             restoreAgentSessions = true
+            shareOpenCodeServer = true
             submitPromptOnSend = true
             appendPromptSeparatorOnSend = true
             focusPromptFileAfterSend = true
@@ -611,16 +613,42 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         }
     }
 
-    fun testTheAgentSessionCheckBoxIsTheOnlyIndentedSessionOption() {
+    fun testTheNestedSessionOptionsAreIndentedUnderTheOnesTheyNeed() {
         val page = configuration().createComponent() as JPanel
         layOutTheTree(page, PAGE_WIDTH, PAGE_HEIGHT)
+        val nested = listOf(RESTORE_AGENT_SESSIONS_LABEL, SHARE_OPENCODE_SERVER_LABEL)
         val plainIndents = SESSION_OPTION_LABELS
-            .filterNot { it == RESTORE_AGENT_SESSIONS_LABEL }
+            .filterNot { it in nested }
             .map { findCheckBox(page, it)!!.insets.left }
         val resumeSessionsIndent = findCheckBox(page, RESTORE_AGENT_SESSIONS_LABEL)!!.insets.left
+        val openCodeServerIndent = findCheckBox(page, SHARE_OPENCODE_SERVER_LABEL)!!.insets.left
 
         assertEquals(listOf(plainIndents.first()), plainIndents.distinct())
         assertTrue(resumeSessionsIndent > plainIndents.first())
+        assertTrue(openCodeServerIndent > resumeSessionsIndent)
+    }
+
+    fun testTheSharedOpenCodeServerCheckBoxNeedsBothSessionOptions() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.restoreOpenTabs = true
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        val openTabs = findCheckBox(component, RESTORE_OPEN_TABS_LABEL)!!
+        val agentSessions = findCheckBox(component, RESTORE_AGENT_SESSIONS_LABEL)!!
+        val sharedServer = findCheckBox(component, SHARE_OPENCODE_SERVER_LABEL)!!
+
+        assertTrue(sharedServer.isEnabled)
+
+        agentSessions.doClick()
+        assertFalse(sharedServer.isEnabled)
+
+        agentSessions.doClick()
+        openTabs.doClick()
+        assertFalse(sharedServer.isEnabled)
+        assertFalse(agentSessions.isEnabled)
+
+        openTabs.doClick()
+        assertTrue(sharedServer.isEnabled)
     }
 
     fun testThePromptBoxCompletionsGroupSitsAtTheLeftUnderTheSessionOptions() {
@@ -981,6 +1009,63 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val configurable = configuration()
         configurable.createComponent()
 
+        assertFalse(configurable.isModified())
+    }
+
+    fun testTheSharedOpenCodeServerCheckBoxIsPresentAndOnByDefault() {
+        val component = configuration().createComponent() as JPanel
+
+        assertTrue(findCheckBox(component, SHARE_OPENCODE_SERVER_LABEL)!!.isSelected)
+    }
+
+    fun testTurningTheSharedOpenCodeServerOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, SHARE_OPENCODE_SERVER_LABEL)!!.isSelected = false
+        configurable.apply()
+
+        assertFalse(settings.state.shareOpenCodeServer)
+        assertTrue(settings.state.restoreAgentSessions)
+    }
+
+    fun testTurningTheSharedOpenCodeServerBackOnIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        settings.state.shareOpenCodeServer = false
+
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, SHARE_OPENCODE_SERVER_LABEL)!!
+        assertFalse(checkbox.isSelected)
+
+        checkbox.isSelected = true
+        configurable.apply()
+
+        assertTrue(settings.state.shareOpenCodeServer)
+    }
+
+    fun testTogglingTheSharedOpenCodeServerMarksThePanelModified() {
+        TuiLauncherSettings.getInstance().state.restoreOpenTabs = true
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, SHARE_OPENCODE_SERVER_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
+    fun testResetRestoresTheSharedOpenCodeServerCheckBox() {
+        TuiLauncherSettings.getInstance().state.restoreOpenTabs = true
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, SHARE_OPENCODE_SERVER_LABEL)!!
+
+        checkbox.doClick()
+        configurable.reset()
+
+        assertTrue(checkbox.isSelected)
         assertFalse(configurable.isModified())
     }
 
@@ -1473,6 +1558,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         val SESSION_OPTION_LABELS = listOf(
             RESTORE_OPEN_TABS_LABEL,
             RESTORE_AGENT_SESSIONS_LABEL,
+            SHARE_OPENCODE_SERVER_LABEL,
             SUBMIT_PROMPT_ON_SEND_LABEL,
             APPEND_PROMPT_SEPARATOR_LABEL,
             FOCUS_PROMPT_FILE_LABEL,
