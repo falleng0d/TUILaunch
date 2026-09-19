@@ -273,6 +273,76 @@ class OpenCodeSessionStrategyTest {
     }
 
     @Test
+    fun theTabAttachesToTheServerOfItsProjectDirectory() {
+        val strategy = newStrategy(FakeOpenCodeServer())
+
+        prepare(strategy)
+
+        assertEquals(
+            listOf("attach", FAKE_OPENCODE_ADDRESS, "--dir", tab.projectPath),
+            strategy.launchArguments(tab),
+        )
+        assertEquals(
+            "opencode attach $FAKE_OPENCODE_ADDRESS --dir ${tab.projectPath}",
+            AgentCommand.parse("opencode").withArguments(strategy.launchArguments(tab)),
+        )
+    }
+
+    @Test
+    fun aRestoredTabAttachesAndAsksForTheSessionTheTrackerReported() {
+        val strategy = newStrategy(FakeOpenCodeServer())
+        writeState(strategy, """{"sessionId":"$REPORTED_SESSION_ID"}""")
+
+        prepare(strategy)
+
+        assertEquals(
+            listOf("attach", FAKE_OPENCODE_ADDRESS, "--dir", tab.projectPath, "--session", REPORTED_SESSION_ID),
+            strategy.restoreArguments(tab),
+        )
+    }
+
+    @Test
+    fun aProjectPathWithSpacesIsQuotedInTheAttachCommand() {
+        val windowsTab = tab.copy(projectPath = "C:\\Users\\falleng0d\\My Projects\\app")
+        val strategy = newStrategy(FakeOpenCodeServer())
+
+        runBlocking { strategy.prepareLaunchInBackground(windowsTab, AgentCommand.parse("opencode")) }
+
+        assertEquals(
+            "opencode attach $FAKE_OPENCODE_ADDRESS --dir " +
+                "'C:\\Users\\falleng0d\\My Projects\\app'",
+            AgentCommand.parse("opencode").withArguments(strategy.launchArguments(windowsTab)),
+        )
+    }
+
+    @Test
+    fun aServerThatNeverStartsLeavesTheArgumentsEmpty() {
+        val strategy = newStrategy(FakeOpenCodeServer(address = null))
+
+        prepare(strategy)
+
+        assertEquals(emptyList<String>(), strategy.launchArguments(tab))
+    }
+
+    @Test
+    fun aClosedTabLetsTheSharedServerGo() {
+        val server = FakeOpenCodeServer()
+        val strategy = newStrategy(server)
+        prepare(strategy)
+
+        strategy.tabClosed(tab)
+
+        assertEquals(emptySet<String>(), server.attachedTabs)
+        assertEquals(1, server.stops)
+    }
+
+    @Test
+    fun aTabOfAStrategyWithoutAServerWaitsForNothing() {
+        assertFalse(newStrategy().launchWaitsForPreparation)
+        assertTrue(newStrategy(FakeOpenCodeServer()).launchWaitsForPreparation)
+    }
+
+    @Test
     fun theFactoryBuildsAnOpenCodeStrategyOverThePluginDirectories() {
         val environment = AgentSessionEnvironment(
             homeDirectory = temporaryFolder.root.toPath().resolve("home"),
@@ -293,8 +363,12 @@ class OpenCodeSessionStrategyTest {
         )
     }
 
-    private fun newStrategy(): OpenCodeSessionStrategy =
-        OpenCodeSessionStrategy(stateDirectory(), bundledDirectory())
+    private fun newStrategy(server: FakeOpenCodeServer? = null): OpenCodeSessionStrategy =
+        OpenCodeSessionStrategy(stateDirectory(), bundledDirectory(), server)
+
+    private fun prepare(strategy: OpenCodeSessionStrategy) {
+        runBlocking { strategy.prepareLaunchInBackground(tab, AgentCommand.parse("opencode")) }
+    }
 
     private fun stateDirectory(): Path = temporaryFolder.root.toPath().resolve("state")
 

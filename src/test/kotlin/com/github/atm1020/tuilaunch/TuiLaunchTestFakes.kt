@@ -11,9 +11,11 @@ import com.github.atm1020.tuilaunch.copilot.PromptBoxCompletionSettings
 import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
+import com.github.atm1020.tuilaunch.resume.AgentCommand
 import com.github.atm1020.tuilaunch.resume.AgentSessionEnvironment
 import com.github.atm1020.tuilaunch.resume.AgentSessionStrategy
 import com.github.atm1020.tuilaunch.resume.HookShell
+import com.github.atm1020.tuilaunch.resume.OpenCodeServer
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
@@ -63,6 +65,7 @@ private const val GHOST_TEXT_TIMEOUT_SECONDS = 30
 private const val CLAUDE_STATE_FILE_ARGUMENT = "\$0"
 
 internal const val SEND_PROMPT_BOX_TEST_KEYSTROKE = "control ENTER"
+internal const val FAKE_OPENCODE_ADDRESS = "http://127.0.0.1:44631"
 
 internal fun claudeHookSettings(stateFile: Path): String =
     """{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/bin/sh","args":["-c",""" +
@@ -264,6 +267,37 @@ internal class RecordingSessionStrategy(
     override fun restoreArguments(tab: TabIdentity): List<String> {
         recorded.add("restoreArguments")
         return arguments
+    }
+}
+
+internal class FakeOpenCodeServer(private val address: String? = FAKE_OPENCODE_ADDRESS) : OpenCodeServer {
+
+    private val attached = mutableSetOf<String>()
+    private val commands = Collections.synchronizedList(mutableListOf<String>())
+
+    var starts = 0
+        private set
+
+    var stops = 0
+        private set
+
+    val serverCommands: List<String> get() = synchronized(commands) { commands.toList() }
+
+    val attachedTabs: Set<String> get() = synchronized(attached) { attached.toSet() }
+
+    override suspend fun acquire(tabUuid: String, command: AgentCommand): String? = synchronized(attached) {
+        commands.add(command.command)
+        if (address == null) return@synchronized null
+        if (attached.isEmpty()) starts++
+        attached.add(tabUuid)
+        address
+    }
+
+    override fun release(tabUuid: String) {
+        synchronized(attached) {
+            if (!attached.remove(tabUuid)) return
+            if (attached.isEmpty()) stops++
+        }
     }
 }
 

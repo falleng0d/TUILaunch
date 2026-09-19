@@ -17,6 +17,8 @@ import com.github.atm1020.tuilaunch.resume.AgentStateFiles
 import com.github.atm1020.tuilaunch.resume.ClaudeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
 import com.github.atm1020.tuilaunch.resume.OmpSessionStrategy
+import com.github.atm1020.tuilaunch.resume.OpenCodeServer
+import com.github.atm1020.tuilaunch.resume.OpenCodeServerService
 import com.github.atm1020.tuilaunch.resume.OpenCodeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
@@ -28,12 +30,15 @@ import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
 import com.github.atm1020.tuilaunch.toolwindow.TuiTabLayout
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectCloseListener
+import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
@@ -84,8 +89,11 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             bundledDirectory = AgentSessionEnvironment.bundledDirectory(),
         )
     }
+    var openCodeServer: () -> OpenCodeServer? = { OpenCodeServerService.getInstance(project) }
     var agentSessionStrategies: (AgentCliKind, AgentSessionEnvironment, Boolean) -> AgentSessionStrategy =
-        { kind, environment, hookAllowed -> AgentSessionStrategies.forKind(kind, environment, hookAllowed) }
+        { kind, environment, hookAllowed ->
+            AgentSessionStrategies.forKind(kind, environment, hookAllowed) { openCodeServer() }
+        }
     var clock: () -> Long = { System.currentTimeMillis() }
     private var hostListenersInstalled = false
     private var windowRevealedByLaunch = false
@@ -114,6 +122,27 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     )
 
     private data class PendingLaunch(val appName: String, val disposable: Disposable)
+
+    private data class AgentSetup(
+        val kind: AgentCliKind,
+        val parsed: AgentCommand,
+        val tab: TabIdentity,
+        val strategy: AgentSessionStrategy,
+    )
+
+    private class PendingTab(
+        val host: IdeToolWindowHost,
+        val sessionId: String,
+        val appName: String,
+        val command: String,
+        val title: String,
+        val intent: LaunchIntent,
+        val index: Int,
+        val onOpened: ((OpenTab) -> Unit)?,
+        val onFailed: (() -> Unit)?,
+        val disposable: CheckedDisposable,
+        val setup: AgentSetup?,
+    )
 
     private sealed interface LaunchIntent {
         val tabUuid: String
@@ -515,16 +544,58 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         onOpened: ((OpenTab) -> Unit)? = null,
         onFailed: (() -> Unit)? = null,
     ) {
-        val agentLaunch = agentLaunchFor(command, intent)
-        val launchedAt = clock()
         val disposable = Disposer.newCheckedDisposable("TUILaunch-$sessionId")
         pendingLaunchesBySessionId[sessionId] = PendingLaunch(appName, disposable)
+        val pending = PendingTab(
+            host = host,
+            sessionId = sessionId,
+            appName = appName,
+            command = command,
+            title = title,
+            intent = intent,
+            index = index,
+            onOpened = onOpened,
+            onFailed = onFailed,
+            disposable = disposable,
+            setup = agentSetupFor(command, intent),
+        )
+        if (pending.setup?.strategy?.launchWaitsForPreparation != true) {
+            startTheSession(pending)
+            return
+        }
+        val setup = pending.setup
+        scope.launch {
+            setup.strategy.prepareLaunchInBackground(setup.tab, setup.parsed)
+            onTheEventThread {
+                if (pendingLaunchesBySessionId[sessionId]?.disposable !== disposable || disposable.isDisposed) {
+                    setup.strategy.tabClosed(setup.tab)
+                    return@onTheEventThread
+                }
+                startTheSession(pending)
+            }
+        }
+    }
+
+    private fun onTheEventThread(work: () -> Unit) {
+        ApplicationManager.getApplication().invokeLater(work, ModalityState.any())
+    }
+
+    private fun startTheSession(pending: PendingTab) {
+        val host = pending.host
+        val sessionId = pending.sessionId
+        val appName = pending.appName
+        val title = pending.title
+        val intent = pending.intent
+        val disposable = pending.disposable
+        val agentLaunch = agentLaunchFor(pending.command, intent, pending.setup)
+        val launchedAt = clock()
         sessionFactory.createAsync(
             parent = disposable,
             command = agentLaunch.command,
             environment = agentLaunch.environment,
             onCreated = { session ->
                 if (pendingLaunchesBySessionId.remove(sessionId)?.disposable !== disposable || disposable.isDisposed) {
+                    releaseTheServerOf(pending)
                     return@createAsync
                 }
                 val promptBox = PromptBox(
@@ -536,7 +607,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     existingPromptDocument = existingPromptDocument,
                 )
                 val layout = newTabLayout(host, appName, session, promptBox)
-                val handle = host.addTab(layout.component, title, disposable, index)
+                val handle = host.addTab(layout.component, title, disposable, pending.index)
                 val tab = OpenTab(
                     sessionId = sessionId,
                     appName = appName,
@@ -560,18 +631,42 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                 layout.onPromptBoxPercentChanged = { percent -> onPromptBoxPercentChanged(tab, percent) }
                 session.onTerminated { onSessionTerminated(host, tab) }
                 recordOpenTabs()
-                if (onOpened != null) onOpened(tab) else selectTuiTab(host, tab)
+                val opened = pending.onOpened
+                if (opened != null) opened(tab) else selectTuiTab(host, tab)
             },
             onFailed = { throwable ->
                 pendingLaunchesBySessionId.remove(sessionId)
+                releaseTheServerOf(pending)
                 Disposer.dispose(disposable)
                 thisLogger().warn("Failed to launch TUI app: ${agentLaunch.command}", throwable)
-                onFailed?.invoke()
+                pending.onFailed?.invoke()
             },
         )
     }
 
-    private fun agentLaunchFor(command: String, intent: LaunchIntent): AgentLaunch {
+    private fun releaseTheServerOf(pending: PendingTab) {
+        val setup = pending.setup ?: return
+        setup.strategy.tabClosed(setup.tab)
+    }
+
+    private fun agentSetupFor(command: String, intent: LaunchIntent): AgentSetup? {
+        if (!agentSessionsAreResumed()) {
+            return unmanaged(command, "restoring agent sessions is turned off in the settings")
+        }
+        val projectPath = project.basePath ?: return unmanaged(command, "the project has no base path")
+        val parsed = AgentCommand.parse(command)
+        val kind = parsed.kind
+        if (kind == null) {
+            return unmanaged(command, "none of ${parsed.tokens} names an agent CLI this plugin knows")
+        }
+        if (!parsed.isManageable) return unmanaged(command, whyItCannotBeManaged(parsed))
+        val tab = TabIdentity(intent.tabUuid, projectPath, project.locationHash)
+        val strategy = agentSessionStrategies(kind, agentSessionEnvironment(), !parsed.bringsItsOwnHookFlag)
+        strategy.prepareLaunch(tab)
+        return AgentSetup(kind, parsed, tab, strategy)
+    }
+
+    private fun agentLaunchFor(command: String, intent: LaunchIntent, setup: AgentSetup?): AgentLaunch {
         val plainLaunch = AgentLaunch(
             command = command,
             commandWasDecorated = false,
@@ -580,19 +675,8 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             cliKind = null,
             strategy = null,
         )
-        if (!agentSessionsAreResumed()) {
-            return plainLaunch.alsoLog(command, "restoring agent sessions is turned off in the settings")
-        }
-        val projectPath = project.basePath ?: return plainLaunch.alsoLog(command, "the project has no base path")
-        val parsed = AgentCommand.parse(command)
-        val kind = parsed.kind
-        if (kind == null) {
-            return plainLaunch.alsoLog(command, "none of ${parsed.tokens} names an agent CLI this plugin knows")
-        }
-        if (!parsed.isManageable) return plainLaunch.alsoLog(command, whyItCannotBeManaged(parsed))
-        val tab = TabIdentity(intent.tabUuid, projectPath, project.locationHash)
-        val strategy = agentSessionStrategies(kind, agentSessionEnvironment(), !parsed.bringsItsOwnHookFlag)
-        strategy.prepareLaunch(tab)
+        if (setup == null) return plainLaunch
+        val (kind, parsed, tab, strategy) = setup
         val arguments = when (intent) {
             is LaunchIntent.Fresh -> strategy.launchArguments(tab)
             is LaunchIntent.Restore -> strategy.restoreArguments(tab)
@@ -602,6 +686,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             is LaunchIntent.Restore -> strategy.restoreEnvironment(tab)
         }
         if (arguments.isEmpty() && environment.isEmpty()) {
+            strategy.tabClosed(tab)
             return plainLaunch.alsoLog(command, "the $kind strategy had nothing to add")
         }
         val decorated = parsed.withArguments(arguments)
@@ -615,6 +700,11 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             cliKind = kind.name,
             strategy = strategy,
         )
+    }
+
+    private fun unmanaged(command: String, reason: String): AgentSetup? {
+        thisLogger().info("TUILaunch runs '$command' without session management because $reason")
+        return null
     }
 
     private fun AgentLaunch.alsoLog(command: String, reason: String): AgentLaunch {
@@ -933,9 +1023,16 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     }
 
     private fun forgetTab(sessionId: String) {
-        tabsBySessionId.remove(sessionId)
+        val tab = tabsBySessionId.remove(sessionId)
         closingSessions.remove(sessionId)
         sessionIdsRemovedForDrag.remove(sessionId)
+        releaseAgentResources(tab ?: return)
+    }
+
+    private fun releaseAgentResources(tab: OpenTab) {
+        val strategy = tab.agentStrategy ?: return
+        val identity = identityOf(tab) ?: return
+        strategy.tabClosed(identity)
     }
 }
 

@@ -17,7 +17,13 @@ data class TabIdentity(
 )
 
 interface AgentSessionStrategy {
+    val launchWaitsForPreparation: Boolean
+        get() = false
+
     fun prepareLaunch(tab: TabIdentity) {
+    }
+
+    suspend fun prepareLaunchInBackground(tab: TabIdentity, command: AgentCommand) {
     }
 
     fun launchArguments(tab: TabIdentity): List<String>
@@ -29,6 +35,9 @@ interface AgentSessionStrategy {
     fun restoreEnvironment(tab: TabIdentity): Map<String, String> = launchEnvironment(tab)
 
     suspend fun cleanUp(tab: TabIdentity) {
+    }
+
+    fun tabClosed(tab: TabIdentity) {
     }
 }
 
@@ -158,6 +167,7 @@ object AgentSessionStrategies {
         kind: AgentCliKind,
         environment: AgentSessionEnvironment,
         hookAllowed: Boolean = true,
+        openCodeServer: () -> OpenCodeServer? = { null },
     ): AgentSessionStrategy = when (kind) {
         AgentCliKind.CLAUDE -> ClaudeSessionStrategy(
             claudeHome = environment.claudeHome,
@@ -173,6 +183,7 @@ object AgentSessionStrategies {
         AgentCliKind.OPENCODE -> OpenCodeSessionStrategy(
             stateDirectory = environment.stateDirectory,
             bundledDirectory = environment.bundledDirectory,
+            server = openCodeServer(),
         )
 
         AgentCliKind.OMP -> OmpSessionStrategy(

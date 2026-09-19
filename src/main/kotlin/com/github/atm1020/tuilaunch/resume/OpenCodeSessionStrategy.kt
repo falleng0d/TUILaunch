@@ -5,7 +5,18 @@ import java.nio.file.Path
 class OpenCodeSessionStrategy(
     private val stateDirectory: Path,
     private val bundledDirectory: Path,
+    private val server: OpenCodeServer? = null,
 ) : AgentSessionStrategy {
+
+    @Volatile
+    private var serverAddress: String? = null
+
+    override val launchWaitsForPreparation: Boolean
+        get() = server != null
+
+    override suspend fun prepareLaunchInBackground(tab: TabIdentity, command: AgentCommand) {
+        serverAddress = server?.acquire(tab.tabUuid, command)
+    }
 
     override fun prepareLaunch(tab: TabIdentity) {
         BundledIntegrationFiles.ensure(TUI_CONFIG_RESOURCE, tuiConfigFile())
@@ -13,11 +24,17 @@ class OpenCodeSessionStrategy(
         AgentStateFiles.createDirectoryFor(stateFile(tab))
     }
 
-    override fun launchArguments(tab: TabIdentity): List<String> = emptyList()
+    override fun launchArguments(tab: TabIdentity): List<String> = attachArguments(tab)
 
     override fun restoreArguments(tab: TabIdentity): List<String> {
-        val reported = readSessionId(stateFile(tab)) ?: return emptyList()
-        return listOf(SESSION_FLAG, reported)
+        val attach = attachArguments(tab)
+        val reported = readSessionId(stateFile(tab)) ?: return attach
+        return attach + listOf(SESSION_FLAG, reported)
+    }
+
+    private fun attachArguments(tab: TabIdentity): List<String> {
+        val address = serverAddress ?: return emptyList()
+        return listOf(ATTACH_SUBCOMMAND, address, DIRECTORY_FLAG, tab.projectPath)
     }
 
     override fun launchEnvironment(tab: TabIdentity): Map<String, String> {
@@ -30,6 +47,10 @@ class OpenCodeSessionStrategy(
 
     override suspend fun cleanUp(tab: TabIdentity) {
         AgentStateFiles.delete(stateFile(tab))
+    }
+
+    override fun tabClosed(tab: TabIdentity) {
+        server?.release(tab.tabUuid)
     }
 
     fun stateFile(tab: TabIdentity): Path =
@@ -48,6 +69,8 @@ class OpenCodeSessionStrategy(
 
     companion object {
         const val DIRECTORY_NAME = "opencode"
+        const val ATTACH_SUBCOMMAND = "attach"
+        const val DIRECTORY_FLAG = "--dir"
         const val SESSION_FLAG = "--session"
         const val TUI_CONFIG_VARIABLE = "OPENCODE_TUI_CONFIG"
         const val STATE_FILE_VARIABLE = "TUILAUNCH_OPENCODE_STATE"

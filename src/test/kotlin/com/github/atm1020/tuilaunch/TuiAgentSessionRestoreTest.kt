@@ -29,10 +29,12 @@ private const val AGENT_SESSION_TIMEOUT_SECONDS = 30
 class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
 
     private lateinit var environment: AgentSessionEnvironment
+    private lateinit var openCodeServer: FakeOpenCodeServer
 
     override fun setUp() {
         super.setUp()
         environment = temporaryAgentSessionEnvironment()
+        openCodeServer = FakeOpenCodeServer()
         TuiLauncherSettings.getInstance().state.apply {
             tuiApps.clear()
             restoreOpenTabs = true
@@ -614,6 +616,7 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, _) = newService(factory)
 
         service.launchNew("opencode", "opencode")
+        awaitCommands(factory, 1)
 
         val tabUuid = requireNotNull(savedTabs().single().tabUuid)
         assertEquals(listOf(openCodeEnvironment(tabUuid)), factory.environments)
@@ -630,33 +633,105 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertEquals(listOf(codexEnvironment(tabUuid)), factory.environments)
     }
 
-    fun testAFreshOpenCodeTabCarriesTheTrackerVariablesAndNoArguments() {
+    fun testAFreshOpenCodeTabAttachesToTheServerOfItsProject() {
         configureApp("opencode", "opencode")
         val factory = FakeFactory(FakeSession())
         val (service, _) = newService(factory)
 
         service.launchNew("opencode", "opencode")
+        awaitCommands(factory, 1)
 
         val tabUuid = requireNotNull(savedTabs().single().tabUuid)
-        assertEquals(listOf("opencode"), factory.commands)
+        assertEquals(listOf("opencode ${openCodeAttach()}"), factory.commands)
+        assertEquals(1, openCodeServer.starts)
+        assertEquals(setOf(tabUuid), openCodeServer.attachedTabs)
+        assertEquals(listOf("opencode"), openCodeServer.serverCommands)
         assertTrue(Files.isRegularFile(openCodeTuiConfig()))
         assertTrue(Files.isRegularFile(openCodeSessionTracker()))
         assertTrue(Files.isDirectory(openCodeStateFile(tabUuid).parent))
         assertNull(savedTabs().single().agentSessionId)
     }
 
-    fun testAWrappedOpenCodeTabCarriesTheTrackerVariablesBeforeHeadroom() {
+    fun testAnOpenCodeTabWithTheSharedServerOffIsLaunchedAsItAlwaysWas() {
+        configureApp("opencode", "opencode")
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+        service.openCodeServer = { null }
+
+        service.launchNew("opencode", "opencode")
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf("opencode"), factory.commands)
+        assertEquals(listOf(openCodeEnvironment(tabUuid)), factory.environments)
+        assertEquals(0, openCodeServer.starts)
+    }
+
+    fun testAnOpenCodeTabWhoseServerNeverStartsIsLaunchedOnItsOwn() {
+        configureApp("opencode", "opencode")
+        openCodeServer = FakeOpenCodeServer(address = null)
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("opencode", "opencode")
+        awaitCommands(factory, 1)
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf("opencode"), factory.commands)
+        assertEquals(listOf(openCodeEnvironment(tabUuid)), factory.environments)
+    }
+
+    fun testTwoOpenCodeTabsAttachToOneServer() {
+        configureApp("opencode", "opencode")
+        val factory = FakeFactory(List(2) { FakeSession() })
+        val (service, _) = newService(factory)
+
+        service.launchNew("opencode", "opencode")
+        awaitCommands(factory, 1)
+        service.launchNew("opencode", "opencode")
+        awaitCommands(factory, 2)
+
+        assertEquals(listOf("opencode ${openCodeAttach()}", "opencode ${openCodeAttach()}"), factory.commands)
+        assertEquals(1, openCodeServer.starts)
+        assertEquals(savedTabs().mapNotNull { it.tabUuid }.toSet(), openCodeServer.attachedTabs)
+    }
+
+    fun testTheServerStopsOnlyWhenTheLastOpenCodeTabIsGone() {
+        configureApp("opencode", "opencode")
+        configureApp("claude", "claude")
+        val factory = FakeFactory(List(3) { FakeSession() })
+        val (service, _) = newService(factory)
+        service.launchNew("claude", "claude")
+        service.launchNew("opencode", "opencode")
+        awaitCommands(factory, 2)
+        service.launchNew("opencode", "opencode")
+        awaitCommands(factory, 3)
+
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(1, openCodeServer.attachedTabs.size)
+        assertEquals(0, openCodeServer.stops)
+
+        service.closeActiveTui()
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(emptySet<String>(), openCodeServer.attachedTabs)
+        assertEquals(1, openCodeServer.stops)
+    }
+
+    fun testAWrappedOpenCodeTabAttachesThroughThePassThrough() {
         configureApp("opencode", "headroom wrap opencode --no-serena")
         val factory = FakeFactory(FakeSession())
         val (service, _) = newService(factory)
 
         service.launchNew("opencode", "headroom wrap opencode --no-serena")
+        awaitCommands(factory, 1)
 
-        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
         assertEquals(
-            listOf("headroom wrap opencode --no-serena"),
+            listOf("headroom wrap opencode --no-serena -- ${openCodeAttach()}"),
             factory.commands,
         )
+        assertEquals(listOf("headroom wrap opencode --no-serena"), openCodeServer.serverCommands)
     }
 
     fun testAnOpenCodeTabComesBackToTheSessionItsTrackerReported() {
@@ -667,9 +742,10 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, _) = newService(factory)
 
         service.restoreSavedTabs()
+        awaitCommands(factory, 1)
 
         assertEquals(
-            listOf("opencode --session $OPENCODE_SESSION_ID"),
+            listOf("opencode ${openCodeAttach(listOf("--session", OPENCODE_SESSION_ID))}"),
             factory.commands,
         )
         assertEquals(OPENCODE_SESSION_ID, savedTabs().single().agentSessionId)
@@ -683,11 +759,12 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, _) = newService(factory)
 
         service.restoreSavedTabs()
+        awaitCommands(factory, 1)
 
         assertEquals(
             listOf(
-                "headroom wrap opencode --no-serena " +
-                    "-- --session $OPENCODE_SESSION_ID"
+                "headroom wrap opencode --no-serena -- " +
+                    openCodeAttach(listOf("--session", OPENCODE_SESSION_ID))
             ),
             factory.commands,
         )
@@ -700,16 +777,19 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, _) = newService(factory)
 
         service.restoreSavedTabs()
+        awaitCommands(factory, 1)
 
-        assertEquals(listOf("opencode"), factory.commands)
+        assertEquals(listOf("opencode ${openCodeAttach()}"), factory.commands)
         assertNull(savedTabs().single().agentSessionId)
         assertEquals("OPENCODE", savedTabs().single().agentCliKind)
     }
 
-    fun testClosingAnOpenCodeTabDeletesTheSessionItsTrackerReported() {
+    fun testClosingAnOpenCodeTabDeletesTheSessionItsTrackerReportedAndLetsTheServerGo() {
         configureApp("opencode", "opencode")
-        val (service, _) = newService(FakeFactory(FakeSession()))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
         service.launchNew("opencode", "opencode")
+        awaitCommands(factory, 1)
         val stateFile = openCodeStateFile(savedTabs().single().tabUuid!!)
         write(stateFile, """{"sessionId":"$OPENCODE_SESSION_ID"}""" + "\n")
 
@@ -717,9 +797,11 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
         awaitDeletedFile(stateFile)
+        assertEquals(emptySet<String>(), openCodeServer.attachedTabs)
+        assertEquals(1, openCodeServer.stops)
     }
 
-    fun testAReopenedOpenCodeTabThatEndsRightAwayComesBackAsANewTab() {
+    fun testAReopenedOpenCodeTabWhoseSessionIsGoneComesBackOnTheSameServer() {
         configureApp("opencode", "opencode")
         saveTab(TuiSessionRecord("opencode", "opencode", true, TAB_UUID, agentCliKind = "OPENCODE"))
         write(openCodeStateFile(TAB_UUID), """{"sessionId":"$OPENCODE_SESSION_ID"}""")
@@ -728,18 +810,20 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, _) = newService(factory)
 
         service.restoreSavedTabs()
+        awaitCommands(factory, 1)
         sessions[0].terminate()
-        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        awaitCommands(factory, 2)
 
         val relaunchedTabUuid = requireNotNull(savedTabs().single().tabUuid)
         assertTrue(relaunchedTabUuid, relaunchedTabUuid != TAB_UUID)
         assertEquals(
             listOf(
-                "opencode --session $OPENCODE_SESSION_ID",
-                "opencode",
+                "opencode ${openCodeAttach(listOf("--session", OPENCODE_SESSION_ID))}",
+                "opencode ${openCodeAttach()}",
             ),
             factory.commands,
         )
+        assertEquals(setOf(relaunchedTabUuid), openCodeServer.attachedTabs)
     }
 
     fun testAReopenedTabThatAskedForNoSessionIsNotStartedAgain() {
@@ -750,11 +834,38 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         val (service, _) = newService(factory)
 
         service.restoreSavedTabs()
+        awaitCommands(factory, 1)
         sessions[0].terminate()
         PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
 
-        assertEquals(listOf("opencode"), factory.commands)
+        assertEquals(listOf("opencode ${openCodeAttach()}"), factory.commands)
         assertTrue(savedTabs().toString(), savedTabs().isEmpty())
+        assertEquals(emptySet<String>(), openCodeServer.attachedTabs)
+    }
+
+    fun testTwoRestoredOpenCodeTabsAttachToOneServer() {
+        configureApp("opencode", "opencode")
+        val secondTabUuid = "0f2b6c19-7d34-4e58-9a21-5c8e3b0d7f46"
+        write(openCodeStateFile(TAB_UUID), """{"sessionId":"$OPENCODE_SESSION_ID"}""")
+        saveTabs(
+            TuiSessionRecord("opencode", "opencode", true, TAB_UUID, agentCliKind = "OPENCODE"),
+            TuiSessionRecord("opencode", "opencode 2", false, secondTabUuid, agentCliKind = "OPENCODE"),
+        )
+        val factory = FakeFactory(List(2) { FakeSession() })
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+        awaitCommands(factory, 2)
+
+        assertEquals(
+            listOf(
+                "opencode ${openCodeAttach(listOf("--session", OPENCODE_SESSION_ID))}",
+                "opencode ${openCodeAttach()}",
+            ),
+            factory.commands,
+        )
+        assertEquals(1, openCodeServer.starts)
+        assertEquals(setOf(TAB_UUID, secondTabUuid), openCodeServer.attachedTabs)
     }
 
     fun testTheSettingOffLaunchesAnOpenCodeTabExactlyAsConfigured() {
@@ -805,8 +916,21 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         service.host = host
         service.sessionFactory = sessionFactory
         service.agentSessionEnvironment = { environment }
+        service.openCodeServer = { openCodeServer }
         return service to host
     }
+
+    private fun awaitCommands(factory: FakeFactory, count: Int) {
+        PlatformTestUtil.waitWithEventsDispatching(
+            "Only ${factory.commands.size} of $count TUI apps were launched",
+            { factory.commands.size >= count },
+            AGENT_SESSION_TIMEOUT_SECONDS,
+        )
+    }
+
+    private fun openCodeAttach(extra: List<String> = emptyList()): String = ShellWords.join(
+        listOf("attach", FAKE_OPENCODE_ADDRESS, "--dir", projectPath()) + extra,
+    )
 
     private fun awaitDeletedFile(file: Path) {
         PlatformTestUtil.waitWithEventsDispatching(
