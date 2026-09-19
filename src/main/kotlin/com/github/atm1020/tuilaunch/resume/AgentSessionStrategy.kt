@@ -2,6 +2,7 @@ package com.github.atm1020.tuilaunch.resume
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.util.SystemInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -123,6 +124,23 @@ data class AgentSessionEnvironment(
     companion object {
         const val CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
         const val PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
+
+        private const val PLUGIN_STATE_DIRECTORY = "TUILaunch"
+        private const val AGENT_SESSION_STATE_DIRECTORY = "agent-sessions"
+        private const val BUNDLED_INTEGRATIONS_DIRECTORY = "integrations"
+
+        fun stateDirectoryFor(projectLocationHash: String): Path = Path.of(
+            PathManager.getSystemPath(),
+            PLUGIN_STATE_DIRECTORY,
+            AGENT_SESSION_STATE_DIRECTORY,
+            projectLocationHash,
+        )
+
+        fun bundledDirectory(): Path = Path.of(
+            PathManager.getSystemPath(),
+            PLUGIN_STATE_DIRECTORY,
+            BUNDLED_INTEGRATIONS_DIRECTORY,
+        )
 
         fun fromSystem(stateDirectory: Path, bundledDirectory: Path): AgentSessionEnvironment =
             AgentSessionEnvironment(

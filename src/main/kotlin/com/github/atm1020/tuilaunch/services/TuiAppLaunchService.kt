@@ -28,7 +28,6 @@ import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
 import com.github.atm1020.tuilaunch.toolwindow.TuiTabLayout
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
@@ -41,15 +40,11 @@ import com.intellij.openapi.wm.ToolWindowManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.awt.event.KeyEvent
-import java.nio.file.Path
 import java.util.UUID
 
 const val TUI_TOOL_WINDOW_ID = "TUILaunch"
 
 private const val SUBMIT_KEY_CHAR = '\r'
-private const val PLUGIN_STATE_DIRECTORY = "TUILaunch"
-private const val AGENT_SESSION_STATE_DIRECTORY = "agent-sessions"
-private const val BUNDLED_INTEGRATIONS_DIRECTORY = "integrations"
 private const val EARLY_EXIT_RELAUNCH_WINDOW_MILLIS = 15_000L
 private val RESUME_ARGUMENTS = setOf(
     ClaudeSessionStrategy.RESUME_FLAG,
@@ -85,17 +80,8 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     var promptBoxCompletions: PromptBoxCopilotStarter = PromptBoxCopilotStarter()
     var agentSessionEnvironment: () -> AgentSessionEnvironment = {
         AgentSessionEnvironment.fromSystem(
-            stateDirectory = Path.of(
-                PathManager.getSystemPath(),
-                PLUGIN_STATE_DIRECTORY,
-                AGENT_SESSION_STATE_DIRECTORY,
-                project.locationHash,
-            ),
-            bundledDirectory = Path.of(
-                PathManager.getSystemPath(),
-                PLUGIN_STATE_DIRECTORY,
-                BUNDLED_INTEGRATIONS_DIRECTORY,
-            ),
+            stateDirectory = AgentSessionEnvironment.stateDirectoryFor(project.locationHash),
+            bundledDirectory = AgentSessionEnvironment.bundledDirectory(),
         )
     }
     var agentSessionStrategies: (AgentCliKind, AgentSessionEnvironment, Boolean) -> AgentSessionStrategy =
