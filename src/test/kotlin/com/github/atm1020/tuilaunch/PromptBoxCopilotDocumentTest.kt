@@ -4,6 +4,7 @@ import com.github.atm1020.tuilaunch.copilot.InlineCompletionItem
 import com.github.atm1020.tuilaunch.copilot.LspPosition
 import com.github.atm1020.tuilaunch.copilot.LspRange
 import com.github.atm1020.tuilaunch.copilot.MAX_HISTORY_CONTEXT_CHARS
+import com.github.atm1020.tuilaunch.copilot.MAX_SCREEN_CONTEXT_CHARS
 import com.github.atm1020.tuilaunch.copilot.PromptBoxCopilotDocument
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -98,6 +99,70 @@ class PromptBoxCopilotDocumentTest {
 
         assertEquals(LspPosition(4, 0), snapshot.positionOf(0))
         assertEquals(LspPosition(4, 6), snapshot.positionOf(6))
+    }
+
+    @Test
+    fun `the screen text sits between the history and the draft`() {
+        val snapshot = newDocument().snapshot(listOf("first"), "draft", includeHistory = true, screenText = "shown")
+
+        assertEquals("first${separator}shown${separator}draft", snapshot.text)
+        assertEquals("first${separator}shown$separator".length, snapshot.draftStart)
+        assertEquals(LspPosition(8, 2), snapshot.positionOf(2))
+    }
+
+    @Test
+    fun `the screen text still comes along with the history turned off`() {
+        val snapshot = newDocument().snapshot(listOf("first"), "draft", includeHistory = false, screenText = "shown")
+
+        assertEquals("shown${separator}draft", snapshot.text)
+    }
+
+    @Test
+    fun `a blank screen text leaves the document as it was`() {
+        val snapshot = newDocument().snapshot(listOf("first"), "draft", includeHistory = true, screenText = "  \n")
+
+        assertEquals("first${separator}draft", snapshot.text)
+    }
+
+    @Test
+    fun `the screen text takes its share first and the history fills what is left`() {
+        val screen = "s".repeat(MAX_SCREEN_CONTEXT_CHARS)
+        val historyRoom = MAX_HISTORY_CONTEXT_CHARS - MAX_SCREEN_CONTEXT_CHARS - separator.length
+        val fillsTheRoom = "h".repeat(historyRoom)
+
+        val snapshot = newDocument().snapshot(
+            listOf("older", fillsTheRoom),
+            "draft",
+            includeHistory = true,
+            screenText = screen,
+        )
+
+        assertEquals("$fillsTheRoom$separator$screen${separator}draft", snapshot.text)
+    }
+
+    @Test
+    fun `a history block one character over what the screen text leaves is dropped`() {
+        val screen = "s".repeat(MAX_SCREEN_CONTEXT_CHARS)
+        val historyRoom = MAX_HISTORY_CONTEXT_CHARS - MAX_SCREEN_CONTEXT_CHARS - separator.length
+
+        val snapshot = newDocument().snapshot(
+            listOf("h".repeat(historyRoom + 1)),
+            "draft",
+            includeHistory = true,
+            screenText = screen,
+        )
+
+        assertEquals("$screen${separator}draft", snapshot.text)
+    }
+
+    @Test
+    fun `a screen text over its share keeps its newest whole lines`() {
+        val newest = "n".repeat(MAX_SCREEN_CONTEXT_CHARS - 5) + "\nlast"
+        val screen = "oldest line\n$newest"
+
+        val snapshot = newDocument().snapshot(emptyList(), "draft", includeHistory = true, screenText = screen)
+
+        assertEquals("$newest${separator}draft", snapshot.text)
     }
 
     @Test

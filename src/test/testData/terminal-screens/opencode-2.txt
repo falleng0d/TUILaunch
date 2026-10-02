@@ -1,0 +1,40 @@
+
+     - ANSI escape sequences change terminal state and usually do not appear as visible text.
+     - A terminal’s character cells are layout units, so character count and display width can
+       differ.
+     - Glyph caching reduces repeated font rasterization when the same text appears across frames.
+
+     fun main() {
+         val esc = "\u001B"
+         println("${esc}[32mGreen terminal text${esc}[0m")
+         println("Default terminal text")
+     }
+
+     ▣  Build · GPT-6.1 Sol Fast · 24.4s
+
+  ┃
+  ┃  Run ls -la in this folder with your shell tool, then tell me in one sentence what you saw.
+  ┃
+
+  ┃
+  ┃  $ ls -la
+  ┃
+  ┃  total 0
+  ┃  drwxr-xr-x@   4 someone  wheel   128 Oct  2 16:46 .
+  ┃  drwxrwxrwt  158 root       wheel  5056 Oct  2 16:48 ..
+  ┃  drwxr-xr-x@   9 someone  wheel   288 Oct  2 16:46 .git
+  ┃  drwxr-xr-x@  12 someone  wheel   384 Oct  2 16:48 caps
+  ┃
+
+     The folder contains a .git directory and a caps directory, with no files listed at the top
+     level.
+
+     ▣  Build · GPT-6.1 Sol Fast · 5.2s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · GPT-6.1 Sol Fast OpenAI · high
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   /private/tmp/tuilaunch-samples                                      14.3K (1%)  ctrl+p commands
+

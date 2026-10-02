@@ -145,6 +145,15 @@ pick up the wording and the subject of earlier prompts; the newest prompts win w
 characters. With it off only the draft is sent. Either way the text is a Markdown document of TUILaunch's own and no
 file of the project is opened for it.
 
+**Include the text shown by the TUI as completion context** also sends what the agent's terminal shows, so a
+suggestion can follow the conversation on screen. It is on by default. The text sits right before the draft, after the
+`PROMPT.md` history. It is cleaned first so that only the words are left: frames, icons, spinners, the agent's own
+input box, its status rows and its timing rows are dropped, and a sentence the TUI broke over several rows becomes one
+line again. Code and command output keep their lines. The input box and status rows are recognized for claude, codex,
+opencode and omp; any other program only gets the frames and icons removed. The screen text takes up to 24 000
+characters first, keeping its newest lines, and the history fills what is left of the 48 000. A program that runs on
+the normal screen rather than the alternate one, as omp does, also has its last 500 scrollback rows read.
+
 While Copilot is not ready — no binary found, no signed-in client, or a server that failed to start — the box quietly
 falls back to JetBrains AI Assistant, and a balloon names it once per reason, quoting the status the
 server answered rather than guessing at it. A sign-in that happens after the server started is picked up from the
@@ -401,6 +410,10 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - Programmatic resizing emits the same `componentResized` events as a user drag, so size recording has to be suppressed while a saved size is applied and re-armed on the next event-queue pass.
 - `Disposer.dispose` on an already-disposed object is a no-op, which is what lets a plugin-initiated dispose race the platform's own disposal of the `Content`.
 - `JBTerminalWidget.asJediTermWidget` only unwraps the classic Gen-1 widget; that widget's `terminalStarter` is the only write path to the child process.
+- claude, codex, opencode and omp break their own prose into rows with real newlines a little before the right edge, so JediTerm's `TerminalLine.isWrapped` stays false for those rows; it is only true where the terminal itself wrapped an over-long row.
+- `TerminalLine.getText` stops at the first run of never-written (NUL) cells, so a row a TUI drew with cursor jumps reads short or empty; reading `getEntries` and turning NUL cells into spaces gets the whole row.
+- JediTerm stores the second cell of a double-width character as `U+E000` (`CharUtils.DWC`), which has to be dropped from row text.
+- `TerminalTextBuffer.getHistoryBuffer` and `getScreenBuffer` are deprecated; `getLine(index)` reads screen rows from `0` and scrollback rows from `-historyLinesCount`, and only rows below `screenLinesCount` exist yet.
 - JediTerm's `TerminalKeyEncoder` has no `VK_ESCAPE` entry, so `TerminalStarter.getCode(27, 0)` returns null and callers must fall back to sending the character themselves, exactly as `TerminalPanel` does.
 - Sending with `userInput = true` also scrolls to the cursor and clears the selection, which is what makes a forwarded key indistinguishable from real typing.
 - The platform's `TerminalEscapeKeyListener` moves focus to the editor on bare Escape in any tool window other than the bundled "Terminal", so a custom terminal window has to intercept Escape before it.

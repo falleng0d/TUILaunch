@@ -65,6 +65,7 @@ internal const val COPILOT_COMPLETION_SOURCE_ITEM = "GitHub Copilot"
 internal const val COPILOT_SERVER_PATH_LABEL = "Copilot Language Server"
 internal const val COPILOT_SERVER_PATH_PLACEHOLDER = "Auto-detect"
 internal const val COPILOT_PROMPT_HISTORY_CONTEXT_LABEL = "Include the PROMPT.md history as completion context"
+internal const val COPILOT_SCREEN_TEXT_CONTEXT_LABEL = "Include the text shown by the TUI as completion context"
 internal const val CHECK_COPILOT_STATUS_LABEL = "Check Copilot status"
 internal const val CHECKING_COPILOT_STATUS_TEXT = "Checking…"
 internal const val DETECTING_COPILOT_SERVER_TEXT = "Looking for the GitHub Copilot language server…"
@@ -114,6 +115,7 @@ class TuiLauncherConfiguration internal constructor(
     private var copilotServerPathField: TextFieldWithBrowseButton? = null
     private var copilotServerHintLabel: JBLabel? = null
     private var copilotPromptHistoryContextCheckBox: JBCheckBox? = null
+    private var copilotScreenTextContextCheckBox: JBCheckBox? = null
     private var copilotStatusLabel: JBLabel? = null
     private val copilotComponents = mutableListOf<JComponent>()
     private var copilotStatusRequests = 0
@@ -310,13 +312,19 @@ class TuiLauncherConfiguration internal constructor(
             JBCheckBox(COPILOT_PROMPT_HISTORY_CONTEXT_LABEL, settings.state.copilotPromptHistoryContext)
         copilotPromptHistoryContextCheckBox = historyContextCheckBox
 
+        val screenTextContextCheckBox =
+            JBCheckBox(COPILOT_SCREEN_TEXT_CONTEXT_LABEL, settings.state.copilotScreenTextContext)
+        copilotScreenTextContextCheckBox = screenTextContextCheckBox
+
         val statusLabel = JBLabel("").apply { name = COPILOT_STATUS_NAME }
         copilotStatusLabel = statusLabel
         val statusButton = JButton(CHECK_COPILOT_STATUS_LABEL).apply {
             addActionListener { checkCopilotStatus() }
         }
 
-        copilotComponents.addAll(listOf(pathField, hintLabel, historyContextCheckBox, statusButton, statusLabel))
+        copilotComponents.addAll(
+            listOf(pathField, hintLabel, historyContextCheckBox, screenTextContextCheckBox, statusButton, statusLabel),
+        )
         sourceCombo.addActionListener { updateCopilotComponentsEnabled() }
         updateCopilotServerHint()
         updateCopilotComponentsEnabled()
@@ -328,6 +336,7 @@ class TuiLauncherConfiguration internal constructor(
             add(formRow(JBLabel("$COPILOT_SERVER_PATH_LABEL:"), pathField))
             add(formRow(hintLabel))
             add(formRow(historyContextCheckBox))
+            add(formRow(screenTextContextCheckBox))
             add(formRow(statusButton, statusLabel))
         }
     }
@@ -646,6 +655,7 @@ class TuiLauncherConfiguration internal constructor(
         completionSourceCombo?.selectedItem = completionSourceItem()
         copilotServerPathField?.text = settings.state.copilotLanguageServerPath
         copilotPromptHistoryContextCheckBox?.isSelected = settings.state.copilotPromptHistoryContext
+        copilotScreenTextContextCheckBox?.isSelected = settings.state.copilotScreenTextContext
         copilotStatusLabel?.text = ""
         copilotStatusRequests++
         modifierCombo?.selectedItem = modifierComboItem()
@@ -679,6 +689,7 @@ class TuiLauncherConfiguration internal constructor(
         copilotServerPathField = null
         copilotServerHintLabel = null
         copilotPromptHistoryContextCheckBox = null
+        copilotScreenTextContextCheckBox = null
         copilotStatusLabel = null
         copilotComponents.clear()
         modifierCombo = null
@@ -706,6 +717,7 @@ class TuiLauncherConfiguration internal constructor(
         promptBoxCompletionSource = selectedCompletionSource(),
         copilotLanguageServerPath = typedCopilotServerPath(),
         copilotPromptHistoryContext = copilotPromptHistoryContextCheckBox?.isSelected == true,
+        copilotScreenTextContext = copilotScreenTextContextCheckBox?.isSelected == true,
         escapeModifier = selectedEscapeModifier(),
     ).also { edited ->
         builtInShortcuts.forEach { it.stateProperty.set(edited, it.keyCode) }
@@ -746,6 +758,7 @@ class TuiLauncherConfiguration internal constructor(
         settings.state.promptBoxCompletionSource = source
         settings.state.copilotLanguageServerPath = path
         settings.state.copilotPromptHistoryContext = copilotPromptHistoryContextCheckBox?.isSelected == true
+        settings.state.copilotScreenTextContext = copilotScreenTextContextCheckBox?.isSelected == true
 
         val stayedOnCopilot = previousSource == PromptBoxCompletionSource.COPILOT &&
             source == PromptBoxCompletionSource.COPILOT

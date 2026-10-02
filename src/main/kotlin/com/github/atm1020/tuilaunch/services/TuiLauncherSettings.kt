@@ -35,6 +35,7 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         var promptBoxCompletionSource: PromptBoxCompletionSource = PromptBoxCompletionSource.JETBRAINS_AI,
         var copilotLanguageServerPath: String = "",
         var copilotPromptHistoryContext: Boolean = true,
+        var copilotScreenTextContext: Boolean = true,
         var escapeModifier: String = "CTRL",
         var escapeKeyCode: Int? = null,
         var focusEditorKeyCode: Int? = null,

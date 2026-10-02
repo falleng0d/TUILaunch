@@ -3,6 +3,7 @@ package com.github.atm1020.tuilaunch.copilot
 import java.util.concurrent.atomic.AtomicLong
 
 const val MAX_HISTORY_CONTEXT_CHARS = 48_000
+const val MAX_SCREEN_CONTEXT_CHARS = 24_000
 
 private const val BLOCK_SEPARATOR = "\n\n---\n\n"
 private const val PROMPT_BOX_LANGUAGE_ID = "markdown"
@@ -50,11 +51,19 @@ class PromptBoxCopilotDocument(sequence: Long = nextSequence()) {
     private var openedAgainst: CopilotCompletionServer? = null
     private var textAlreadySent: String? = null
 
-    fun snapshot(historyBlocks: List<String>, draft: String, includeHistory: Boolean): VirtualPromptText {
-        val context = if (includeHistory) newestBlocksWithinTheCap(historyBlocks) else emptyList()
+    fun snapshot(
+        historyBlocks: List<String>,
+        draft: String,
+        includeHistory: Boolean,
+        screenText: String? = null,
+    ): VirtualPromptText {
+        val screen = screenText?.let(::newestLinesWithinTheCap)?.takeIf { it.isNotBlank() }
+        val historyCap = MAX_HISTORY_CONTEXT_CHARS - (screen?.let { it.length + BLOCK_SEPARATOR.length } ?: 0)
+        val history = if (includeHistory) newestBlocksWithinTheCap(historyBlocks, historyCap) else emptyList()
+        val context = history + listOfNotNull(screen)
         if (context.isEmpty()) return VirtualPromptText(draft, 0)
-        val history = context.joinToString(BLOCK_SEPARATOR) + BLOCK_SEPARATOR
-        return VirtualPromptText(history + draft, history.length)
+        val prefix = context.joinToString(BLOCK_SEPARATOR) + BLOCK_SEPARATOR
+        return VirtualPromptText(prefix + draft, prefix.length)
     }
 
     suspend fun sync(server: CopilotCompletionServer, text: String) {
@@ -78,13 +87,20 @@ class PromptBoxCopilotDocument(sequence: Long = nextSequence()) {
         server.didClose(uri)
     }
 
-    private fun newestBlocksWithinTheCap(blocks: List<String>): List<String> {
+    private fun newestLinesWithinTheCap(text: String): String {
+        if (text.length <= MAX_SCREEN_CONTEXT_CHARS) return text
+        val lineBreakBeforeTheCap = text.indexOf('\n', text.length - MAX_SCREEN_CONTEXT_CHARS - 1)
+        if (lineBreakBeforeTheCap < 0) return ""
+        return text.substring(lineBreakBeforeTheCap + 1).trimStart('\n')
+    }
+
+    private fun newestBlocksWithinTheCap(blocks: List<String>, cap: Int): List<String> {
         var kept = 0
         var length = 0
         for (index in blocks.indices.reversed()) {
             val separator = if (kept == 0) 0 else BLOCK_SEPARATOR.length
             val grown = length + separator + blocks[index].length
-            if (grown > MAX_HISTORY_CONTEXT_CHARS) break
+            if (grown > cap) break
             length = grown
             kept++
         }

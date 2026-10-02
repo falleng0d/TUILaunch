@@ -47,6 +47,8 @@ interface PromptBoxCompletionSettings {
     val completionSource: PromptBoxCompletionSource
 
     val includePromptHistory: Boolean
+
+    val includeScreenText: Boolean
 }
 
 object PersistentPromptBoxCompletionSettings : PromptBoxCompletionSettings {
@@ -56,6 +58,9 @@ object PersistentPromptBoxCompletionSettings : PromptBoxCompletionSettings {
 
     override val includePromptHistory: Boolean
         get() = TuiLauncherSettings.getInstance().state.copilotPromptHistoryContext
+
+    override val includeScreenText: Boolean
+        get() = TuiLauncherSettings.getInstance().state.copilotScreenTextContext
 }
 
 class PromptBoxCopilotStarter(

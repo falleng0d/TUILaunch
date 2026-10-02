@@ -10,6 +10,8 @@ import com.github.atm1020.tuilaunch.prompt.promptBoxHoldsFocus
 import com.github.atm1020.tuilaunch.services.ReleasePromptBoxEditorsOnProjectClose
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
+import com.github.atm1020.tuilaunch.terminal.TerminalRow
+import com.github.atm1020.tuilaunch.terminal.TerminalScreen
 import com.intellij.openapi.ui.Splitter
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.testFramework.PlatformTestUtil
@@ -117,6 +119,31 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
         assertFalse(promptBoxIsVisibleIn(host, handle))
         assertNull(promptBoxPanelOf(host, handle).promptBox.installedEditor)
         assertEquals(false, service.isPromptBoxVisible())
+    }
+
+    fun testTheBoxOfAClaudeTabReadsTheCleanedTextOfItsScreen() {
+        val session = FakeSession()
+        val rule = "─".repeat(40)
+        session.screen = TerminalScreen(
+            listOf("⏺ The parser crashed on line 3.", "", rule, "❯ a suggested prompt", rule, "  Opus").map {
+                TerminalRow(it)
+            },
+            columns = 40,
+            usesAlternateScreen = true,
+        )
+        val (service, host) = newService(listOf(session))
+
+        service.launchNew("claude", "claude")
+
+        assertEquals("The parser crashed on line 3.", promptBoxOf(host, host.tabs.single()).screenText())
+    }
+
+    fun testTheBoxOfATabWithoutAScreenHasNoScreenText() {
+        val (service, host) = newService(listOf(FakeSession()))
+
+        service.launchNew("claude", "claude")
+
+        assertNull(promptBoxOf(host, host.tabs.single()).screenText())
     }
 
     fun testTheToggleShowsAndHidesTheBoxOfTheActiveTab() {

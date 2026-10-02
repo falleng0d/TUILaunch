@@ -1,0 +1,40 @@
+› Without using any tools, explain in two long paragraphs how a terminal emulator renders text, th…
+  Frequently used glyphs can be cached to avoid repeating that work. When output changes, the
+  emulator schedules a redraw and may update only affected regions. Resizing the window changes the
+  available grid dimensions and usually notifies the running program so it can adjust its layout.
+
+  • Programs normally send text and control sequences, while the terminal emulator chooses and
+    renders the glyphs.
+
+  • A terminal cell can contain a base character with combining marks, rather than exactly one
+    Unicode code point.
+
+  • Escape sequences can change text styling without producing visible characters themselves.
+
+  fun main() {
+      val esc = "\u001B"
+      println("${esc}[31mRed text${esc}[0m")
+      println("Plain text")
+  }
+
+  Worked for 37s • 4:47 PM
+
+
+› Run ls -la in this folder with your shell tool, then tell me in one sentence what you saw.
+
+
+• I’ll list the folder’s contents.
+
+• Explored
+  └ List ls -la
+    + Show details
+
+• The folder contains two directories, .git and caps, and no regular files.
+
+  Worked for 7s • 4:49 PM
+
+
+› Ask Codex to do anything
+
+  GPT-6.1-Sol high · Context 3% used · 13.7K used · 258K window · Explain terminal text rendering
+  ← for agents · ? for shortcuts

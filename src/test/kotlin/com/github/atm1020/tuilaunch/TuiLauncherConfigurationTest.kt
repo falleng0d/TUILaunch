@@ -13,6 +13,7 @@ import com.github.atm1020.tuilaunch.ui.CHECKING_COPILOT_STATUS_TEXT
 import com.github.atm1020.tuilaunch.ui.CHECK_COPILOT_STATUS_LABEL
 import com.github.atm1020.tuilaunch.ui.COPILOT_COMPLETION_SOURCE_ITEM
 import com.github.atm1020.tuilaunch.ui.COPILOT_PROMPT_HISTORY_CONTEXT_LABEL
+import com.github.atm1020.tuilaunch.ui.COPILOT_SCREEN_TEXT_CONTEXT_LABEL
 import com.github.atm1020.tuilaunch.ui.COPILOT_SERVER_HINT_NAME
 import com.github.atm1020.tuilaunch.ui.COPILOT_SERVER_PATH_PLACEHOLDER
 import com.github.atm1020.tuilaunch.ui.COPILOT_STATUS_NAME
@@ -74,6 +75,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             promptBoxCompletionSource = PromptBoxCompletionSource.JETBRAINS_AI
             copilotLanguageServerPath = ""
             copilotPromptHistoryContext = true
+            copilotScreenTextContext = true
             escapeModifier = "CTRL"
             escapeKeyCode = null
             focusEditorKeyCode = null
@@ -1182,6 +1184,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertFalse(findServerPathField(component)!!.isEnabled)
         assertFalse(findLabel(component, COPILOT_SERVER_HINT_NAME)!!.isEnabled)
         assertFalse(findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isEnabled)
+        assertFalse(findCheckBox(component, COPILOT_SCREEN_TEXT_CONTEXT_LABEL)!!.isEnabled)
         assertFalse(findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.isEnabled)
     }
 
@@ -1193,6 +1196,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertTrue(findServerPathField(component)!!.isEnabled)
         assertTrue(findLabel(component, COPILOT_SERVER_HINT_NAME)!!.isEnabled)
         assertTrue(findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isEnabled)
+        assertTrue(findCheckBox(component, COPILOT_SCREEN_TEXT_CONTEXT_LABEL)!!.isEnabled)
         assertTrue(findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.isEnabled)
     }
 
@@ -1202,6 +1206,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertEquals("", findServerPathField(component)!!.text)
         assertEquals(COPILOT_SERVER_PATH_PLACEHOLDER, serverPathPlaceholder(component))
         assertTrue(findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isSelected)
+        assertTrue(findCheckBox(component, COPILOT_SCREEN_TEXT_CONTEXT_LABEL)!!.isSelected)
     }
 
     fun testTheHintNamesTheAutoDetectedServerAndThenTheTypedOne() {
@@ -1250,12 +1255,14 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         findCompletionSourceCombo(component)!!.selectedItem = COPILOT_COMPLETION_SOURCE_ITEM
         findServerPathField(component)!!.text = "/opt/copilot/copilot-language-server"
         findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isSelected = false
+        findCheckBox(component, COPILOT_SCREEN_TEXT_CONTEXT_LABEL)!!.isSelected = false
         assertTrue(configurable.isModified())
         configurable.apply()
 
         assertEquals(PromptBoxCompletionSource.COPILOT, settings.state.promptBoxCompletionSource)
         assertEquals("/opt/copilot/copilot-language-server", settings.state.copilotLanguageServerPath)
         assertFalse(settings.state.copilotPromptHistoryContext)
+        assertFalse(settings.state.copilotScreenTextContext)
         assertEquals(1, copilotServer.starts)
         assertEquals(0, copilotServer.restarts)
         assertEquals(0, copilotServer.stops)
@@ -1322,6 +1329,18 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertTrue(configurable.isModified())
     }
 
+    fun testTogglingTheScreenTextContextMarksThePanelModified() {
+        TuiLauncherSettings.getInstance().state.promptBoxCompletionSource = PromptBoxCompletionSource.COPILOT
+
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        assertFalse(configurable.isModified())
+        findCheckBox(component, COPILOT_SCREEN_TEXT_CONTEXT_LABEL)!!.doClick()
+
+        assertTrue(configurable.isModified())
+    }
+
     fun testResetRestoresTheCompletionSettingsAndTheirEnabledState() {
         val configurable = configuration()
         val component = configurable.createComponent() as JPanel
@@ -1329,11 +1348,13 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         findCompletionSourceCombo(component)!!.selectedItem = COPILOT_COMPLETION_SOURCE_ITEM
         findServerPathField(component)!!.text = "/opt/copilot/copilot-language-server"
         findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.doClick()
+        findCheckBox(component, COPILOT_SCREEN_TEXT_CONTEXT_LABEL)!!.doClick()
         configurable.reset()
 
         assertEquals(JETBRAINS_AI_COMPLETION_SOURCE_ITEM, findCompletionSourceCombo(component)!!.selectedItem)
         assertEquals("", findServerPathField(component)!!.text)
         assertTrue(findCheckBox(component, COPILOT_PROMPT_HISTORY_CONTEXT_LABEL)!!.isSelected)
+        assertTrue(findCheckBox(component, COPILOT_SCREEN_TEXT_CONTEXT_LABEL)!!.isSelected)
         assertFalse(findServerPathField(component)!!.isEnabled)
         assertFalse(findButton(component, CHECK_COPILOT_STATUS_LABEL)!!.isEnabled)
         assertFalse(configurable.isModified())
@@ -1344,6 +1365,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         settings.state.promptBoxCompletionSource = PromptBoxCompletionSource.COPILOT
         settings.state.copilotLanguageServerPath = "/opt/copilot/copilot-language-server"
         settings.state.copilotPromptHistoryContext = false
+        settings.state.copilotScreenTextContext = false
 
         val configurable = configuration()
         configurable.createComponent()

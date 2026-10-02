@@ -33,6 +33,7 @@ class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
     private var server = FakeCopilotCompletionServer()
     private var backend = FakeCopilotCompletionBackend()
     private var promptDocumentLookups = 0
+    private var screenReads = 0
 
     private val wholeLine = InlineCompletionItem(
         insertText = "Fix the crash in the parser",
@@ -45,6 +46,7 @@ class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
         super.setUp()
         settings = FakePromptBoxCompletionSettings()
         promptDocumentLookups = 0
+        screenReads = 0
         answerWith(wholeLine)
     }
 
@@ -67,13 +69,21 @@ class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
         backend = FakeCopilotCompletionBackend(server = server)
     }
 
-    private fun boxWithADraft(promptFileText: String? = null): PromptBox {
+    private fun boxWithADraft(promptFileText: String? = null, screenText: String? = null): PromptBox {
         val promptDocument: Document? = promptFileText?.let { EditorFactory.getInstance().createDocument(it) }
         return draftIn(
-            PromptBox(project, newBoxDisposable(), existingPromptDocument = {
-                promptDocumentLookups++
-                promptDocument
-            })
+            PromptBox(
+                project,
+                newBoxDisposable(),
+                existingPromptDocument = {
+                    promptDocumentLookups++
+                    promptDocument
+                },
+                screenText = {
+                    screenReads++
+                    screenText
+                },
+            )
         )
     }
 
@@ -203,6 +213,31 @@ class PromptBoxCopilotCompletionTest : BasePlatformTestCase() {
         showACompletionIn(box)
 
         assertEquals(0, promptDocumentLookups)
+        assertEquals(DRAFT, openedDocument().text)
+    }
+
+    fun testTheTextTheTuiShowsSitsBetweenTheHistoryAndTheDraft() {
+        settings.includePromptHistory = true
+        settings.includeScreenText = true
+        val box = boxWithADraft("first prompt\n\n---\n\n", screenText = "The parser crashed on line 3.")
+
+        showACompletionIn(box)
+
+        val asked = server.calls.filterIsInstance<CopilotServerCall.Asked>().single()
+        assertEquals(
+            "first prompt\n\n---\n\nThe parser crashed on line 3.\n\n---\n\n$DRAFT",
+            openedDocument().text,
+        )
+        assertEquals(LspPosition(8, DRAFT.length), asked.position)
+    }
+
+    fun testTheScreenIsNotEvenReadWhileItsSettingIsOff() {
+        settings.includeScreenText = false
+        val box = boxWithADraft(screenText = "The parser crashed on line 3.")
+
+        showACompletionIn(box)
+
+        assertEquals(0, screenReads)
         assertEquals(DRAFT, openedDocument().text)
     }
 

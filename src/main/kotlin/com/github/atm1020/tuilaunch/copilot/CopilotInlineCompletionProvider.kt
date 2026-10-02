@@ -115,6 +115,7 @@ class CopilotInlineCompletionProvider(
         request: InlineCompletionRequest,
     ): InlineCompletionSuggestion {
         val includeHistory = settings.includePromptHistory
+        val screenText = if (settings.includeScreenText) box.screenText() else null
         val draft = readAction {
             PromptBoxDraft(
                 request.document.text,
@@ -123,7 +124,7 @@ class CopilotInlineCompletionProvider(
             )
         }
         val document = virtualDocumentOf(editor)
-        val snapshot = document.snapshot(draft.historyBlocks, draft.text, includeHistory)
+        val snapshot = document.snapshot(draft.historyBlocks, draft.text, includeHistory, screenText)
         document.sync(server, snapshot.text)
         val items = server.inlineCompletion(
             document.uri,

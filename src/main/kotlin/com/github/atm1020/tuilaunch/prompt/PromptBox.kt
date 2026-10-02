@@ -106,6 +106,7 @@ internal class PromptBox(
     private val focusSession: () -> Unit = {},
     private val spendKeyPress: (KeyEvent) -> Unit = {},
     private val existingPromptDocument: () -> Document? = existingPromptFileDocumentSupplier(project),
+    private val screenText: () -> String? = { null },
 ) {
 
     private var editorIfInstalled: EditorEx? = null
@@ -162,6 +163,8 @@ internal class PromptBox(
         val document = existingPromptDocument() ?: return emptyList()
         return parsePromptBlocks(document.text).map { it.text }
     }
+
+    fun screenText(): String? = screenText.invoke()
 
     fun historyPrevious() {
         val history = browsedHistory ?: PromptBoxHistory(promptHistoryBlocks()).also { browsedHistory = it }

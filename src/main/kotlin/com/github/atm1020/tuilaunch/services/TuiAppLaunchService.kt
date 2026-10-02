@@ -24,6 +24,7 @@ import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
+import com.github.atm1020.tuilaunch.terminal.cleanTerminalScreen
 import com.github.atm1020.tuilaunch.toolwindow.APPEND_TAB
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
@@ -625,6 +626,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     focusSession = { session.requestFocus() },
                     spendKeyPress = session::spendKeyPress,
                     existingPromptDocument = existingPromptDocument,
+                    screenText = screenTextOf(session, AgentCommand.parse(pending.command).kind),
                 )
                 val layout = newTabLayout(host, appName, session, promptBox)
                 val handle = host.addTab(layout.component, title, disposable, pending.index)
@@ -846,6 +848,10 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     private fun identityOf(tab: OpenTab): TabIdentity? {
         val projectPath = project.basePath ?: return null
         return TabIdentity(tab.tabUuid, projectPath, project.locationHash)
+    }
+
+    private fun screenTextOf(session: TerminalSession, kind: AgentCliKind?): () -> String? = {
+        session.screen()?.let { cleanTerminalScreen(it, kind) }?.takeIf { it.isNotEmpty() }
     }
 
     private fun promptBoxSenderFor(sessionId: String, session: TerminalSession): PromptBoxSender = PromptBoxSender(

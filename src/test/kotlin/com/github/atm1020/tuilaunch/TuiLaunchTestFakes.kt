@@ -18,6 +18,7 @@ import com.github.atm1020.tuilaunch.resume.HookShell
 import com.github.atm1020.tuilaunch.resume.OpenCodeServer
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
+import com.github.atm1020.tuilaunch.terminal.TerminalScreen
 import com.github.atm1020.tuilaunch.terminal.TerminalSession
 import com.github.atm1020.tuilaunch.terminal.TerminalSessionFactory
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
@@ -211,6 +212,7 @@ internal class FakeCopilotCompletionBackend(
 internal class FakePromptBoxCompletionSettings(
     override var completionSource: PromptBoxCompletionSource = PromptBoxCompletionSource.COPILOT,
     override var includePromptHistory: Boolean = false,
+    override var includeScreenText: Boolean = false,
 ) : PromptBoxCompletionSettings
 
 internal fun registerTheSendPromptBoxAction(parentDisposable: Disposable) {
@@ -335,6 +337,7 @@ internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
     val sentText = mutableListOf<String>()
     val sentKeys = mutableListOf<SentKey>()
     val spentKeyPresses = mutableListOf<KeyEvent>()
+    var screen: TerminalScreen? = null
     private var terminationCallback: (() -> Unit)? = null
 
     fun requestFocus() {
@@ -354,6 +357,7 @@ internal class FakeSession(private val terminalAcceptsText: Boolean = true) {
             sentText.add(text)
             terminalAcceptsText
         },
+        readScreen = { screen },
     ).also { session ->
         session.spendKeyPressesWith { spentKeyPresses.add(it) }
     }

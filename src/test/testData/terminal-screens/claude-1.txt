@@ -1,0 +1,40 @@
+  underline, and width. Wide characters like CJK glyphs or many emoji take up two cells. Combining
+  marks attach to the cell before them. The grid also keeps a scrollback buffer, so lines that
+  scroll off the top are saved rather than lost. At this stage nothing has been drawn yet. The
+  emulator only has an accurate model of what the screen should contain.
+
+  The renderer turns that grid into pixels. It works out the cell size from the font's metrics, so
+  every column has the same width and every row the same height. For each cell it picks a font that
+  has the needed glyph, and it falls back to other fonts when the main one lacks it. A shaping
+  engine such as HarfBuzz may handle ligatures and complex scripts across runs of cells. The
+  emulator rasterizes each glyph once and stores the bitmap in a glyph atlas, which is a texture
+  cache. Modern emulators like Alacritty, Kitty, and WezTerm upload that atlas to the GPU. They draw
+  every cell as a textured quad in one or a few draw calls. Backgrounds are drawn first, then
+  glyphs, then the cursor, selection highlights, and underlines on top. To save work, the renderer
+  tracks dirty regions and redraws only the cells that changed. It also syncs frames to the display
+  refresh rate, so fast output does not cause tearing or wasted frames.
+
+  Three facts.
+
+  - The VT100 escape sequences from DEC in 1978 still form the basis of most control codes that
+    emulators support today.
+  - The TERM environment variable tells programs which terminfo entry to use, and that entry
+    describes which features the emulator supports.
+  - Cell width comes from Unicode East Asian Width data and wcwidth-style tables, and mismatches
+    between the program and the emulator cause misaligned text.
+
+  Here is a five-line Kotlin sketch of a cell grid.
+
+  data class Cell(val ch: Char = ' ', val fg: Int = 7, val bg: Int = 0)
+  val grid = Array(24) { Array(80) { Cell() } }
+  fun put(row: Int, col: Int, text: String) =
+      text.forEachIndexed { i, c -> grid[row][col + i] = Cell(c) }
+  fun main() { put(0, 0, "Hello"); println(grid[0].take(5).joinToString("") { "${it.ch}" }) }
+
+✻ Crunched for 17s · done 4:47 PM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5 (1M context) high – 26.6K (3%) – Terminal emulator text rendering
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent

@@ -1,0 +1,40 @@
+     recognizes control characters and escape sequences. Printable characters generally populate
+     cells in a grid. Control characters can move the cursor or advance to another line, while
+     escape sequences can change colors, erase regions, scroll the display, or switch screen
+     buffers. Each cell stores a character or character sequence together with attributes such as
+     foreground color, background color, boldness, and underline. The emulator also tracks cursor
+     position, scrolling margins, and other terminal state. This internal screen model determines
+     what should appear in the window, independently of how those contents are drawn.
+
+     To draw that screen model, the emulator converts its contents into positioned glyphs and
+     visual decorations. It selects fonts, uses fallback fonts when necessary, and obtains glyph
+     shapes through font-rendering libraries. Some emulators also apply text shaping to support
+     ligatures or complex scripts, although behavior varies because a terminal’s fixed cell grid
+     constrains glyph positioning. A character can occupy one or two cells, and combining marks
+     can share a cell with a preceding character, so Unicode handling requires more than
+     assigning one cell to every code point. The renderer paints backgrounds, draws glyphs with
+     the appropriate colors, and adds underlines, selection highlights, and the cursor. Many
+     implementations cache rasterized glyphs in texture atlases and use a GPU to compose the
+     display efficiently. Others use software rendering. Updates typically target changed regions,
+      though resizing, scrolling, or changing fonts can require broader redraws.
+
+     - ANSI escape sequences change terminal state and usually do not appear as visible text.
+     - A terminal’s character cells are layout units, so character count and display width can
+       differ.
+     - Glyph caching reduces repeated font rasterization when the same text appears across frames.
+
+     fun main() {
+         val esc = "\u001B"
+         println("${esc}[32mGreen terminal text${esc}[0m")
+         println("Default terminal text")
+     }
+
+     ▣  Build · GPT-6.1 Sol Fast · 24.4s
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · GPT-6.1 Sol Fast OpenAI · high
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   /private/tmp/tuilaunch-samples                                      14.1K (1%)  ctrl+p commands
+

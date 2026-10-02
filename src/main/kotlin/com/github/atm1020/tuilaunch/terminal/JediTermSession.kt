@@ -100,6 +100,7 @@ class JediTermSessionFactory(
                 starter?.sendString(bracketedPastePayload(text), SEND_AS_USER_INPUT)
                 starter != null
             },
+            readScreen = { jediTermWidget?.terminalTextBuffer?.let { readTerminalScreen(it) } },
         )
         installKeyInterceptor(session, parent)
         return session

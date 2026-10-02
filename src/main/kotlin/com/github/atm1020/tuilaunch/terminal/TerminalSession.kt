@@ -11,6 +11,7 @@ class TerminalSession(
     val canSendKeys: Boolean = false,
     private val sendKey: (keyCode: Int, modifiers: Int, keyChar: Char) -> Unit = { _, _, _ -> },
     private val sendText: (String) -> Boolean = { false },
+    private val readScreen: () -> TerminalScreen? = { null },
 ) {
     private var keyPressSpender: (KeyEvent) -> Unit = {}
 
@@ -25,6 +26,8 @@ class TerminalSession(
     fun sendKey(keyCode: Int, modifiers: Int, keyChar: Char) = sendKey.invoke(keyCode, modifiers, keyChar)
 
     fun sendText(text: String): Boolean = sendText.invoke(text)
+
+    fun screen(): TerminalScreen? = readScreen.invoke()
 
     fun onTerminated(callback: () -> Unit) = registerTerminationCallback(callback)
 }

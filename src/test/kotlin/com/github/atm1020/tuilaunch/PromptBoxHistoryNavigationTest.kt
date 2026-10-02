@@ -90,7 +90,7 @@ class PromptBoxHistoryNavigationTest : BasePlatformTestCase() {
         )
         val disposable = Disposer.newDisposable("PromptBoxHistoryNavigationTest")
         boxDisposables.add(disposable)
-        val box = PromptBox(project, disposable, sender) { promptDocument }
+        val box = PromptBox(project, disposable, sender, existingPromptDocument = { promptDocument })
         box.installEditor()
         return box
     }

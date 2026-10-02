@@ -19,6 +19,12 @@
 - **Run one OpenCode server per project and attach every tab to it**, under **Resume the agent session when a TUI tab
   is reopened** because it only applies while that option is on. It is on by default; turn it off to go back to one
   server per tab, which is what an opencode build without an `attach` command needs.
+- **Include the text shown by the TUI as completion context**, under the Copilot prompt box settings and on by
+  default. Copilot now also sees what the agent's terminal shows, cleaned down to the words: frames, icons, spinners,
+  the agent's input box, status rows and timing rows are dropped, and sentences the TUI broke over several rows are
+  joined again. The input box and status rows are recognized for claude, codex, opencode and omp. The screen text
+  sits right before the draft and takes up to 24 000 characters first; the `PROMPT.md` history fills the rest of the
+  48 000.
 
 ## [0.11.3] - 2026-09-12
 

@@ -225,6 +225,16 @@ class TuiLauncherSettingsSerializationTest {
     }
 
     @Test
+    fun `the text shown by the TUI is completion context unless turned off`() {
+        assertTrue(TuiLauncherSettings.State().copilotScreenTextContext)
+        assertFalse(optionNames(TuiLauncherSettings.State()).contains("copilotScreenTextContext"))
+
+        val restored = roundTrip(TuiLauncherSettings.State(copilotScreenTextContext = false))
+
+        assertFalse(restored.copilotScreenTextContext)
+    }
+
+    @Test
     fun `a Copilot completion source with its own server path survives serialization`() {
         val restored = roundTrip(
             TuiLauncherSettings.State(

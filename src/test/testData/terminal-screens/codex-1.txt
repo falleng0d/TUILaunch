@@ -1,0 +1,40 @@
+› Without using any tools, explain in two long paragraphs how a terminal emulator renders text, th…
+  background color, and underline state. Printable text updates cells at the current cursor
+  position, while control sequences modify the grid or its surrounding state. Line wrapping,
+  scrolling, and cursor movement determine where subsequent text appears. This grid is the
+  terminal’s interpretation of the program’s output, rather than a direct picture supplied by the
+  program.
+
+  To display that grid, the emulator converts its character content into glyphs using the selected
+  fonts. Font fallback supplies glyphs that the primary font lacks, while text shaping may combine
+  or position characters to represent combining marks, joined scripts, or ligatures. The grid still
+  constrains placement, so the renderer must reconcile font metrics with fixed cell dimensions and
+  character widths. Many characters occupy one column, while others occupy two, and combining marks
+  generally attach to preceding text without adding a column. The renderer draws cell backgrounds,
+  glyphs, decorations, and the cursor, often using a GPU, although software rendering is also
+  possible. Rasterization turns glyph outlines into pixels, and antialiasing smooths their edges.
+  Frequently used glyphs can be cached to avoid repeating that work. When output changes, the
+  emulator schedules a redraw and may update only affected regions. Resizing the window changes the
+  available grid dimensions and usually notifies the running program so it can adjust its layout.
+
+  • Programs normally send text and control sequences, while the terminal emulator chooses and
+    renders the glyphs.
+
+  • A terminal cell can contain a base character with combining marks, rather than exactly one
+    Unicode code point.
+
+  • Escape sequences can change text styling without producing visible characters themselves.
+
+  fun main() {
+      val esc = "\u001B"
+      println("${esc}[31mRed text${esc}[0m")
+      println("Plain text")
+  }
+
+  Worked for 37s • 4:47 PM
+
+
+› Ask Codex to do anything
+
+  GPT-6.1-Sol high · Context 3% used · 12.2K used · 258K window · Explain terminal text rendering
+  ← for agents · ? for shortcuts
