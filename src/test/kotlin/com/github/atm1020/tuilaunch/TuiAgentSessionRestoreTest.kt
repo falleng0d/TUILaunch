@@ -101,6 +101,31 @@ class TuiAgentSessionRestoreTest : BasePlatformTestCase() {
         assertEquals(listOf("claude ${claudeSettings(TAB_UUID)} --resume $TAB_UUID"), factory.commands)
     }
 
+    fun testAClaudexTabResumesWithClaudexItself() {
+        val command = "claudex --dangerously-skip-permissions"
+        configureApp("claudex", command)
+        writeClaudeTranscript(TAB_UUID)
+        saveTab(TuiSessionRecord("claudex", command, true, TAB_UUID))
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.restoreSavedTabs()
+
+        assertEquals(listOf("$command ${claudeSettings(TAB_UUID)} --resume $TAB_UUID"), factory.commands)
+    }
+
+    fun testAFreshClaudexTabPinsItsSessionIdOnClaudexItself() {
+        val command = "claudex --dangerously-skip-permissions"
+        configureApp("claudex", command)
+        val factory = FakeFactory(FakeSession())
+        val (service, _) = newService(factory)
+
+        service.launchNew("claudex", command)
+
+        val tabUuid = requireNotNull(savedTabs().single().tabUuid)
+        assertEquals(listOf("$command ${claudeSettings(tabUuid)} --session-id $tabUuid"), factory.commands)
+    }
+
     fun testAFreshClaudeTabPinsItsTabUuidAsTheSessionId() {
         configureApp("claude", "claude")
         val factory = FakeFactory(FakeSession())
