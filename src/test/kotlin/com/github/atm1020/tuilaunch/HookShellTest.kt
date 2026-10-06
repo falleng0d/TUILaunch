@@ -37,6 +37,17 @@ class HookShellTest {
     }
 
     @Test
+    fun `claudex is claude under another name`() {
+        assertEquals(AgentCliKind.CLAUDE, AgentCommand.parse("claudex --dangerously-skip-permissions").kind)
+        assertEquals(AgentCliKind.CLAUDE, AgentCommand.parse("/usr/local/bin/claudex").kind)
+        assertEquals(AgentCliKind.CLAUDE, AgentCommand.parse("claudex-agent").kind)
+        assertEquals(
+            "claudex --dangerously-skip-permissions --resume 6f1d0a2e",
+            AgentCommand.parse("claudex --dangerously-skip-permissions").withArguments(listOf("--resume", "6f1d0a2e")),
+        )
+    }
+
+    @Test
     fun `a wrapper appends the session arguments where the wrapper forwards them`() {
         assertEquals(
             "claude-agent --resume 6f1d0a2e",

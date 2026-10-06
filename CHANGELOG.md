@@ -25,6 +25,8 @@
   joined again. The input box and status rows are recognized for claude, codex, opencode and omp. The screen text
   sits right before the draft and takes up to 24 000 characters first; the `PROMPT.md` history fills the rest of the
   48 000.
+- `claudex` is recognized as claude, so a tab started with a command like `claudex --dangerously-skip-permissions`
+  has its session saved and restored the same way a `claude` tab does.
 
 ## [0.11.3] - 2026-09-12
 

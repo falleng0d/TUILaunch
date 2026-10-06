@@ -1,7 +1,7 @@
 package com.github.atm1020.tuilaunch.resume
 
-enum class AgentCliKind(val programName: String) {
-    CLAUDE("claude"),
+enum class AgentCliKind(val programName: String, private vararg val aliases: String) {
+    CLAUDE("claude", "claudex"),
     CODEX("codex"),
     OPENCODE("opencode"),
     OMP("omp"),
@@ -16,7 +16,7 @@ enum class AgentCliKind(val programName: String) {
 
         fun forProgramName(programName: String): AgentCliKind? {
             val name = programName.removeSuffix(WRAPPER_SUFFIX)
-            return entries.firstOrNull { it.programName == name }
+            return entries.firstOrNull { it.programName == name || name in it.aliases }
         }
     }
 }

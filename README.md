@@ -179,7 +179,7 @@ disk and is used again if you turn the setting back on before opening any TUI ta
 
 A reopened tab that runs a coding agent can come back to the *same conversation* instead of an empty one. It works
 for `claude`, `codex`, `opencode` and `omp`, whether they are launched directly or through
-`headroom wrap <cli> <flags>`. Every other command is launched untouched, and so is any command that already
+`headroom wrap <cli> <flags>`. `claudex` counts as `claude`. Every other command is launched untouched, and so is any command that already
 selects a session itself (`--resume`, `--continue`, `--session-id`, `codex resume`, …), that chains something
 else onto the CLI with `;`, `&&`, `||`, `|`, `&` or a redirection, or that sets one of the variables TUILaunch
 would set itself (`OPENCODE_TUI_CONFIG`, `TUILAUNCH_OPENCODE_STATE`, `TUILAUNCH_CODEX_STATE`).
