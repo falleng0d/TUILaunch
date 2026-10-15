@@ -48,6 +48,21 @@ Multiple TUI apps can stay open at the same time as separate tabs, and each tab 
 
 TUILaunch remembers the last tool window size used by each app and restores it when that app tab is selected again.
 
+### Move a session into an editor tab
+
+Right-click a TUILaunch tab and choose **Move to Editor**, or drag the tab onto the editor area, to keep the running
+session in an editor tab instead. The process, its scrollback and the prompt box move with it; the prompt box sits under
+the terminal there. The editor tab can be moved to another split or window like any other tab.
+
+To put it back, right-click the editor tab and choose **Move to TUILaunch**, or drag the editor tab onto the TUILaunch
+tool window. **Rename Session** on the same menu renames the editor tab. Closing the editor tab ends the session, the
+same as closing it in the tool window.
+
+Sessions in the editor are left out of the next/previous TUI tab actions. The send, focus, prompt box and close actions
+act on the session that had the focus last, so after working in an editor session they target that one; the prompt box
+button in the tool window title bar always acts on the tool window's own tab. Saved tool window sizes do not apply in
+the editor.
+
 ### Prompt box
 
 The **Toggle Prompt Box** button in the `TUILaunch` tool window title bar, left of the button that opens `PROMPT.md`,
@@ -170,6 +185,8 @@ The next time you open that project, the tabs come back the first time the tool 
 Reopening means relaunching. Each tab starts a brand new session, so processes and scrollback are gone; only the shape
 of the tab strip comes back. An app that has since been deleted from the settings table is skipped, and an app whose
 command was edited starts the new command. The setting is off by default and applies to every project.
+
+Sessions that were in an editor tab are saved too, after the tool window tabs, and come back in the tool window.
 
 The tab list lives in the project's `.idea/workspace.xml`, so it is per developer rather than shared through VCS.
 While the setting is off nothing is recorded and nothing is reopened; the list from before you turned it off stays on
@@ -396,6 +413,14 @@ Example workflow after configuring <kbd>Ctrl</kbd> + <kbd>Space</kbd> as the pre
 Platform behaviour this plugin depends on, collected so it does not have to be rediscovered:
 
 - `Content.setDisplayName` fires the property change the tab UI repaints on; `setTabName` does not.
+- `ToolWindowContentUi.setToolWindowInEditorSupport` is the 2026.2 hook that lets `ToolWindowInnerDragHelper` drop a tool window tab into an `EditorWindow`; the helper removes the `Content` with `TEMPORARY_REMOVED_KEY` at drag start, calls `openInEditor`, and disposes the `Content` right after, so the session disposable has to be moved to another parent inside `openInEditor`.
+- `Disposer.register(parent, child)` moves an already registered child to the new parent, which is how a session's lifetime follows it between a `Content` and the service.
+- `FileEditorManagerKeys.FORBID_TAB_SPLIT` turns a second open of a file into a move by closing it in its old window first without `CLOSING_TO_REOPEN`, so a `FileEditor.dispose` cannot tell a move from a close; a session editor only ends its session when the file is still not open one event-queue turn later.
+- `EditorWindow.split` ignores `FORBID_TAB_SPLIT` and opens a second copy of a session file, and 2026.2 builds that copy's editor a few event-queue turns later; the newest shown copy takes the terminal and closes the others, but never one whose editor is not built yet, because the old window re-shows during the split before the new editor exists.
+- An editor tab dropped on a registered `DockContainer` is closed in its window with `CLOSING_TO_REOPEN` set before `DockContainer.add` runs; holding Ctrl makes it a copy that is not closed at all.
+- `DockManagerImpl` hit-tests the screen rectangle of every registered `DockContainer`, including a hidden tool window's stale bounds, so the TUILaunch dock container is registered only while the tool window component is showing.
+- `FileEditorManagerImpl` closes every editor from its own `ProjectCloseListener.projectClosing`, in no fixed order with ours, so an editor closed by the project closing is told apart from one closed by the user only after the close sequence has run.
+- The 2026.2 platform's own `tabInEditor` prototype and the 2026.3 `ToolWindowEditorTabSupport` extension point both stay off unless the `toolwindow.open.tab.in.editor` registry key is set, and that key also switches the bundled Terminal's own Move to Editor behaviour.
 - `ToolWindowFactory.init(ToolWindow)` runs before `createToolWindowContent` and before any content exists, which is the only point where `ToolWindowEx.setTabActions` can install the tab bar's "+" button.
 - A tab only gets an X and enabled "Close Tab"/"Close Other Tabs"/"Close All Tabs" actions when `Content.isCloseable` is true *and* the `<toolWindow>` element declares `canCloseContents="true"`; either one alone leaves them disabled.
 - Once content is closeable the platform removes tabs without calling back into plugin code, so a `ContentManagerListener.contentRemoved` hook is the only way to learn that a session is gone.

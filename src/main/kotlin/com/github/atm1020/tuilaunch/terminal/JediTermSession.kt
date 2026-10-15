@@ -79,6 +79,7 @@ class JediTermSessionFactory(
         val session = TerminalSession(
             component = widget.component,
             requestFocus = { widget.requestFocus() },
+            preferredFocusableComponent = widget.preferredFocusableComponent,
             registerTerminationCallback = { callback ->
                 widget.addTerminationCallback({ callback() }, parent)
             },

@@ -28,6 +28,8 @@
                 implementation="com.github.atm1020.tuilaunch.copilot.CopilotInlineCompletionProvider"
                 order="first"/>
         <postStartupActivity implementation="com.github.atm1020.tuilaunch.LoadDynamicActions"/>
+        <fileEditorProvider id="tuilaunch-session-editor"
+                            implementation="com.github.atm1020.tuilaunch.editor.TuiSessionFileEditorProvider"/>
         <!-- editorFactoryListener rather than lineMarkerProvider: MarkdownLanguage and PlainTextLanguage are
              siblings, so a lineMarkerProvider registered on "TEXT" never fires for a .md file, and registering
              on Language.ANY would hand us a PsiElement we cannot type without the Markdown plugin (TSK-9057). -->
@@ -196,6 +198,26 @@
                 text="Rename Session"
                 description="Rename this TUI session's tab">
             <add-to-group group-id="ToolWindowContextMenu" anchor="last"/>
+        </action>
+        <action id="TUILaunch.MoveSessionToEditor"
+                class="com.github.atm1020.tuilaunch.action.MoveSessionToEditorAction"
+                text="Move to Editor"
+                description="Move this TUI session into an editor tab"
+                icon="AllIcons.Actions.MoveToWindow">
+            <add-to-group group-id="ToolWindowContextMenu" anchor="last"/>
+        </action>
+        <action id="TUILaunch.MoveSessionToToolWindow"
+                class="com.github.atm1020.tuilaunch.action.MoveSessionToToolWindowAction"
+                text="Move to TUILaunch"
+                description="Move this TUI session back into the TUILaunch tool window"
+                icon="AllIcons.General.OpenInToolWindow">
+            <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
+        </action>
+        <action id="TUILaunch.RenameEditorSession"
+                class="com.github.atm1020.tuilaunch.action.RenameEditorSessionAction"
+                text="Rename Session"
+                description="Rename this TUI session's editor tab">
+            <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>

@@ -8,6 +8,8 @@ import com.github.atm1020.tuilaunch.copilot.InlineCompletionItem
 import com.github.atm1020.tuilaunch.copilot.InlineCompletionTriggerKind
 import com.github.atm1020.tuilaunch.copilot.LspPosition
 import com.github.atm1020.tuilaunch.copilot.PromptBoxCompletionSettings
+import com.github.atm1020.tuilaunch.editor.SessionEditorHost
+import com.github.atm1020.tuilaunch.editor.TuiSessionFile
 import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
@@ -41,17 +43,13 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.KeyboardShortcut
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.fileEditor.impl.EditorWindow
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
-import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.UserDataHolderBase
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.testFramework.PlatformTestUtil
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.runBlocking
 import java.awt.event.KeyEvent
 import java.nio.file.Path
 import java.util.Collections
@@ -60,6 +58,11 @@ import java.util.concurrent.CountDownLatch
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.KeyStroke
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 
 private const val MAXIMUM_LEFTOVER_SESSIONS = 100
 private const val GHOST_TEXT = "a suggestion nobody typed"
@@ -423,6 +426,50 @@ internal class DeferredFactory(private val sessions: List<FakeSession>) : Termin
     }
 }
 
+internal class FakeEditorHost : SessionEditorHost(null) {
+    val openFiles = mutableListOf<TuiSessionFile>()
+    val selectedFiles = mutableListOf<TuiSessionFile>()
+    private var selectionListener: ((TuiSessionFile) -> Unit)? = null
+
+    override fun open(file: TuiSessionFile, window: EditorWindow?) {
+        openFiles.add(file)
+    }
+
+    override fun select(file: TuiSessionFile) {
+        selectedFiles.add(file)
+    }
+
+    override fun close(file: TuiSessionFile) {
+        openFiles.remove(file)
+        file.isValid = false
+    }
+
+    override fun isOpen(file: TuiSessionFile): Boolean = file in openFiles
+
+    override fun closeCopiesOutside(file: TuiSessionFile, shownEditorComponent: JComponent) = Unit
+
+    override fun titleChanged(file: TuiSessionFile) = Unit
+
+    override fun onSelected(parentDisposable: Disposable, listener: (TuiSessionFile) -> Unit) {
+        selectionListener = listener
+    }
+
+    fun userCloses(file: TuiSessionFile, service: TuiAppLaunchService) {
+        openFiles.remove(file)
+        service.editorTabClosed(file)
+    }
+
+    fun moveToAnotherSplit(file: TuiSessionFile, service: TuiAppLaunchService) {
+        openFiles.remove(file)
+        service.editorTabClosed(file)
+        openFiles.add(file)
+    }
+
+    fun userSelects(file: TuiSessionFile) {
+        selectionListener?.invoke(file)
+    }
+}
+
 internal class FakeHost : IdeToolWindowHost(null) {
     var visible = false
     var pinned = true
@@ -443,7 +490,7 @@ internal class FakeHost : IdeToolWindowHost(null) {
     private var tabRemoved: ((Any) -> Unit)? = null
     private var anchorChanged: ((Boolean) -> Unit)? = null
     private val tabsRemovedForDrag = mutableSetOf<Any>()
-    private val disposableByTab = mutableMapOf<Any, CheckedDisposable>()
+    private val contentByTab = mutableMapOf<Any, Disposable>()
     private val componentByTab = mutableMapOf<Any, JComponent>()
 
     override fun isVisible(): Boolean = visible
@@ -462,10 +509,10 @@ internal class FakeHost : IdeToolWindowHost(null) {
         tabs.add(if (index in tabs.indices) index else tabs.size, handle)
         titles.add(title)
         componentByTab[handle] = component
-        (disposable as? CheckedDisposable)?.let {
-            disposables.add(it)
-            disposableByTab[handle] = it
-        }
+        val content = Disposer.newDisposable("FakeHost content $title")
+        Disposer.register(content, disposable)
+        contentByTab[handle] = content
+        (disposable as? CheckedDisposable)?.let { if (it !in disposables) disposables.add(it) }
         tabAdded?.invoke(handle)
         if (selected == null) {
             selected = handle
@@ -492,6 +539,7 @@ internal class FakeHost : IdeToolWindowHost(null) {
         if (removingSelectedTab) selected = null
         tabs.removeAt(index)
         tabRemoved?.invoke(handle)
+        contentByTab.remove(handle)?.let { Disposer.dispose(it) }
         if (removingSelectedTab) {
             selected = tabs.getOrNull(index) ?: tabs.getOrNull(index - 1)
             selected?.let { tabSelected?.invoke(it) }
@@ -512,7 +560,14 @@ internal class FakeHost : IdeToolWindowHost(null) {
 
     fun dragTabIntoTheEditor(from: Int) {
         val handle = detachTabForDrag(from)
-        disposableByTab[handle]?.let { Disposer.dispose(it) }
+        contentByTab.remove(handle)?.let { Disposer.dispose(it) }
+        tabsRemovedForDrag.remove(handle)
+    }
+
+    fun dropTabIntoTheEditor(from: Int, service: TuiAppLaunchService) {
+        val handle = detachTabForDrag(from)
+        service.moveToEditor(handle)
+        contentByTab.remove(handle)?.let { Disposer.dispose(it) }
         tabsRemovedForDrag.remove(handle)
     }
 

@@ -1,6 +1,8 @@
 package com.github.atm1020.tuilaunch.services
 
 import com.github.atm1020.tuilaunch.copilot.PromptBoxCopilotStarter
+import com.github.atm1020.tuilaunch.editor.SessionEditorHost
+import com.github.atm1020.tuilaunch.editor.TuiSessionFile
 import com.github.atm1020.tuilaunch.model.ACTION_ID_PREFIX
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
@@ -37,22 +39,30 @@ import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.TextEditor
+import com.intellij.openapi.fileEditor.impl.EditorWindow
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.ui.content.Content
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.awt.Component
+import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
+import java.beans.PropertyChangeListener
 import java.util.UUID
+import javax.swing.SwingUtilities
 
 const val TUI_TOOL_WINDOW_ID = "TUILaunch"
 
 private const val SUBMIT_KEY_CHAR = '\r'
 private const val EARLY_EXIT_RELAUNCH_WINDOW_MILLIS = 15_000L
+private const val FOCUS_OWNER_PROPERTY = "focusOwner"
 private val RESUME_ARGUMENTS = setOf(
     ClaudeSessionStrategy.RESUME_FLAG,
     CodexSessionStrategy.RESUME_SUBCOMMAND,
@@ -68,7 +78,7 @@ internal fun uniqueSessionTitle(base: String, taken: Set<String>): String {
 }
 
 @Service(Service.Level.PROJECT)
-class TuiAppLaunchService(private val project: Project, private val scope: CoroutineScope) {
+class TuiAppLaunchService(private val project: Project, private val scope: CoroutineScope) : Disposable {
 
     var sessionFactory: TerminalSessionFactory = JediTermSessionFactory(
         project = project,
@@ -77,11 +87,17 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         onPreviousTab = { previousTuiTab() },
     )
     var host: IdeToolWindowHost? = null
+    var editorHost: SessionEditorHost = SessionEditorHost(project)
     var activeToolWindowIdProvider: () -> String? = {
         ToolWindowManager.getInstance(project).activeToolWindowId
     }
+    var focusOwnerProvider: () -> Component? = {
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+    }
     var editorFocusRequest: () -> Unit = {
-        val component = FileEditorManager.getInstance(project).selectedTextEditor?.contentComponent
+        val editors = FileEditorManager.getInstance(project)
+        val component = editors.selectedTextEditor?.contentComponent
+            ?: editors.selectedEditors.firstNotNullOfOrNull { (it as? TextEditor)?.editor?.contentComponent }
         if (component != null) IdeFocusManager.getInstance(project).requestFocus(component, true)
     }
     var promptBoxCompletions: PromptBoxCopilotStarter = PromptBoxCopilotStarter()
@@ -104,10 +120,18 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         }
     var clock: () -> Long = { System.currentTimeMillis() }
     private var hostListenersInstalled = false
+    private var editorListenersInstalled = false
     private var windowRevealedByLaunch = false
     private var applyingSize = false
     private var restoringTabs = false
     private var restoreAttempted = false
+    private var projectIsClosing = false
+
+    private sealed interface SessionPlace {
+        data class InToolWindow(val handle: Any) : SessionPlace
+
+        data class InEditor(val file: TuiSessionFile) : SessionPlace
+    }
 
     private data class OpenTab(
         val sessionId: String,
@@ -116,7 +140,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val session: TerminalSession,
         val layout: TuiTabLayout,
         val promptBox: PromptBox,
-        val handle: Any,
+        var place: SessionPlace,
         val disposable: Disposable,
         var openedFromTui: Boolean,
         val tabUuid: String,
@@ -127,7 +151,11 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val commandWasDecorated: Boolean,
         val agentSessionWasRequested: Boolean,
         val agentStrategy: AgentSessionStrategy?,
-    )
+    ) {
+        val handle: Any? get() = (place as? SessionPlace.InToolWindow)?.handle
+
+        val editorFile: TuiSessionFile? get() = (place as? SessionPlace.InEditor)?.file
+    }
 
     private data class PendingLaunch(val appName: String, val disposable: Disposable)
 
@@ -180,6 +208,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     private val sessionIdsRemovedForDrag = mutableSetOf<String>()
     private var sessionSequence = 0
     private var activeSessionIdBeingRemoved: String? = null
+    private var lastFocusedSessionId: String? = null
 
     private fun tabsNotClosing(): Map<String, OpenTab> =
         tabsBySessionId.filterKeys { it !in closingSessions }
@@ -210,16 +239,48 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             afterRemoval = { handle -> onTabRemoved(host, handle) },
         )
         host.onAnchorChanged { dockedHorizontally ->
-            tabsBySessionId.values.forEach { it.layout.setDockedHorizontally(dockedHorizontally) }
+            tabsBySessionId.values
+                .filter { it.handle != null }
+                .forEach { it.layout.setDockedHorizontally(dockedHorizontally) }
         }
     }
 
+    private fun ensureEditorListeners() {
+        if (editorListenersInstalled) return
+        editorListenersInstalled = true
+        editorHost.onSelected(this) { file -> tabIn(file)?.let { lastFocusedSessionId = it.sessionId } }
+        trackTheFocusedSession()
+    }
+
+    private fun trackTheFocusedSession() {
+        val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+        val listener = PropertyChangeListener { event -> onFocusOwnerChanged(event.newValue as? Component) }
+        focusManager.addPropertyChangeListener(FOCUS_OWNER_PROPERTY, listener)
+        Disposer.register(this) { focusManager.removePropertyChangeListener(FOCUS_OWNER_PROPERTY, listener) }
+    }
+
+    internal fun onFocusOwnerChanged(owner: Component?) {
+        sessionHolding(owner ?: return)?.let { lastFocusedSessionId = it.sessionId }
+    }
+
+    private fun sessionHolding(component: Component): OpenTab? =
+        tabsNotClosing().values.firstOrNull { SwingUtilities.isDescendingFrom(component, it.layout.component) }
+
     private fun tabFor(handle: Any): OpenTab? = tabsBySessionId.values.firstOrNull { it.handle == handle }
 
-    private fun activeOrLastOpenTab(host: IdeToolWindowHost): OpenTab? {
-        val openTabs = tabsNotClosing().values
-        val activeHandle = host.activeTab()
-        return openTabs.firstOrNull { it.handle == activeHandle } ?: openTabs.lastOrNull()
+    private fun tabIn(file: TuiSessionFile): OpenTab? = tabsBySessionId.values.firstOrNull { it.editorFile === file }
+
+    private fun activeToolWindowTab(host: IdeToolWindowHost): OpenTab? {
+        val toolWindowTabs = tabsNotClosing().values.filter { it.handle != null }
+        val activeHandle = host.activeTab() ?: return toolWindowTabs.lastOrNull()
+        return toolWindowTabs.firstOrNull { it.handle == activeHandle } ?: toolWindowTabs.lastOrNull()
+    }
+
+    private fun activeSession(host: IdeToolWindowHost): OpenTab? {
+        val openTabs = tabsNotClosing()
+        val lastFocused = lastFocusedSessionId?.let { openTabs[it] }
+        if (lastFocused?.editorFile != null) return lastFocused
+        return activeToolWindowTab(host) ?: openTabs.values.lastOrNull()
     }
 
     private fun onTabSelected(host: IdeToolWindowHost, handle: Any) {
@@ -234,20 +295,25 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         if (!TuiLauncherSettings.getInstance().state.restoreOpenTabs) return
         val host = host ?: return
         val activeHandle = host.activeTab()
-        val records = host.orderedHandles().mapNotNull { handle ->
+        val toolWindowRecords = host.orderedHandles().mapNotNull { handle ->
             val tab = tabFor(handle) ?: return@mapNotNull null
             if (tab.sessionId in closingSessions) return@mapNotNull null
-            TuiSessionRecord(
-                tab.appName,
-                tab.title,
-                handle == activeHandle,
-                tab.tabUuid,
-                tab.agentSessionId,
-                tab.agentCliKind,
-            )
+            recordOf(tab, selected = handle == activeHandle)
         }
-        TuiOpenTabsService.getInstance(project).replaceTabs(records)
+        val editorRecords = tabsNotClosing().values
+            .filter { it.editorFile != null }
+            .map { recordOf(it, selected = false) }
+        TuiOpenTabsService.getInstance(project).replaceTabs(toolWindowRecords + editorRecords)
     }
+
+    private fun recordOf(tab: OpenTab, selected: Boolean): TuiSessionRecord = TuiSessionRecord(
+        tab.appName,
+        tab.title,
+        selected,
+        tab.tabUuid,
+        tab.agentSessionId,
+        tab.agentCliKind,
+    )
 
     private fun applySavedSize(host: IdeToolWindowHost, appName: String) {
         val size = savedSize(host, appName) ?: return
@@ -362,12 +428,17 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 
     private fun finishRestore(host: IdeToolWindowHost, tabToSelect: OpenTab?) {
         restoringTabs = false
-        if (tabToSelect != null) host.selectTab(tabToSelect.handle)
+        tabToSelect?.handle?.let(host::selectTab)
         recordOpenTabs()
     }
 
     fun releasePromptBoxEditors() {
         tabsBySessionId.values.forEach { it.promptBox.releaseEditor() }
+    }
+
+    fun projectClosing() {
+        projectIsClosing = true
+        releasePromptBoxEditors()
     }
 
     fun renameTab(handle: Any, newTitle: String) {
@@ -378,7 +449,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     fun focusTui() {
         if (tabsBySessionId.isEmpty()) return
         val host = hostWithListeners() ?: return
-        val tab = activeOrLastOpenTab(host) ?: return
+        val tab = activeSession(host) ?: return
         selectTuiTab(host, tab)
     }
 
@@ -388,14 +459,14 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 
     fun sendTextToActiveSession(text: String, submit: Boolean = false, focusSession: Boolean = true): Boolean {
         val host = hostWithListeners() ?: return false
-        val tab = activeOrLastOpenTab(host) ?: return false
+        val tab = activeSession(host) ?: return false
         selectTuiTab(host, tab, requestFocus = focusSession)
         return sendTo(tab.session, text, submit)
     }
 
     fun sendFileReference(reference: String): Boolean {
         val host = hostWithListeners() ?: return false
-        val tab = activeOrLastOpenTab(host) ?: return false
+        val tab = activeSession(host) ?: return false
         if (tab.layout.promptBoxVisible) {
             tab.promptBox.insertAtCaret(reference)
             tab.promptBox.requestFocus()
@@ -411,16 +482,16 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         return true
     }
 
-    fun isPromptBoxVisible(): Boolean? {
+    fun isPromptBoxVisible(inToolWindow: Boolean = false): Boolean? {
         if (tabsNotClosing().isEmpty()) return null
         val host = resolveHost() ?: return null
-        val tab = activeOrLastOpenTab(host) ?: return null
+        val tab = targetSession(host, inToolWindow) ?: return null
         return tab.layout.promptBoxVisible
     }
 
-    fun setPromptBoxVisible(visible: Boolean) {
+    fun setPromptBoxVisible(visible: Boolean, inToolWindow: Boolean = false) {
         val host = hostWithListeners() ?: return
-        val tab = activeOrLastOpenTab(host) ?: return
+        val tab = targetSession(host, inToolWindow) ?: return
         val promptBoxHadFocus = tab.promptBox.hasFocus()
         rememberAndShowPromptBox(tab, visible)
         if (visible) {
@@ -429,6 +500,9 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             tab.session.requestFocus()
         }
     }
+
+    private fun targetSession(host: IdeToolWindowHost, inToolWindow: Boolean): OpenTab? =
+        if (inToolWindow) activeToolWindowTab(host) else activeSession(host)
 
     private fun rememberAndShowPromptBox(tab: OpenTab, visible: Boolean) {
         promptBoxPreferences.rememberVisibility(tab.appName, visible)
@@ -447,8 +521,9 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 
     fun focusPromptBox() {
         val host = hostWithListeners() ?: return
-        val tab = activeOrLastOpenTab(host) ?: return
-        if (host.isVisible() && promptBoxHoldsTheFocus(tab)) {
+        val tab = activeSession(host) ?: return
+        val theSessionIsShowing = tab.editorFile != null || host.isVisible()
+        if (theSessionIsShowing && promptBoxHoldsTheFocus(tab)) {
             setPromptBoxVisible(false)
             return
         }
@@ -462,20 +537,26 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     }
 
     fun toggleToolWindow() {
-        if (tabsBySessionId.isEmpty()) return
+        if (noSessionIsInTheToolWindow()) return
         val host = hostWithListeners() ?: return
         if (host.isVisible()) host.hide() else host.show()
     }
 
     fun toggleToolWindowAndFocus() {
-        if (tabsBySessionId.isEmpty()) return
+        if (noSessionIsInTheToolWindow()) return
         val host = hostWithListeners() ?: return
-        if (host.isVisible()) host.hide() else focusTui()
+        if (host.isVisible()) {
+            host.hide()
+            return
+        }
+        activeToolWindowTab(host)?.let { selectTuiTab(host, it) }
     }
+
+    private fun noSessionIsInTheToolWindow(): Boolean = tabsBySessionId.values.none { it.handle != null }
 
     fun closeActiveTui() {
         val host = hostWithListeners() ?: return
-        val tab = activeOrLastOpenTab(host) ?: return
+        val tab = activeSession(host) ?: return
         closeTab(tab.sessionId, theUserClosedTheTab = true)
     }
 
@@ -637,7 +718,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     session = session,
                     layout = layout,
                     promptBox = promptBox,
-                    handle = handle,
+                    place = SessionPlace.InToolWindow(handle),
                     disposable = disposable,
                     openedFromTui = isTuiFocused(),
                     tabUuid = intent.tabUuid,
@@ -819,8 +900,9 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             closeTab(tab.sessionId)
             return
         }
-        val position = host.orderedHandles().indexOf(tab.handle)
-        val theTabWasSelected = host.activeTab() == tab.handle
+        val handle = tab.handle
+        val position = handle?.let { host.orderedHandles().indexOf(it) } ?: APPEND_TAB
+        val theTabWasSelected = handle != null && host.activeTab() == handle
         thisLogger().info(
             "Reopened TUI tab '${tab.title}' ended right after launch; starting it again as a new tab",
         )
@@ -834,7 +916,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             title = tab.title,
             intent = LaunchIntent.Fresh(newTabUuid()),
             index = position,
-            onOpened = { relaunched -> if (theTabWasSelected) host.selectTab(relaunched.handle) },
+            onOpened = { relaunched -> if (theTabWasSelected) relaunched.handle?.let(host::selectTab) },
         )
     }
 
@@ -918,12 +1000,18 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         requestFocus: Boolean = true,
         keepFocusInThePromptBox: Boolean = false,
     ) {
-        val selectionWillChange = host.activeTab() != tab.handle
-        if (selectionWillChange) recordActiveTabSize(host)
         if (requestFocus) tab.openedFromTui = isTuiFocused()
-        host.show()
-        host.selectTab(tab.handle)
-        if (!selectionWillChange) applySavedSize(host, tab.appName)
+        lastFocusedSessionId = tab.sessionId
+        val handle = tab.handle
+        if (handle == null) {
+            tab.editorFile?.let(editorHost::select)
+        } else {
+            val selectionWillChange = host.activeTab() != handle
+            if (selectionWillChange) recordActiveTabSize(host)
+            host.show()
+            host.selectTab(handle)
+            if (!selectionWillChange) applySavedSize(host, tab.appName)
+        }
         if (requestFocus) focusTabContent(tab, keepFocusInThePromptBox)
     }
 
@@ -935,7 +1023,13 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     private fun promptBoxHoldsTheFocus(tab: OpenTab): Boolean =
         tab.layout.promptBoxVisible && tab.promptBox.hasFocus()
 
-    private fun isTuiFocused(): Boolean = activeToolWindowIdProvider() == TUI_TOOL_WINDOW_ID
+    private fun isTuiFocused(): Boolean =
+        activeToolWindowIdProvider() == TUI_TOOL_WINDOW_ID || anEditorSessionHoldsTheFocus()
+
+    private fun anEditorSessionHoldsTheFocus(): Boolean {
+        val owner = focusOwnerProvider() ?: return false
+        return sessionHolding(owner)?.editorFile != null
+    }
 
     private fun recordActiveTabSize(host: IdeToolWindowHost) {
         if (applyingSize) return
@@ -974,6 +1068,14 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         if (!closingSessions.add(sessionId)) return
         if (theUserClosedTheTab) cleanUpAgentSession(tab)
 
+        val handle = when (val place = tab.place) {
+            is SessionPlace.InEditor -> {
+                closeEditorSession(tab, place.file)
+                return
+            }
+            is SessionPlace.InToolWindow -> place.handle
+        }
+
         val host = resolveHost()
         if (host == null) {
             forgetTab(sessionId)
@@ -981,7 +1083,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             return
         }
 
-        val closingActiveTab = host.activeTab() == tab.handle
+        val closingActiveTab = host.activeTab() == handle
         if (closingActiveTab) {
             host.currentSize()?.let { storeWindowSize(host, tab.appName, it) }
             if (!tab.openedFromTui) focusEditor()
@@ -989,7 +1091,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 
         invokeLater {
             forgetTab(sessionId)
-            host.removeTab(tab.handle)
+            host.removeTab(handle)
             if (windowRevealedByLaunch && host.isPinned()) {
                 host.hide()
             }
@@ -997,6 +1099,77 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         tab.layout.promptBoxVisible = false
         Disposer.dispose(tab.disposable)
     }
+
+    private fun closeEditorSession(tab: OpenTab, file: TuiSessionFile) {
+        forgetTab(tab.sessionId)
+        editorHost.close(file)
+        tab.layout.promptBoxVisible = false
+        Disposer.dispose(tab.disposable)
+        recordOpenTabs()
+    }
+
+    fun handleFor(content: Content): Any? = resolveHost()?.handleFor(content)
+
+    fun canMoveToEditor(handle: Any): Boolean = tabFor(handle)?.takeIf { it.sessionId !in closingSessions } != null
+
+    fun moveToEditor(handle: Any, window: EditorWindow? = null) {
+        val host = resolveHost() ?: return
+        val tab = tabFor(handle) ?: return
+        if (tab.sessionId in closingSessions) return
+        ensureEditorListeners()
+        if (host.activeTab() == handle) host.currentSize()?.let { storeWindowSize(host, tab.appName, it) }
+        val file = TuiSessionFile(
+            sessionId = tab.sessionId,
+            title = tab.title,
+            component = tab.layout.component,
+            focusTarget = { tab.session.preferredFocusableComponent },
+        )
+        Disposer.register(this, tab.disposable)
+        tab.place = SessionPlace.InEditor(file)
+        sessionIdsRemovedForDrag.remove(tab.sessionId)
+        if (host.isTabAttachedToToolWindow(handle)) host.removeTab(handle)
+        if (noSessionIsInTheToolWindow()) host.hide()
+        tab.layout.setDockedHorizontally(false)
+        lastFocusedSessionId = tab.sessionId
+        editorHost.open(file, window)
+        recordOpenTabs()
+    }
+
+    fun moveToToolWindow(file: TuiSessionFile) {
+        val host = hostWithListeners() ?: return
+        val tab = tabIn(file) ?: return
+        if (tab.sessionId in closingSessions) return
+        editorHost.close(file)
+        tab.layout.setDockedHorizontally(host.isDockedHorizontally())
+        val handle = host.addTab(tab.layout.component, tab.title, tab.disposable)
+        tab.place = SessionPlace.InToolWindow(handle)
+        recordOpenTabs()
+        selectTuiTab(host, tab)
+    }
+
+    fun editorTabClosed(file: TuiSessionFile) {
+        ApplicationManager.getApplication().invokeLater(
+            {
+                if (projectIsClosing || editorHost.isOpen(file)) return@invokeLater
+                val tab = tabIn(file) ?: return@invokeLater
+                closeTab(tab.sessionId, theUserClosedTheTab = true)
+            },
+            ModalityState.nonModal(),
+            project.disposed,
+        )
+    }
+
+    fun renameEditorSession(file: TuiSessionFile, newTitle: String) {
+        val tab = tabIn(file) ?: return
+        tab.title = newTitle
+        file.retitle(newTitle)
+        editorHost.titleChanged(file)
+        recordOpenTabs()
+    }
+
+    fun sessionTitleOf(file: TuiSessionFile): String? = tabIn(file)?.title
+
+    override fun dispose() = Unit
 
     private fun onTabRemoving(host: IdeToolWindowHost, handle: Any) {
         activeSessionIdBeingRemoved = null
@@ -1026,9 +1199,10 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         var forgotATab = false
         sessionIdsRemovedForDrag.toList().forEach { sessionId ->
             val tab = tabsBySessionId[sessionId]
-            if (tab != null && host.isTabRemovedForDrag(tab.handle)) return@forEach
+            val handle = tab?.handle
+            if (handle != null && host.isTabRemovedForDrag(handle)) return@forEach
             sessionIdsRemovedForDrag.remove(sessionId)
-            if (tab == null || host.isTabAttachedToToolWindow(tab.handle)) return@forEach
+            if (tab == null || handle == null || host.isTabAttachedToToolWindow(handle)) return@forEach
             forgetTab(sessionId)
             Disposer.dispose(tab.disposable)
             forgotATab = true
@@ -1065,6 +1239,6 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
 class ReleasePromptBoxEditorsOnProjectClose : ProjectCloseListener {
 
     override fun projectClosing(project: Project) {
-        project.getServiceIfCreated(TuiAppLaunchService::class.java)?.releasePromptBoxEditors()
+        project.getServiceIfCreated(TuiAppLaunchService::class.java)?.projectClosing()
     }
 }

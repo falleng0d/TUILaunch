@@ -3,6 +3,7 @@ package com.github.atm1020.tuilaunch.action
 import com.github.atm1020.tuilaunch.services.TUI_TOOL_WINDOW_ID
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
 import com.intellij.openapi.components.service
@@ -43,72 +44,17 @@ class TuiRenameSessionAction : ToolWindowContextMenuActionBase() {
     override fun actionPerformed(e: AnActionEvent, toolWindow: ToolWindow, content: Content?) {
         val project = e.project ?: return
         val target = content ?: return
-        showRenameBalloon(renameAnchor(e, toolWindow), target, project)
+        showSessionRenameBalloon(
+            anchor = renameAnchor(e, toolWindow),
+            currentName = target.displayName.orEmpty(),
+            parentDisposable = target,
+        ) { newName -> applyContentDisplayName(target, project, newName) }
     }
 
     private fun renameAnchor(e: AnActionEvent, toolWindow: ToolWindow): Component {
         e.getData(PlatformCoreDataKeys.CONTEXT_COMPONENT)?.takeIf { it.isShowing }?.let { return it }
         e.inputEvent?.component?.takeIf { it.isShowing }?.let { return it }
         return toolWindow.component
-    }
-
-    private fun showRenameBalloon(anchor: Component, content: Content, project: Project) {
-        val textField = JBTextField(content.displayName.orEmpty())
-        textField.selectAll()
-
-        val label = JBLabel("New session name:")
-        label.font = label.font.deriveFont(Font.BOLD)
-        val panel = SwingHelper.newLeftAlignedVerticalPanel(
-            label,
-            Box.createVerticalStrut(JBUI.scale(2)),
-            textField,
-        )
-        panel.addFocusListener(object : FocusAdapter() {
-            override fun focusGained(e: FocusEvent) {
-                IdeFocusManager.findInstance().requestFocus(textField, true)
-            }
-        })
-
-        val balloon = JBPopupFactory.getInstance()
-            .createDialogBalloonBuilder(panel, null)
-            .setShowCallout(true)
-            .setCloseButtonEnabled(false)
-            .setAnimationCycle(0)
-            .setDisposable(content)
-            .setHideOnKeyOutside(true)
-            .setHideOnClickOutside(true)
-            .setRequestFocus(true)
-            .setBlockClicksThroughBalloon(true)
-            .createBalloon()
-
-        textField.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                when (e.keyCode) {
-                    KeyEvent.VK_ENTER -> {
-                        val newName = textField.text
-                        if (newName.isEmpty()) {
-                            textField.putClientProperty(OUTLINE_PROPERTY, OUTLINE_ERROR)
-                            textField.repaint()
-                        } else {
-                            applyContentDisplayName(content, project, newName)
-                            balloon.hide()
-                        }
-                    }
-                    KeyEvent.VK_ESCAPE -> balloon.hide()
-                }
-            }
-        })
-        textField.document.addDocumentListener(object : DocumentAdapter() {
-            override fun textChanged(e: DocumentEvent) {
-                if (textField.getClientProperty(OUTLINE_PROPERTY) == OUTLINE_ERROR) {
-                    textField.putClientProperty(OUTLINE_PROPERTY, null)
-                    textField.repaint()
-                }
-            }
-        })
-
-        val point = RelativePoint(anchor, Point(anchor.width / 2, anchor.height))
-        balloon.show(point, Balloon.Position.below)
     }
 
     private fun applyContentDisplayName(content: Content, project: Project, newContentName: String) {
@@ -120,4 +66,68 @@ class TuiRenameSessionAction : ToolWindowContextMenuActionBase() {
         host.setTabTitle(handle, newContentName)
         service.renameTab(handle, newContentName)
     }
+}
+
+internal fun showSessionRenameBalloon(
+    anchor: Component,
+    currentName: String,
+    parentDisposable: Disposable,
+    onRename: (String) -> Unit,
+) {
+    val textField = JBTextField(currentName)
+    textField.selectAll()
+
+    val label = JBLabel("New session name:")
+    label.font = label.font.deriveFont(Font.BOLD)
+    val panel = SwingHelper.newLeftAlignedVerticalPanel(
+        label,
+        Box.createVerticalStrut(JBUI.scale(2)),
+        textField,
+    )
+    panel.addFocusListener(object : FocusAdapter() {
+        override fun focusGained(e: FocusEvent) {
+            IdeFocusManager.findInstance().requestFocus(textField, true)
+        }
+    })
+
+    val balloon = JBPopupFactory.getInstance()
+        .createDialogBalloonBuilder(panel, null)
+        .setShowCallout(true)
+        .setCloseButtonEnabled(false)
+        .setAnimationCycle(0)
+        .setDisposable(parentDisposable)
+        .setHideOnKeyOutside(true)
+        .setHideOnClickOutside(true)
+        .setRequestFocus(true)
+        .setBlockClicksThroughBalloon(true)
+        .createBalloon()
+
+    textField.addKeyListener(object : KeyAdapter() {
+        override fun keyPressed(e: KeyEvent) {
+            when (e.keyCode) {
+                KeyEvent.VK_ENTER -> {
+                    val newName = textField.text
+                    if (newName.isEmpty()) {
+                        textField.putClientProperty(OUTLINE_PROPERTY, OUTLINE_ERROR)
+                        textField.repaint()
+                    } else {
+                        onRename(newName)
+                        balloon.hide()
+                    }
+                }
+                KeyEvent.VK_ESCAPE -> balloon.hide()
+            }
+        }
+    })
+    textField.document.addDocumentListener(object : DocumentAdapter() {
+        override fun textChanged(e: DocumentEvent) {
+            if (textField.getClientProperty(OUTLINE_PROPERTY) == OUTLINE_ERROR) {
+                textField.putClientProperty(OUTLINE_PROPERTY, null)
+                textField.repaint()
+            }
+        }
+    })
+
+    val point = RelativePoint(anchor, Point(anchor.width / 2, anchor.height))
+    balloon.show(point, Balloon.Position.below)
 }

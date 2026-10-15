@@ -26,6 +26,7 @@ class TuiLaunchToolWindowFactory : ToolWindowFactory, DumbAware {
                 ActionManager.getInstance().getAction("TUILaunch.OpenPromptFile"),
             )
         )
+        installSessionDragAndDrop(project, toolWindow)
         invokeLater {
             if (!project.isDisposed) project.service<TuiAppLaunchService>().restoreSavedTabs()
         }

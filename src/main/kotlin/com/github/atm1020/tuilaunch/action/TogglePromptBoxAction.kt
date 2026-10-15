@@ -1,9 +1,11 @@
 package com.github.atm1020.tuilaunch.action
 
+import com.github.atm1020.tuilaunch.services.TUI_TOOL_WINDOW_ID
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.PlatformDataKeys
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.DumbAwareToggleAction
 
@@ -22,9 +24,12 @@ class TogglePromptBoxAction : DumbAwareToggleAction(
     override fun isSelected(e: AnActionEvent): Boolean = promptBoxVisibility(e) == true
 
     override fun setSelected(e: AnActionEvent, state: Boolean) {
-        e.project?.service<TuiAppLaunchService>()?.setPromptBoxVisible(state)
+        e.project?.service<TuiAppLaunchService>()?.setPromptBoxVisible(state, invokedFromTheToolWindow(e))
     }
 
     private fun promptBoxVisibility(e: AnActionEvent): Boolean? =
-        e.project?.service<TuiAppLaunchService>()?.isPromptBoxVisible()
+        e.project?.service<TuiAppLaunchService>()?.isPromptBoxVisible(invokedFromTheToolWindow(e))
+
+    private fun invokedFromTheToolWindow(e: AnActionEvent): Boolean =
+        e.getData(PlatformDataKeys.TOOL_WINDOW)?.id == TUI_TOOL_WINDOW_ID
 }

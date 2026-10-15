@@ -12,6 +12,7 @@ class TerminalSession(
     private val sendKey: (keyCode: Int, modifiers: Int, keyChar: Char) -> Unit = { _, _, _ -> },
     private val sendText: (String) -> Boolean = { false },
     private val readScreen: () -> TerminalScreen? = { null },
+    val preferredFocusableComponent: JComponent = component,
 ) {
     private var keyPressSpender: (KeyEvent) -> Unit = {}
 
