@@ -7,4 +7,5 @@ data class TuiSessionRecord(
     var tabUuid: String? = null,
     var agentSessionId: String? = null,
     var agentCliKind: String? = null,
+    var inEditor: Boolean = false,
 )

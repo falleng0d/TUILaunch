@@ -9,6 +9,7 @@ import com.github.atm1020.tuilaunch.copilot.InlineCompletionTriggerKind
 import com.github.atm1020.tuilaunch.copilot.LspPosition
 import com.github.atm1020.tuilaunch.copilot.PromptBoxCompletionSettings
 import com.github.atm1020.tuilaunch.model.PromptBoxCompletionSource
+import com.github.atm1020.tuilaunch.model.TuiSessionRecord
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.SEND_PROMPT_BOX_ACTION_ID
 import com.github.atm1020.tuilaunch.resume.AgentCommand
@@ -46,6 +47,7 @@ import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.UserDataHolderBase
+import com.intellij.ui.components.panels.Wrapper
 import com.intellij.testFramework.PlatformTestUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -455,6 +457,7 @@ internal class FakeHost : IdeToolWindowHost(null) {
     private val disposableByTab = mutableMapOf<Any, CheckedDisposable>()
     private val componentByTab = mutableMapOf<Any, JComponent>()
     val editorTabs = mutableListOf<Any>()
+    private val recordByTab = mutableMapOf<Any, () -> TuiSessionRecord?>()
     var selectedEditorTab: Any? = null
     val splitTabs = mutableListOf<Any>()
     val editorTabSwitches = mutableListOf<Boolean>()
@@ -472,13 +475,20 @@ internal class FakeHost : IdeToolWindowHost(null) {
         visible = false
     }
 
-    override fun addTab(component: JComponent, title: String, disposable: CheckedDisposable, index: Int): Any {
+    override fun addTab(
+        component: JComponent,
+        title: String,
+        disposable: CheckedDisposable,
+        record: () -> TuiSessionRecord?,
+        index: Int,
+    ): Any {
         val handle = Any()
         tabs.add(if (index in tabs.indices) index else tabs.size, handle)
         titles.add(title)
         componentByTab[handle] = component
         disposables.add(disposable)
         disposableByTab[handle] = disposable
+        recordByTab[handle] = record
         tabAdded?.invoke(handle)
         if (selected == null) {
             selected = handle
@@ -590,7 +600,26 @@ internal class FakeHost : IdeToolWindowHost(null) {
 
     fun visiblePositionOfActiveTab(): Int = tabs.indexOf(selected) + 1
 
-    fun componentOf(handle: Any): JComponent? = componentByTab[handle]
+    fun componentOf(handle: Any): JComponent? {
+        val component = componentByTab[handle]
+        return (component as? Wrapper)?.targetComponent?.takeIf { it !== component } ?: component
+    }
+
+    fun savedRecordOf(handle: Any): TuiSessionRecord? = recordByTab[handle]?.invoke()
+
+    override fun createEditorTab(component: JComponent, title: String): Any {
+        val handle = Any()
+        titles.add(title)
+        componentByTab[handle] = component
+        editorTabs.add(handle)
+        return handle
+    }
+
+    override fun attachSession(handle: Any, disposable: CheckedDisposable, record: () -> TuiSessionRecord?) {
+        disposables.add(disposable)
+        disposableByTab[handle] = disposable
+        recordByTab[handle] = record
+    }
 
     override fun isDockedHorizontally(): Boolean = dockedHorizontally
 

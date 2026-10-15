@@ -38,7 +38,7 @@ class TuiLaunchEditorTabSupportTest : BasePlatformTestCase() {
     fun testOnlyTheTabOfALiveSessionCanMoveToTheEditor() {
         val toolWindow = ToolWindowHeadlessManagerImpl.MockToolWindow(project)
         val sessionLifetime = Disposer.newCheckedDisposable(testRootDisposable)
-        IdeToolWindowHost(toolWindow).addTab(JPanel(), "claude", sessionLifetime)
+        IdeToolWindowHost(toolWindow).addTab(JPanel(), "claude", sessionLifetime, { null })
         val sessionContent = toolWindow.contentManager.contents.single()
         val foreignContent = ContentFactory.getInstance().createContent(JPanel(), "Terminal", false)
         try {

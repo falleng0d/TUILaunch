@@ -535,6 +535,11 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - Return to Tool Window onto a split section adds the `Content` to that section's nested `ContentManager`, whose events reach the top-level manager only through `addRecursiveContentManagerListener`.
 - `ToolWindowEditorTabActionBase` makes `update` and `actionPerformed` final, so an `EditorTabPopupMenu` action for a tool window editor tab cannot be a `ToggleAction`; `Toggleable.setSelected` on the presentation gives it the check mark instead.
 - `FileEditorManager.getSelectedTextEditor` only looks at the current editor window, so it is null while a tool window editor tab is selected there; `FileEditorManagerImpl.getSelectionHistory` still lists the files selected before it.
+- `ToolWindowEditorTabPersistenceProvider.canSerialize` is asked once, when a tab moves to the editor, and decides whether the editor file is persistent at all; a tab that moved while it said no stays transient and is never saved.
+- A restored tool window editor tab calls `deserialize` only the first time it is shown, or when an action needs its content, and `ToolWindowEditorTabFileEditor` takes `content.component` once, so a `Content` whose session starts asynchronously has to hand over a container the session is put into later.
+- Editor tabs are restored from the IDE's editor history, apart from the plugin's `workspace.xml` state, and lazily, so the tool window restore and its agent-state cleanup can run before any editor tab is deserialized.
+- `ToolWindowEditorTabManager.getOrRestoreSession` removes the pending state before calling `deserialize`, so after a `null` return nothing about the tab can be read back when the platform closes it.
+- A restored editor tab closed before it was shown disposes no `Content`; its saved state is only reachable from `beforeFileClosed`, through the editor's `getState` and `FileEditorProviderManager.getProvider("ToolWindowEditorTabFileEditor").writeState`, which turns it back into the provider's XML.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

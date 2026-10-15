@@ -54,6 +54,8 @@
                      description="Lets tool window tabs, TUILaunch sessions included, move into editor tabs"/>
         <toolWindowEditorTabSupport key="TUILaunch"
                                     implementationClass="com.github.atm1020.tuilaunch.toolwindow.TuiLaunchEditorTabSupport"/>
+        <toolWindowEditorTabPersistenceProvider key="TUILaunch"
+                                                implementationClass="com.github.atm1020.tuilaunch.toolwindow.TuiLaunchEditorTabPersistence"/>
     </extensions>
 
     <applicationListeners>
@@ -65,6 +67,13 @@
         <listener class="com.github.atm1020.tuilaunch.services.PrepareTuiSessionsForProjectClose"
                   topic="com.intellij.openapi.project.ProjectCloseListener"/>
     </applicationListeners>
+
+    <projectListeners>
+        <!-- An editor tab restored after a restart only becomes a session once it is shown, so closing it before
+             that disposes no Content; beforeFileClosed is the last point where its saved record is readable. -->
+        <listener class="com.github.atm1020.tuilaunch.toolwindow.ForgetTuiEditorTabsClosedBeforeTheyWereShown"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener$Before"/>
+    </projectListeners>
 
     <actions>
         <action id="TUILauncher.FocusTui"

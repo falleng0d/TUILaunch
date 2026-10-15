@@ -30,6 +30,7 @@ import com.github.atm1020.tuilaunch.toolwindow.IdeToolWindowHost
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSize
 import com.github.atm1020.tuilaunch.toolwindow.ToolWindowSizeAxis
 import com.github.atm1020.tuilaunch.toolwindow.TuiTabLayout
+import com.intellij.ide.trustedProjects.TrustedProjects
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
@@ -42,9 +43,11 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.Key
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.wm.impl.tabInEditor.ToolWindowEditorTabFile
+import com.intellij.ui.components.panels.Wrapper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -104,6 +107,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             AgentSessionStrategies.forKind(kind, environment, hookAllowed) { openCodeServer() }
         }
     var clock: () -> Long = { System.currentTimeMillis() }
+    var projectIsTrusted: () -> Boolean = { TrustedProjects.isProjectTrusted(project) }
     private var hostListenersInstalled = false
     private var windowRevealedByLaunch = false
     private var applyingSize = false
@@ -120,6 +124,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val layout: TuiTabLayout,
         val promptBox: PromptBox,
         val handle: Any,
+        val container: Wrapper,
         val disposable: Disposable,
         var openedFromTui: Boolean,
         val tabUuid: String,
@@ -154,7 +159,10 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val onFailed: (() -> Unit)?,
         val disposable: CheckedDisposable,
         val setup: AgentSetup?,
+        val editorSlot: EditorSlot?,
     )
+
+    private class EditorSlot(val handle: Any, val container: Wrapper)
 
     private sealed interface LaunchIntent {
         val tabUuid: String
@@ -184,6 +192,13 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     private val sessionIdsRemovedForDrag = mutableSetOf<String>()
     private var sessionSequence = 0
     private var activeSessionIdBeingRemoved: String? = null
+    private val launchingEditorSlotLivesInEditor = mutableMapOf<Any, Boolean>()
+    private val editorRecordsAwaitingTheirTab: MutableMap<String, TuiSessionRecord> by lazy {
+        TuiOpenTabsService.getInstance(project).state.tabs
+            .filter { it.inEditor }
+            .mapNotNull { record -> record.tabUuid?.let { it to record } }
+            .toMap(linkedMapOf())
+    }
 
     private fun tabsNotClosing(): Map<String, OpenTab> =
         tabsBySessionId.filterKeys { it !in closingSessions }
@@ -263,18 +278,28 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         }
         val editorRecords = tabsNotClosing().values
             .filter { it.livesInEditor }
-            .map { recordOf(it, selected = false) }
-        TuiOpenTabsService.getInstance(project).replaceTabs(toolWindowRecords + editorRecords)
+            .map { recordOf(it, selected = false, inEditor = true) }
+        val liveTabUuids = tabsBySessionId.values.mapTo(mutableSetOf()) { it.tabUuid }
+        val recordsOfEditorTabsNotShownYet = editorRecordsAwaitingTheirTab.values.filter { it.tabUuid !in liveTabUuids }
+        TuiOpenTabsService.getInstance(project)
+            .replaceTabs(toolWindowRecords + editorRecords + recordsOfEditorTabsNotShownYet)
     }
 
-    private fun recordOf(tab: OpenTab, selected: Boolean): TuiSessionRecord = TuiSessionRecord(
+    private fun recordOf(tab: OpenTab, selected: Boolean, inEditor: Boolean = false): TuiSessionRecord = TuiSessionRecord(
         tab.appName,
         tab.title,
         selected,
         tab.tabUuid,
         tab.agentSessionId,
         tab.agentCliKind,
+        inEditor,
     )
+
+    private fun editorTabRecordOf(sessionId: String, tabUuid: String): TuiSessionRecord? {
+        if (!TuiLauncherSettings.getInstance().state.restoreOpenTabs) return null
+        val liveRecord = tabsNotClosing()[sessionId]?.let { recordOf(it, selected = false) }
+        return liveRecord ?: editorRecordsAwaitingTheirTab[tabUuid]?.copy(selected = false, inEditor = false)
+    }
 
     private fun applySavedSize(host: IdeToolWindowHost, appName: String) {
         val size = savedSize(host, appName) ?: return
@@ -331,10 +356,69 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         restoreAttempted = true
         val saved = TuiOpenTabsService.getInstance(project).state.tabs.toList()
         deleteAgentStateOfTabsThatAreGone(saved)
-        if (saved.isEmpty()) return
+        val toolWindowRecords = saved.filterNot { it.inEditor }
+        if (toolWindowRecords.isEmpty()) return
         val host = hostWithListeners() ?: return
         restoringTabs = true
-        restoreTabAt(host, saved, 0, null, null)
+        restoreTabAt(host, toolWindowRecords, 0, null, null)
+    }
+
+    fun restoreEditorTab(record: TuiSessionRecord): Any? {
+        val config = configFor(record.appName)
+        if (config == null) {
+            thisLogger().info("Not restoring editor tab '${record.title}': app '${record.appName}' is no longer configured")
+            forgetAwaitingEditorRecord(record)
+            return null
+        }
+        if (!projectIsTrusted()) return null
+        val host = hostWithListeners() ?: return null
+        restoreSavedTabs()
+        val title = uniqueSessionTitle(
+            record.title.ifBlank { record.appName },
+            tabsBySessionId.values.mapTo(mutableSetOf()) { it.title },
+        )
+        val container = Wrapper()
+        val handle = host.createEditorTab(container, title)
+        launchingEditorSlotLivesInEditor[handle] = true
+        val tabUuid = record.tabUuid ?: newTabUuid()
+        openNewTab(
+            host = host,
+            sessionId = newSessionId(record.appName),
+            appName = record.appName,
+            command = config.command,
+            title = title,
+            intent = LaunchIntent.Restore(tabUuid, record.copy(tabUuid = tabUuid)),
+            editorSlot = EditorSlot(handle, container),
+            onOpened = {},
+            onFailed = {
+                launchingEditorSlotLivesInEditor.remove(handle)
+                forgetAwaitingEditorRecord(record)
+                host.releaseEditorTab(handle)
+            },
+        )
+        return handle
+    }
+
+    fun forgetEditorTabClosedBeforeItWasShown(record: TuiSessionRecord) {
+        if (projectIsClosing) return
+        forgetAwaitingEditorRecord(record)
+        cleanUpAgentSessionOf(record)
+    }
+
+    private fun forgetAwaitingEditorRecord(record: TuiSessionRecord) {
+        val tabUuid = record.tabUuid ?: return
+        if (editorRecordsAwaitingTheirTab.remove(tabUuid) != null) recordOpenTabs()
+    }
+
+    private fun cleanUpAgentSessionOf(record: TuiSessionRecord) {
+        if (!agentSessionsAreResumed()) return
+        val tabUuid = record.tabUuid ?: return
+        val kind = AgentCliKind.entries.firstOrNull { it.name == record.agentCliKind } ?: return
+        val projectPath = project.basePath ?: return
+        val command = configFor(record.appName)?.command?.let { AgentCommand.parse(it) }
+        val strategy = agentSessionStrategies(kind, agentSessionEnvironment(), command?.bringsItsOwnHookFlag != true)
+        val identity = TabIdentity(tabUuid, projectPath, project.locationHash)
+        scope.launch { strategy.cleanUp(identity) }
     }
 
     private fun deleteAgentStateOfTabsThatAreGone(saved: List<TuiSessionRecord>) {
@@ -403,6 +487,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     }
 
     fun tabMovedToEditor(handle: Any) {
+        if (handle in launchingEditorSlotLivesInEditor) launchingEditorSlotLivesInEditor[handle] = true
         val tab = tabFor(handle) ?: return
         tab.livesInEditor = true
         sessionIdsRemovedForDrag.remove(tab.sessionId)
@@ -629,11 +714,15 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         title: String,
         intent: LaunchIntent,
         index: Int = APPEND_TAB,
+        editorSlot: EditorSlot? = null,
         onOpened: ((OpenTab) -> Unit)? = null,
         onFailed: (() -> Unit)? = null,
     ) {
         val disposable = Disposer.newCheckedDisposable("TUILaunch-$sessionId")
         pendingLaunchesBySessionId[sessionId] = PendingLaunch(appName, disposable)
+        if (editorSlot != null) {
+            host.attachSession(editorSlot.handle, disposable) { editorTabRecordOf(sessionId, intent.tabUuid) }
+        }
         val pending = PendingTab(
             host = host,
             sessionId = sessionId,
@@ -646,7 +735,9 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             onFailed = onFailed,
             disposable = disposable,
             setup = agentSetupFor(command, intent),
+            editorSlot = editorSlot,
         )
+        if (editorSlot != null) Disposer.register(disposable) { forgetEditorTabClosedWhileLaunching(pending) }
         if (pending.setup?.strategy?.launchWaitsForPreparation != true) {
             startTheSession(pending)
             return
@@ -708,8 +799,18 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     existingPromptDocument = existingPromptDocument,
                     screenText = screenTextOf(session, AgentCommand.parse(pending.command).kind),
                 )
-                val layout = newTabLayout(host, appName, session, promptBox)
-                val handle = host.addTab(layout.component, title, disposable, pending.index)
+                val slot = pending.editorSlot
+                val livesInEditor = slot != null && launchingEditorSlotLivesInEditor.remove(slot.handle) == true
+                val layout = newTabLayout(host, appName, session, promptBox, livesInEditor)
+                val container = slot?.container ?: Wrapper()
+                container.setContent(layout.component)
+                val handle = slot?.handle ?: host.addTab(
+                    container,
+                    title,
+                    disposable,
+                    { editorTabRecordOf(sessionId, intent.tabUuid) },
+                    pending.index,
+                )
                 val tab = OpenTab(
                     sessionId = sessionId,
                     appName = appName,
@@ -718,6 +819,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     layout = layout,
                     promptBox = promptBox,
                     handle = handle,
+                    container = container,
                     disposable = disposable,
                     openedFromTui = isTuiFocused(),
                     tabUuid = intent.tabUuid,
@@ -728,8 +830,10 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                     commandWasDecorated = agentLaunch.commandWasDecorated,
                     agentSessionWasRequested = agentLaunch.agentSessionWasRequested,
                     agentStrategy = agentLaunch.strategy,
+                    livesInEditor = livesInEditor,
                 )
                 tabsBySessionId[sessionId] = tab
+                editorRecordsAwaitingTheirTab.remove(intent.tabUuid)
                 Disposer.register(disposable) { forgetEditorTabClosedByTheUser(tab) }
                 layout.onPromptBoxPercentChanged = { percent -> onPromptBoxPercentChanged(tab, percent) }
                 session.onTerminated { onSessionTerminated(host, tab) }
@@ -745,6 +849,17 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
                 pending.onFailed?.invoke()
             },
         )
+    }
+
+    private fun forgetEditorTabClosedWhileLaunching(pending: PendingTab) {
+        val theLaunchWasStillRunning = pendingLaunchesBySessionId[pending.sessionId]?.disposable === pending.disposable
+        if (!theLaunchWasStillRunning || projectIsClosing) return
+        pendingLaunchesBySessionId.remove(pending.sessionId)
+        pending.editorSlot?.let { launchingEditorSlotLivesInEditor.remove(it.handle) }
+        val record = (pending.intent as? LaunchIntent.Restore)?.record ?: return
+        forgetAwaitingEditorRecord(record)
+        val setup = pending.setup ?: return
+        scope.launch { setup.strategy.cleanUp(setup.tab) }
     }
 
     private fun releaseTheServerOf(pending: PendingTab) {
@@ -900,12 +1015,16 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             closeTab(tab.sessionId)
             return
         }
-        val position = host.orderedHandles().indexOf(tab.handle)
-        val theTabWasSelected = host.activeTab() == tab.handle
         thisLogger().info(
             "Reopened TUI tab '${tab.title}' ended right after launch; starting it again as a new tab",
         )
         cleanUpAgentSession(tab)
+        if (tab.livesInEditor) {
+            relaunchInTheSameEditorTab(host, tab, config)
+            return
+        }
+        val position = host.orderedHandles().indexOf(tab.handle)
+        val theTabWasSelected = host.activeTab() == tab.handle
         closeTab(tab.sessionId)
         openNewTab(
             host = host,
@@ -917,6 +1036,28 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             index = position,
             onOpened = { relaunched -> if (theTabWasSelected) host.selectTab(relaunched.handle) },
         )
+    }
+
+    private fun relaunchInTheSameEditorTab(host: IdeToolWindowHost, tab: OpenTab, config: TuiAppConfig) {
+        forgetTab(tab.sessionId)
+        launchingEditorSlotLivesInEditor[tab.handle] = true
+        openNewTab(
+            host = host,
+            sessionId = newSessionId(tab.appName),
+            appName = tab.appName,
+            command = config.command,
+            title = tab.title,
+            intent = LaunchIntent.Fresh(newTabUuid()),
+            editorSlot = EditorSlot(tab.handle, tab.container),
+            onOpened = {},
+            onFailed = {
+                launchingEditorSlotLivesInEditor.remove(tab.handle)
+                host.releaseEditorTab(tab.handle)
+            },
+        )
+        tab.layout.promptBoxVisible = false
+        Disposer.dispose(tab.disposable)
+        recordOpenTabs()
     }
 
     private fun cleanUpAgentSession(tab: OpenTab) {
@@ -948,13 +1089,14 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         appName: String,
         session: TerminalSession,
         promptBox: PromptBox,
+        livesInEditor: Boolean,
     ): TuiTabLayout {
         val promptBoxVisible = promptBoxPreferences.visibilityFor(appName)
         if (promptBoxVisible) showPromptBoxEditor(promptBox)
         return TuiTabLayout(
             terminal = session.component,
             promptBox = promptBox.component,
-            dockedHorizontally = host.isDockedHorizontally(),
+            dockedHorizontally = !livesInEditor && host.isDockedHorizontally(),
             promptBoxPercent = promptBoxPreferences.percentFor(appName),
             promptBoxVisible = promptBoxVisible,
         )
@@ -1114,6 +1256,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     }
 
     private fun onTabAdded(host: IdeToolWindowHost, handle: Any) {
+        if (handle in launchingEditorSlotLivesInEditor) launchingEditorSlotLivesInEditor[handle] = false
         val tab = tabFor(handle)
         if (tab != null) {
             sessionIdsRemovedForDrag.remove(tab.sessionId)
@@ -1180,9 +1323,12 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     }
 }
 
+internal val TUI_PROJECT_IS_CLOSING = Key.create<Boolean>("TUILaunch.projectIsClosing")
+
 class PrepareTuiSessionsForProjectClose : ProjectCloseListener {
 
     override fun projectClosing(project: Project) {
+        project.putUserData(TUI_PROJECT_IS_CLOSING, true)
         project.getServiceIfCreated(TuiAppLaunchService::class.java)?.prepareForProjectClose()
     }
 }

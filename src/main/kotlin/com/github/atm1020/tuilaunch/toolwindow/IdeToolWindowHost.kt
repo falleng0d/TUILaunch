@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch.toolwindow
 
+import com.github.atm1020.tuilaunch.model.TuiSessionRecord
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.IdeActions
@@ -49,9 +50,14 @@ private const val FOCUS_OWNER_PROPERTY = "focusOwner"
 
 const val APPEND_TAB = -1
 
-private val TUI_SESSION_LIFETIME = Key.create<CheckedDisposable>("TUILaunch.sessionLifetime")
+private class TuiSessionMarker(val lifetime: CheckedDisposable, val record: () -> TuiSessionRecord?)
 
-internal fun Content.belongsToALiveTuiSession(): Boolean = getUserData(TUI_SESSION_LIFETIME)?.isDisposed == false
+private val TUI_SESSION = Key.create<TuiSessionMarker>("TUILaunch.session")
+
+internal fun Content.belongsToALiveTuiSession(): Boolean = getUserData(TUI_SESSION)?.lifetime?.isDisposed == false
+
+internal fun Content.tuiSessionRecord(): TuiSessionRecord? =
+    getUserData(TUI_SESSION)?.takeIf { !it.lifetime.isDisposed }?.record?.invoke()
 
 open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
 
@@ -62,12 +68,16 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
     open fun show() = requireToolWindow().show(null)
     open fun hide() = requireToolWindow().hide(null)
 
-    open fun addTab(component: JComponent, title: String, disposable: CheckedDisposable, index: Int = APPEND_TAB): Any {
+    open fun addTab(
+        component: JComponent,
+        title: String,
+        disposable: CheckedDisposable,
+        record: () -> TuiSessionRecord?,
+        index: Int = APPEND_TAB,
+    ): Any {
         val toolWindow = requireToolWindow()
-        val content = ContentFactory.getInstance().createContent(component, title, false)
-        content.isCloseable = true
-        content.putUserData(TUI_SESSION_LIFETIME, disposable)
-        Disposer.register(content, disposable)
+        val content = newContent(component, title)
+        attach(content, disposable, record)
         toolWindow.contentManager.addContent(content, index)
         return ContentTabHandle(content)
     }
@@ -84,6 +94,23 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
 
     open fun removeTab(handle: Any) {
         requireToolWindow().contentManager.removeContent(contentOf(handle), true)
+    }
+
+    open fun createEditorTab(component: JComponent, title: String): Any = ContentTabHandle(newContent(component, title))
+
+    open fun attachSession(handle: Any, disposable: CheckedDisposable, record: () -> TuiSessionRecord?) {
+        attach(contentOf(handle), disposable, record)
+    }
+
+    private fun newContent(component: JComponent, title: String): Content {
+        val content = ContentFactory.getInstance().createContent(component, title, false)
+        content.isCloseable = true
+        return content
+    }
+
+    private fun attach(content: Content, disposable: CheckedDisposable, record: () -> TuiSessionRecord?) {
+        content.putUserData(TUI_SESSION, TuiSessionMarker(disposable, record))
+        Disposer.register(content, disposable)
     }
 
     open fun selectEditorTab(handle: Any, requestFocus: Boolean) {
@@ -241,7 +268,7 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
         contentOf(handle).setDisplayName(title)
     }
 
-    private fun contentOf(handle: Any): Content = (handle as ContentTabHandle).content
+    fun contentOf(handle: Any): Content = (handle as ContentTabHandle).content
 
     private fun canResizeWindowDirectly(): Boolean = when (requireToolWindow().type) {
         ToolWindowType.FLOATING, ToolWindowType.WINDOWED -> true
