@@ -18,6 +18,8 @@ class TerminalKeyInterceptor(
     private val previousTabShortcuts: () -> List<KeyboardShortcut> = { emptyList() },
     private val onNextTab: () -> Unit = {},
     private val onPreviousTab: () -> Unit = {},
+    private val promptBoxSideShortcuts: () -> List<KeyboardShortcut> = { emptyList() },
+    private val onTogglePromptBoxSide: () -> Boolean = { false },
 ) : KeyEventDispatcher {
 
     private var lastFiredWhen = -1L
@@ -72,6 +74,9 @@ class TerminalKeyInterceptor(
             tabAction()
             return swallowHandledPress(e)
         }
+
+        val isPromptBoxSideStroke = promptBoxSideShortcuts().matchesSingleStroke(KeyStroke.getKeyStrokeForEvent(e))
+        if (isPromptBoxSideStroke && onTogglePromptBoxSide()) return swallowHandledPress(e)
 
         return leaveThePressToTheIde()
     }

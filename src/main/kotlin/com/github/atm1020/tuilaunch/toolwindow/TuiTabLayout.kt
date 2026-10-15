@@ -58,6 +58,8 @@ internal class TuiTabLayout(
         }
     }
 
+    val dockedHorizontally: Boolean get() = !splitter.orientation
+
     fun setDockedHorizontally(dockedHorizontally: Boolean) {
         splitter.orientation = !dockedHorizontally
     }

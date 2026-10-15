@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.action.PROMPT_BOX_BESIDE_TERMINAL_ACTION_ID
 import com.github.atm1020.tuilaunch.action.SendPromptBoxAction
 import com.github.atm1020.tuilaunch.prompt.PROMPT_BOX_DATA_KEY
 import com.github.atm1020.tuilaunch.prompt.PromptBox
@@ -146,11 +147,11 @@ class SendPromptBoxActionTest : BasePlatformTestCase() {
         )
     }
 
-    fun testSendingIsTheOnlyActionOfThisPluginThatShipsWithAKeystroke() {
+    fun testOnlySendingAndThePromptBoxSideShipWithAKeystroke() {
         val actionsWithAKeystroke = declaredActions()
             .filter { it.getChildren("keyboard-shortcut").isNotEmpty() }
             .map { it.getAttributeValue("id") }
 
-        assertEquals(listOf(SEND_PROMPT_BOX_ACTION_ID), actionsWithAKeystroke)
+        assertEquals(listOf(SEND_PROMPT_BOX_ACTION_ID, PROMPT_BOX_BESIDE_TERMINAL_ACTION_ID), actionsWithAKeystroke)
     }
 }

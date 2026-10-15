@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch.terminal
 
+import com.github.atm1020.tuilaunch.action.PROMPT_BOX_BESIDE_TERMINAL_ACTION_ID
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
@@ -33,6 +34,7 @@ class JediTermSessionFactory(
     private val prefixCommandActions: () -> Map<Int, () -> Unit> = { emptyMap() },
     private val onNextTab: () -> Unit = {},
     private val onPreviousTab: () -> Unit = {},
+    private val onTogglePromptBoxSide: () -> Boolean = { false },
 ) : TerminalSessionFactory {
     override fun create(parent: Disposable, command: String, environment: Map<String, String>): TerminalSession {
         val shellPath = TerminalProjectOptionsProvider.getInstance(project).shellPath
@@ -123,6 +125,8 @@ class JediTermSessionFactory(
             previousTabShortcuts = { currentKeyboardShortcutsOf("PreviousTab") },
             onNextTab = onNextTab,
             onPreviousTab = onPreviousTab,
+            promptBoxSideShortcuts = { currentKeyboardShortcutsOf(PROMPT_BOX_BESIDE_TERMINAL_ACTION_ID) },
+            onTogglePromptBoxSide = onTogglePromptBoxSide,
         )
         session.spendKeyPressesWith(dispatcher::spendKeyPress)
         val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()

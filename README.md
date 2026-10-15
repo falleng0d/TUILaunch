@@ -51,8 +51,15 @@ TUILaunch remembers the last tool window size used by each app and restores it w
 ### Move a session into an editor tab
 
 Right-click a TUILaunch tab and choose **Move to Editor**, or drag the tab onto the editor area, to keep the running
-session in an editor tab instead. The process, its scrollback and the prompt box move with it; the prompt box sits under
-the terminal there. The editor tab can be moved to another split or window like any other tab.
+session in an editor tab instead. The process, its scrollback and the prompt box move with it. The editor tab can be
+moved to another split or window like any other tab.
+
+The prompt box sits under the terminal in an editor tab. <kbd>Cmd</kbd> + <kbd>Alt</kbd> + <kbd>\\</kbd> on macOS keymaps,
+<kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>\\</kbd> on the others, or **Prompt Box Beside Terminal** on the editor tab's
+right-click menu moves it beside the terminal and back. The key works from the terminal, the prompt box or another
+editor, and acts on the editor session that had the focus last. The side you pick is kept for the next session you move
+into the editor. Change the key in <kbd>Settings/Preferences</kbd> > <kbd>Keymap</kbd> under
+`TUILaunch.TogglePromptBoxBesideTerminal`.
 
 To put it back, right-click the editor tab and choose **Move to TUILaunch**, or drag the editor tab onto the TUILaunch
 tool window. **Rename Session** on the same menu renames the editor tab. Closing the editor tab ends the session, the
@@ -417,6 +424,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `Disposer.register(parent, child)` moves an already registered child to the new parent, which is how a session's lifetime follows it between a `Content` and the service.
 - `FileEditorManagerKeys.FORBID_TAB_SPLIT` turns a second open of a file into a move by closing it in its old window first without `CLOSING_TO_REOPEN`, so a `FileEditor.dispose` cannot tell a move from a close; a session editor only ends its session when the file is still not open one event-queue turn later.
 - `EditorWindow.split` ignores `FORBID_TAB_SPLIT` and opens a second copy of a session file, and 2026.2 builds that copy's editor a few event-queue turns later; the newest shown copy takes the terminal and closes the others, but never one whose editor is not built yet, because the old window re-shows during the split before the new editor exists.
+- With **Override IDE shortcuts** on, `JBTerminalPanel` consumes every keystroke not bound to its fixed `ACTIONS_TO_SKIP` list before `IdeKeyEventDispatcher` sees it, so the prompt box side key is matched against the keymap in `TerminalKeyInterceptor`, like the tab switching keys.
 - Swing fires `HierarchyEvent.SHOWING_CHANGED` from inside `addNotify`, so a component added to the panel from that listener gets `addNotify` twice; `OnePixelDivider` then registers its glass pane listener twice, leaves one behind with a null glass pane once removed, and that listener throws on every mouse event and swallows drag releases. The session editor moves the terminal one event later.
 - An editor tab dropped on a registered `DockContainer` is closed in its window with `CLOSING_TO_REOPEN` set before `DockContainer.add` runs; holding Ctrl makes it a copy that is not closed at all.
 - `DockManagerImpl` hit-tests the screen rectangle of every registered `DockContainer`, including a hidden tool window's stale bounds, so the TUILaunch dock container is registered only while the tool window component is showing.

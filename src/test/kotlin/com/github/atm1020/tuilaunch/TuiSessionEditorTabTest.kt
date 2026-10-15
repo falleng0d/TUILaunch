@@ -42,6 +42,7 @@ class TuiSessionEditorTabTest : BasePlatformTestCase() {
             restoreOpenTabs = false
             promptBoxVisible = false
             rememberPromptBoxVisibilityPerApp = false
+            editorPromptBoxBesideTerminal = false
         }
     }
 
@@ -250,5 +251,50 @@ class TuiSessionEditorTabTest : BasePlatformTestCase() {
         assertEquals("reviewer", file.name)
         assertEquals("reviewer", opened.service.sessionTitleOf(file))
         assertEquals(listOf("reviewer"), savedTitles())
+    }
+
+    fun testThePromptBoxCanSitBesideTheTerminalOfAnEditorSession() {
+        val opened = launch("claude", "codex")
+        val file = opened.moveToEditor(0)
+        assertEquals(false, opened.service.isPromptBoxBesideTerminal())
+
+        opened.service.setPromptBoxBesideTerminal(true)
+
+        assertEquals(true, opened.service.isPromptBoxBesideTerminal(file))
+        assertTrue(TuiLauncherSettings.getInstance().state.editorPromptBoxBesideTerminal)
+    }
+
+    fun testTheNextSessionMovedIntoTheEditorKeepsTheChosenSide() {
+        val opened = launch("claude", "codex")
+        opened.moveToEditor(0)
+        opened.service.setPromptBoxBesideTerminal(true)
+
+        val second = opened.moveToEditor(0)
+
+        assertEquals(true, opened.service.isPromptBoxBesideTerminal(second))
+    }
+
+    fun testThePromptBoxSideIsOnlyForSessionsInTheEditor() {
+        val opened = launch("claude", "codex")
+        val file = opened.moveToEditor(0)
+        opened.service.onFocusOwnerChanged(opened.sessions[1].component)
+
+        assertNull(opened.service.isPromptBoxBesideTerminal())
+        opened.service.setPromptBoxBesideTerminal(true)
+
+        assertEquals(false, opened.service.isPromptBoxBesideTerminal(file))
+        assertFalse(TuiLauncherSettings.getInstance().state.editorPromptBoxBesideTerminal)
+    }
+
+    fun testTheTerminalShortcutTogglesOnlyAnEditorSessionsPromptBoxSide() {
+        val opened = launch("claude", "codex")
+        val file = opened.moveToEditor(0)
+
+        assertTrue(opened.service.togglePromptBoxBesideTerminal())
+        assertEquals(true, opened.service.isPromptBoxBesideTerminal(file))
+
+        opened.service.onFocusOwnerChanged(opened.sessions[1].component)
+        assertFalse(opened.service.togglePromptBoxBesideTerminal())
+        assertEquals(true, opened.service.isPromptBoxBesideTerminal(file))
     }
 }

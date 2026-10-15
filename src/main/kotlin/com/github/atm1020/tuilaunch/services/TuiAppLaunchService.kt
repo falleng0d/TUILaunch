@@ -85,6 +85,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         prefixCommandActions = { prefixCommandActions() },
         onNextTab = { nextTuiTab() },
         onPreviousTab = { previousTuiTab() },
+        onTogglePromptBoxSide = { togglePromptBoxBesideTerminal() },
     )
     var host: IdeToolWindowHost? = null
     var editorHost: SessionEditorHost = SessionEditorHost(project)
@@ -1129,7 +1130,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         sessionIdsRemovedForDrag.remove(tab.sessionId)
         if (host.isTabAttachedToToolWindow(handle)) host.removeTab(handle)
         if (noSessionIsInTheToolWindow()) host.hide()
-        tab.layout.setDockedHorizontally(false)
+        tab.layout.setDockedHorizontally(TuiLauncherSettings.getInstance().state.editorPromptBoxBesideTerminal)
         lastFocusedSessionId = tab.sessionId
         editorHost.open(file, window)
         recordOpenTabs()
@@ -1168,6 +1169,27 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     }
 
     fun sessionTitleOf(file: TuiSessionFile): String? = tabIn(file)?.title
+
+    fun isPromptBoxBesideTerminal(file: TuiSessionFile? = null): Boolean? =
+        editorSessionFor(file)?.layout?.dockedHorizontally
+
+    fun setPromptBoxBesideTerminal(beside: Boolean, file: TuiSessionFile? = null) {
+        val tab = editorSessionFor(file) ?: return
+        TuiLauncherSettings.getInstance().state.editorPromptBoxBesideTerminal = beside
+        tab.layout.setDockedHorizontally(beside)
+    }
+
+    fun togglePromptBoxBesideTerminal(): Boolean {
+        val beside = isPromptBoxBesideTerminal() ?: return false
+        setPromptBoxBesideTerminal(!beside)
+        return true
+    }
+
+    private fun editorSessionFor(file: TuiSessionFile?): OpenTab? {
+        if (file != null) return tabIn(file)?.takeIf { it.sessionId !in closingSessions }
+        val host = resolveHost() ?: return null
+        return activeSession(host)?.takeIf { it.editorFile != null }
+    }
 
     override fun dispose() = Unit
 

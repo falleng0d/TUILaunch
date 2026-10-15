@@ -140,7 +140,7 @@
                 description="Send the PROMPT.md prompt block under the cursor to the active TUI session">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
-        <!-- The one action here that ships with a default keystroke, because the prompt box needs a
+        <!-- Ships with a default keystroke because the prompt box needs a
              send key the way any chat input does. control ENTER is already bound in $default to
              EditorSplitLine, ViewSource, SplitChooser.Duplicate, Console.Execute.Multiline and
              DirDiffMenu.SynchronizeDiff.All. Sharing it is safe: IdeKeyEventDispatcher collects the
@@ -218,6 +218,19 @@
                 text="Rename Session"
                 description="Rename this TUI session's editor tab">
             <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
+        </action>
+        <!-- Ships with default keystrokes that no shipped keymap binds, Cmd+Alt+\ on macOS and
+             Ctrl+Alt+\ elsewhere, and is only enabled while a TUI session in an editor tab is the
+             target, so it does not take the keystroke from anything else. -->
+        <action id="TUILaunch.TogglePromptBoxBesideTerminal"
+                class="com.github.atm1020.tuilaunch.action.TogglePromptBoxBesideTerminalAction"
+                text="Prompt Box Beside Terminal"
+                description="Show the prompt box of a TUI session in an editor tab beside its terminal instead of under it">
+            <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="control alt BACK_SLASH"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt BACK_SLASH"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta alt BACK_SLASH"/>
         </action>
     </actions>
 </idea-plugin>

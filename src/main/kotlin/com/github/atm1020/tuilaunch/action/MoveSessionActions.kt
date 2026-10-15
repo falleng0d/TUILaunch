@@ -9,10 +9,13 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.project.DumbAwareToggleAction
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowContextMenuActionBase
 import com.intellij.ui.content.Content
 import java.awt.Component
+
+internal const val PROMPT_BOX_BESIDE_TERMINAL_ACTION_ID = "TUILaunch.TogglePromptBoxBesideTerminal"
 
 class MoveSessionToEditorAction : ToolWindowContextMenuActionBase() {
 
@@ -67,6 +70,25 @@ class RenameEditorSessionAction : DumbAwareAction() {
         e.inputEvent?.component?.takeIf { it.isShowing }?.let { return it }
         return file.component
     }
+}
+
+class TogglePromptBoxBesideTerminalAction : DumbAwareToggleAction() {
+
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+    override fun update(e: AnActionEvent) {
+        super.update(e)
+        e.presentation.isEnabledAndVisible = besideTerminal(e) != null
+    }
+
+    override fun isSelected(e: AnActionEvent): Boolean = besideTerminal(e) == true
+
+    override fun setSelected(e: AnActionEvent, state: Boolean) {
+        e.project?.service<TuiAppLaunchService>()?.setPromptBoxBesideTerminal(state, sessionFileOf(e))
+    }
+
+    private fun besideTerminal(e: AnActionEvent): Boolean? =
+        e.project?.service<TuiAppLaunchService>()?.isPromptBoxBesideTerminal(sessionFileOf(e))
 }
 
 private fun sessionFileOf(e: AnActionEvent): TuiSessionFile? =

@@ -32,6 +32,7 @@ class TuiLauncherSettings : PersistentStateComponent<TuiLauncherSettings.State> 
         var rememberPromptBoxSizePerApp: Boolean = false,
         var focusTuiAfterPromptBoxSend: Boolean = false,
         var hidePromptBoxAfterSend: Boolean = false,
+        var editorPromptBoxBesideTerminal: Boolean = false,
         var promptBoxCompletionSource: PromptBoxCompletionSource = PromptBoxCompletionSource.JETBRAINS_AI,
         var copilotLanguageServerPath: String = "",
         var copilotPromptHistoryContext: Boolean = true,

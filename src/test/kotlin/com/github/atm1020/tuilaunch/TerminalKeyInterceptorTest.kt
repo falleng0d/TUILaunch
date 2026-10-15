@@ -417,4 +417,34 @@ class TerminalKeyInterceptorTest {
         assertTrue(dispatcher.dispatchKeyEvent(event))
         assertEquals(1, nextTabCount)
     }
+
+    @Test
+    fun promptBoxSideShortcutIsSwallowedWhenTheSessionTogglesIt() {
+        var toggles = 0
+        val dispatcher = TerminalKeyInterceptor(
+            terminalComponent = terminal,
+            promptBoxSideShortcuts = { listOf(KeyboardShortcut(KeyStroke.getKeyStroke("control alt BACK_SLASH"), null)) },
+            onTogglePromptBoxSide = { toggles++; true },
+        )
+
+        val press = keyPress(KeyEvent.VK_BACK_SLASH, KeyEvent.CTRL_DOWN_MASK or KeyEvent.ALT_DOWN_MASK)
+
+        assertTrue(dispatcher.dispatchKeyEvent(press))
+        assertTrue(press.isConsumed)
+        assertEquals(1, toggles)
+    }
+
+    @Test
+    fun promptBoxSideShortcutReachesTheTerminalWhenNothingToggles() {
+        val dispatcher = TerminalKeyInterceptor(
+            terminalComponent = terminal,
+            promptBoxSideShortcuts = { listOf(KeyboardShortcut(KeyStroke.getKeyStroke("control alt BACK_SLASH"), null)) },
+            onTogglePromptBoxSide = { false },
+        )
+
+        val press = keyPress(KeyEvent.VK_BACK_SLASH, KeyEvent.CTRL_DOWN_MASK or KeyEvent.ALT_DOWN_MASK)
+
+        assertFalse(dispatcher.dispatchKeyEvent(press))
+        assertFalse(press.isConsumed)
+    }
 }
