@@ -13,13 +13,18 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.EditorKind
+import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.markup.RangeHighlighter
+import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.TestActionEvent
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.awt.event.KeyEvent
 
 private const val REFRESH_TIMEOUT_MILLIS = 30_000L
+
+private val registeredEditorFactoryListeners =
+    ExtensionPointName<EditorFactoryListener>("com.intellij.editorFactoryListener")
 
 class PromptGutterInstallerTest : BasePlatformTestCase() {
 
@@ -33,8 +38,7 @@ class PromptGutterInstallerTest : BasePlatformTestCase() {
 
     override fun setUp() {
         super.setUp()
-        installer = PromptGutterInstaller()
-        EditorFactory.getInstance().addEditorFactoryListener(installer, testRootDisposable)
+        installer = registeredEditorFactoryListeners.findExtensionOrFail(PromptGutterInstaller::class.java)
         settingsState = TuiLauncherSettings.getInstance().state
         submitPromptOnSendBeforeTest = settingsState.submitPromptOnSend
         appendPromptSeparatorBeforeTest = settingsState.appendPromptSeparatorOnSend
