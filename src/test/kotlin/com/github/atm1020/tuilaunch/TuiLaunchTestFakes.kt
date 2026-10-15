@@ -271,6 +271,14 @@ internal class RecordingSessionStrategy(
         recorded.add("restoreArguments")
         return arguments
     }
+
+    override suspend fun cleanUp(tab: TabIdentity) {
+        recorded.add("cleanUp")
+    }
+
+    override fun tabClosed(tab: TabIdentity) {
+        recorded.add("tabClosed")
+    }
 }
 
 internal class FakeOpenCodeServer(
@@ -445,6 +453,8 @@ internal class FakeHost : IdeToolWindowHost(null) {
     private val tabsRemovedForDrag = mutableSetOf<Any>()
     private val disposableByTab = mutableMapOf<Any, CheckedDisposable>()
     private val componentByTab = mutableMapOf<Any, JComponent>()
+    val editorTabs = mutableListOf<Any>()
+    var selectedEditorTab: Any? = null
 
     override fun isVisible(): Boolean = visible
     override fun isPinned(): Boolean = pinned
@@ -457,15 +467,13 @@ internal class FakeHost : IdeToolWindowHost(null) {
         visible = false
     }
 
-    override fun addTab(component: JComponent, title: String, disposable: Disposable, index: Int): Any {
+    override fun addTab(component: JComponent, title: String, disposable: CheckedDisposable, index: Int): Any {
         val handle = Any()
         tabs.add(if (index in tabs.indices) index else tabs.size, handle)
         titles.add(title)
         componentByTab[handle] = component
-        (disposable as? CheckedDisposable)?.let {
-            disposables.add(it)
-            disposableByTab[handle] = it
-        }
+        disposables.add(disposable)
+        disposableByTab[handle] = disposable
         tabAdded?.invoke(handle)
         if (selected == null) {
             selected = handle
@@ -514,6 +522,34 @@ internal class FakeHost : IdeToolWindowHost(null) {
         val handle = detachTabForDrag(from)
         disposableByTab[handle]?.let { Disposer.dispose(it) }
         tabsRemovedForDrag.remove(handle)
+    }
+
+    fun moveTabToEditor(from: Int, presentInTheEditor: (Any) -> Unit): Any {
+        val handle = detachTabForDrag(from)
+        presentInTheEditor(handle)
+        tabsRemovedForDrag.remove(handle)
+        editorTabs.add(handle)
+        return handle
+    }
+
+    fun returnTabFromEditor(handle: Any) {
+        editorTabs.remove(handle)
+        tabs.add(handle)
+        tabAdded?.invoke(handle)
+        selectTab(handle)
+    }
+
+    fun closeEditorTab(handle: Any) {
+        editorTabs.remove(handle)
+        disposableByTab[handle]?.let { Disposer.dispose(it) }
+    }
+
+    override fun selectEditorTab(handle: Any, requestFocus: Boolean) {
+        selectedEditorTab = handle
+    }
+
+    override fun releaseEditorTab(handle: Any) {
+        closeEditorTab(handle)
     }
 
     private fun detachTabForDrag(from: Int): Any {

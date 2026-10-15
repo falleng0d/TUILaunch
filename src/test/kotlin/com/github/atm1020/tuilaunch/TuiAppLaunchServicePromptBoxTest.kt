@@ -7,7 +7,7 @@ import com.github.atm1020.tuilaunch.prompt.PromptBoxPanel
 import com.github.atm1020.tuilaunch.prompt.PromptBox
 import com.github.atm1020.tuilaunch.prompt.promptBoxFocusRequest
 import com.github.atm1020.tuilaunch.prompt.promptBoxHoldsFocus
-import com.github.atm1020.tuilaunch.services.ReleasePromptBoxEditorsOnProjectClose
+import com.github.atm1020.tuilaunch.services.PrepareTuiSessionsForProjectClose
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.github.atm1020.tuilaunch.terminal.TerminalRow
@@ -647,7 +647,7 @@ class TuiAppLaunchServicePromptBoxTest : BasePlatformTestCase() {
             .getChildren("listener")
             .single { it.getAttributeValue("topic") == PROJECT_CLOSE_TOPIC }
 
-        assertEquals(ReleasePromptBoxEditorsOnProjectClose::class.java.name, listener.getAttributeValue("class"))
+        assertEquals(PrepareTuiSessionsForProjectClose::class.java.name, listener.getAttributeValue("class"))
     }
 
     fun testClosingATabHidesThePromptBoxBeforeItsEditorIsReleased() {

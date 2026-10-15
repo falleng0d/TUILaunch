@@ -1,13 +1,17 @@
 package com.github.atm1020.tuilaunch.toolwindow
 
-import com.intellij.openapi.Disposable
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.Key
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowAnchor
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.wm.ToolWindowType
 import com.intellij.openapi.wm.ex.ToolWindowEx
 import com.intellij.openapi.wm.ex.ToolWindowManagerListener
+import com.intellij.openapi.wm.impl.tabInEditor.ToolWindowEditorTabFile
+import com.intellij.openapi.wm.impl.tabInEditor.ToolWindowEditorTabManager
 import com.intellij.ui.content.Content
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.content.ContentManagerEvent
@@ -38,6 +42,10 @@ private const val SCREEN_MARGIN = 80
 
 const val APPEND_TAB = -1
 
+private val TUI_SESSION_LIFETIME = Key.create<CheckedDisposable>("TUILaunch.sessionLifetime")
+
+internal fun Content.belongsToALiveTuiSession(): Boolean = getUserData(TUI_SESSION_LIFETIME)?.isDisposed == false
+
 open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
 
     open fun isVisible(): Boolean = requireToolWindow().isVisible
@@ -47,10 +55,11 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
     open fun show() = requireToolWindow().show(null)
     open fun hide() = requireToolWindow().hide(null)
 
-    open fun addTab(component: JComponent, title: String, disposable: Disposable, index: Int = APPEND_TAB): Any {
+    open fun addTab(component: JComponent, title: String, disposable: CheckedDisposable, index: Int = APPEND_TAB): Any {
         val toolWindow = requireToolWindow()
         val content = ContentFactory.getInstance().createContent(component, title, false)
         content.isCloseable = true
+        content.putUserData(TUI_SESSION_LIFETIME, disposable)
         Disposer.register(content, disposable)
         toolWindow.contentManager.addContent(content, index)
         return ContentTabHandle(content)
@@ -68,6 +77,24 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
 
     open fun removeTab(handle: Any) {
         requireToolWindow().contentManager.removeContent(contentOf(handle), true)
+    }
+
+    open fun selectEditorTab(handle: Any, requestFocus: Boolean) {
+        val project = requireToolWindow().project
+        val file = editorTabFileOf(contentOf(handle)) ?: return
+        FileEditorManager.getInstance(project).openFile(file, requestFocus)
+    }
+
+    open fun releaseEditorTab(handle: Any) {
+        Disposer.dispose(contentOf(handle))
+    }
+
+    private fun editorTabFileOf(content: Content): ToolWindowEditorTabFile? {
+        val toolWindow = requireToolWindow()
+        val tabManager = ToolWindowEditorTabManager.getInstance(toolWindow.project)
+        return FileEditorManager.getInstance(toolWindow.project).openFiles
+            .filterIsInstance<ToolWindowEditorTabFile>()
+            .firstOrNull { it.toolWindowId == toolWindow.id && tabManager.getSession(it)?.content === content }
     }
 
     open fun currentSize(): ToolWindowSize? {

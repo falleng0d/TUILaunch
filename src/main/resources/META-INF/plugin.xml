@@ -47,13 +47,22 @@
                     canCloseContents="true"
                     icon="org.jetbrains.plugins.terminal.TerminalIcons.OpenTerminal_13x13"
                     factoryClass="com.github.atm1020.tuilaunch.toolwindow.TuiLaunchToolWindowFactory"/>
+        <!-- The platform reads this key with a false fallback; a plugin default takes precedence over the one in
+             the platform's registry.properties, so tool window tabs can always move to the editor. -->
+        <registryKey key="toolwindow.open.tab.in.editor"
+                     defaultValue="true"
+                     description="Lets tool window tabs, TUILaunch sessions included, move into editor tabs"/>
+        <toolWindowEditorTabSupport key="TUILaunch"
+                                    implementationClass="com.github.atm1020.tuilaunch.toolwindow.TuiLaunchEditorTabSupport"/>
     </extensions>
 
     <applicationListeners>
         <!-- projectClosing rather than a Disposable parented to the tool window content: the content
              manager is torn down after the project services, so LineStatusTrackerManager reports the
-             prompt box editor as still held on dispose (TSK-9081). -->
-        <listener class="com.github.atm1020.tuilaunch.services.ReleasePromptBoxEditorsOnProjectClose"
+             prompt box editor as still held on dispose (TSK-9081). As an application listener it also runs
+             before FileEditorManagerImpl's project-level projectClosing closes every editor, so the session
+             editor tabs released then are not taken for tabs the user closed. -->
+        <listener class="com.github.atm1020.tuilaunch.services.PrepareTuiSessionsForProjectClose"
                   topic="com.intellij.openapi.project.ProjectCloseListener"/>
     </applicationListeners>
 
