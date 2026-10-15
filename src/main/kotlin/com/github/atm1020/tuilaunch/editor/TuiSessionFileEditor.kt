@@ -18,6 +18,7 @@ import java.awt.event.HierarchyEvent
 import java.beans.PropertyChangeListener
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.SwingUtilities
 
 private const val EDITOR_TYPE_ID = "tuilaunch-session-editor"
 private const val EDITOR_NAME = "TUILaunch Session"
@@ -34,12 +35,13 @@ class TuiSessionFileEditor(
         if (file.component.parent == null) panel.add(file.component, BorderLayout.CENTER)
         panel.addHierarchyListener { event ->
             val showingChanged = event.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L
-            val noNewerCopyExists = file.newestEditor === this || file.newestEditor == null
-            if (showingChanged && panel.isShowing && file.isValid && noNewerCopyExists) takeTheSession()
+            if (showingChanged && panel.isShowing) SwingUtilities.invokeLater(::takeTheSessionIfStillShown)
         }
     }
 
-    private fun takeTheSession() {
+    private fun takeTheSessionIfStillShown() {
+        val noNewerCopyExists = file.newestEditor === this || file.newestEditor == null
+        if (!panel.isShowing || !file.isValid || !noNewerCopyExists) return
         if (file.component.parent !== panel) {
             panel.add(file.component, BorderLayout.CENTER)
             panel.revalidate()
