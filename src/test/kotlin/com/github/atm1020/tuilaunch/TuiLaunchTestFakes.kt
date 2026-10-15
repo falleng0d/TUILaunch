@@ -52,6 +52,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import java.awt.Component
 import java.awt.event.KeyEvent
 import java.nio.file.Path
 import java.util.Collections
@@ -455,6 +456,10 @@ internal class FakeHost : IdeToolWindowHost(null) {
     private val componentByTab = mutableMapOf<Any, JComponent>()
     val editorTabs = mutableListOf<Any>()
     var selectedEditorTab: Any? = null
+    val splitTabs = mutableListOf<Any>()
+    val editorTabSwitches = mutableListOf<Boolean>()
+    private var focusOwner: Component? = null
+    private var focusMoved: ((Component) -> Unit)? = null
 
     override fun isVisible(): Boolean = visible
     override fun isPinned(): Boolean = pinned
@@ -539,6 +544,27 @@ internal class FakeHost : IdeToolWindowHost(null) {
         selectTab(handle)
     }
 
+    fun returnTabFromEditorIntoASplit(handle: Any) {
+        editorTabs.remove(handle)
+        splitTabs.add(handle)
+        tabAdded?.invoke(handle)
+    }
+
+    fun moveFocusTo(component: Component?) {
+        focusOwner = component
+        component?.let { focusMoved?.invoke(it) }
+    }
+
+    override fun focusOwner(): Component? = focusOwner
+
+    override fun onFocusMoved(listener: (Component) -> Unit) {
+        focusMoved = listener
+    }
+
+    override fun selectNeighbourEditorTab(handle: Any, forward: Boolean) {
+        editorTabSwitches.add(forward)
+    }
+
     fun closeEditorTab(handle: Any) {
         editorTabs.remove(handle)
         disposableByTab[handle]?.let { Disposer.dispose(it) }
@@ -579,7 +605,7 @@ internal class FakeHost : IdeToolWindowHost(null) {
 
     override fun isTabRemovedForDrag(handle: Any): Boolean = handle in tabsRemovedForDrag
 
-    override fun isTabAttachedToToolWindow(handle: Any): Boolean = handle in tabs
+    override fun isTabAttachedToToolWindow(handle: Any): Boolean = handle in tabs || handle in splitTabs
 
     override fun currentSize(): ToolWindowSize? = size
 

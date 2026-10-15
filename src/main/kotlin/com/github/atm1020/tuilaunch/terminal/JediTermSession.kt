@@ -16,6 +16,7 @@ import org.jetbrains.plugins.terminal.TerminalProjectOptionsProvider
 import org.jetbrains.plugins.terminal.runner.LocalTerminalStartCommandBuilder
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
+import javax.swing.JComponent
 
 private const val SEND_AS_USER_INPUT = true
 
@@ -31,8 +32,8 @@ private const val BRACKETED_PASTE_END = "\u001B[201~"
 class JediTermSessionFactory(
     private val project: Project,
     private val prefixCommandActions: () -> Map<Int, () -> Unit> = { emptyMap() },
-    private val onNextTab: () -> Unit = {},
-    private val onPreviousTab: () -> Unit = {},
+    private val onNextTab: (JComponent) -> Unit = {},
+    private val onPreviousTab: (JComponent) -> Unit = {},
 ) : TerminalSessionFactory {
     override fun create(parent: Disposable, command: String, environment: Map<String, String>): TerminalSession {
         val shellPath = TerminalProjectOptionsProvider.getInstance(project).shellPath
@@ -120,8 +121,8 @@ class JediTermSessionFactory(
             sendKey = session::sendKey,
             nextTabShortcuts = { currentKeyboardShortcutsOf("NextTab") },
             previousTabShortcuts = { currentKeyboardShortcutsOf("PreviousTab") },
-            onNextTab = onNextTab,
-            onPreviousTab = onPreviousTab,
+            onNextTab = { onNextTab(session.component) },
+            onPreviousTab = { onPreviousTab(session.component) },
         )
         session.spendKeyPressesWith(dispatcher::spendKeyPress)
         val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()

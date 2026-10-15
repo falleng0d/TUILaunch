@@ -531,6 +531,10 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - Closing a tool window editor tab ends in `Content.release()`, a bare `Disposer.dispose` with no `contentRemoved`; split and window moves set `FileEditorManagerKeys.CLOSING_TO_REOPEN`, which makes `closeEditorTabFile` keep the `Content`.
 - `attachContentToFile` closes the editor tab when its `Content` is disposed, so releasing the `Content` is how plugin code closes an editor tab it owns; `removeContent` on the tool window's manager does nothing for it.
 - `FileEditorManagerImpl` closes every editor from a project-level `projectClosing` subscriber, and `ProjectCloseListener.TOPIC` reaches application-level subscribers before project-level ones, so an `<applicationListeners>` listener can flag the project close before the editor tabs release their `Content`.
+- While a classic terminal panel has the focus and "Override IDE shortcuts" is on, `JBTerminalPanel`'s `TerminalEventDispatcher` hands every press whose action is not in its `ACTIONS_TO_SKIP` list to the panel ahead of the action system; `NextTab`/`PreviousTab` are not on that list, so a terminal in an editor tab has to run the action itself, and `ActionManager.tryToExecute` with the terminal as context component switches editor tabs because `TabNavigationActionBase` navigates editor tabs whenever `ToolWindowManager.isEditorComponentActive`.
+- Return to Tool Window onto a split section adds the `Content` to that section's nested `ContentManager`, whose events reach the top-level manager only through `addRecursiveContentManagerListener`.
+- `ToolWindowEditorTabActionBase` makes `update` and `actionPerformed` final, so an `EditorTabPopupMenu` action for a tool window editor tab cannot be a `ToggleAction`; `Toggleable.setSelected` on the presentation gives it the check mark instead.
+- `FileEditorManager.getSelectedTextEditor` only looks at the current editor window, so it is null while a tool window editor tab is selected there; `FileEditorManagerImpl.getSelectionHistory` still lists the files selected before it.
 
 ---
 Plugin based on the [IntelliJ Platform Plugin Template][template].

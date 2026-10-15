@@ -10,6 +10,9 @@ import com.intellij.openapi.wm.impl.tabInEditor.ToolWindowEditorTabSupport
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.toolWindow.ToolWindowHeadlessManagerImpl
 import com.intellij.ui.content.ContentFactory
+import com.intellij.ui.content.ContentManager
+import com.intellij.ui.content.TabbedPaneContentUI
+import com.intellij.ui.content.impl.ContentManagerImpl
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.take
@@ -48,6 +51,29 @@ class TuiLaunchEditorTabSupportTest : BasePlatformTestCase() {
         } finally {
             toolWindow.contentManager.removeContent(sessionContent, true)
             Disposer.dispose(foreignContent)
+        }
+    }
+
+    fun testATabReturnedIntoASplitSectionIsReportedAsAdded() {
+        val contentFactory = ContentFactory.getInstance()
+        val topLevelManager = contentFactory.createContentManager(TabbedPaneContentUI(), true, project) as ContentManagerImpl
+        val splitManager = contentFactory.createContentManager(TabbedPaneContentUI(), true, project) as ContentManagerImpl
+        topLevelManager.addNestedManager(splitManager)
+        val toolWindow = object : ToolWindowHeadlessManagerImpl.MockToolWindow(project) {
+            override fun getContentManager(): ContentManager = topLevelManager
+        }
+        val host = IdeToolWindowHost(toolWindow)
+        val added = mutableListOf<Any>()
+        host.onTabAdded { added.add(it) }
+        val content = contentFactory.createContent(JPanel(), "claude", false)
+        try {
+            splitManager.addContent(content)
+
+            assertEquals(listOf(host.handleFor(content)), added)
+        } finally {
+            Disposer.dispose(toolWindow.disposable)
+            Disposer.dispose(splitManager)
+            Disposer.dispose(topLevelManager)
         }
     }
 

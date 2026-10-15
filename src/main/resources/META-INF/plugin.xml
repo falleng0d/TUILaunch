@@ -200,6 +200,12 @@
                 class="com.github.atm1020.tuilaunch.action.TogglePromptBoxAction"
                 text="Toggle Prompt Box"
                 description="Show or hide the prompt box under the active TUI session"/>
+        <action id="TUILaunch.TogglePromptBoxInEditorTab"
+                class="com.github.atm1020.tuilaunch.action.TogglePromptBoxInEditorTabAction"
+                text="Toggle Prompt Box"
+                description="Show or hide the prompt box of this TUI session">
+            <add-to-group group-id="EditorTabPopupMenu" anchor="last"/>
+        </action>
         <action id="TUILaunch.RenameSession"
                 class="com.github.atm1020.tuilaunch.action.TuiRenameSessionAction"
                 text="Rename Session"

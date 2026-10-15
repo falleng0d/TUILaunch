@@ -1,5 +1,8 @@
 package com.github.atm1020.tuilaunch.toolwindow
 
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.util.CheckedDisposable
 import com.intellij.openapi.util.Disposer
@@ -16,11 +19,14 @@ import com.intellij.ui.content.Content
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
+import java.awt.Component
+import java.awt.KeyboardFocusManager
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.awt.Dimension
 import java.awt.GraphicsEnvironment
 import java.awt.Rectangle
+import java.beans.PropertyChangeListener
 import javax.swing.JComponent
 import javax.swing.SwingUtilities
 import kotlin.math.max
@@ -39,6 +45,7 @@ private class ContentTabHandle(val content: Content) {
 private const val MIN_TOOL_WINDOW_WIDTH = 400
 private const val MIN_TOOL_WINDOW_HEIGHT = 250
 private const val SCREEN_MARGIN = 80
+private const val FOCUS_OWNER_PROPERTY = "focusOwner"
 
 const val APPEND_TAB = -1
 
@@ -87,6 +94,25 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
 
     open fun releaseEditorTab(handle: Any) {
         Disposer.dispose(contentOf(handle))
+    }
+
+    open fun selectNeighbourEditorTab(handle: Any, forward: Boolean) {
+        val actionManager = ActionManager.getInstance()
+        val actionId = if (forward) IdeActions.ACTION_NEXT_TAB else IdeActions.ACTION_PREVIOUS_TAB
+        val action = actionManager.getAction(actionId) ?: return
+        actionManager.tryToExecute(action, null, contentOf(handle).component, ActionPlaces.KEYBOARD_SHORTCUT, true)
+    }
+
+    open fun focusOwner(): Component? = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+
+    open fun onFocusMoved(listener: (Component) -> Unit) {
+        val toolWindow = requireToolWindow()
+        val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+        val focusOwnerListener = PropertyChangeListener { event -> (event.newValue as? Component)?.let(listener) }
+        focusManager.addPropertyChangeListener(FOCUS_OWNER_PROPERTY, focusOwnerListener)
+        Disposer.register(toolWindow.disposable) {
+            focusManager.removePropertyChangeListener(FOCUS_OWNER_PROPERTY, focusOwnerListener)
+        }
     }
 
     private fun editorTabFileOf(content: Content): ToolWindowEditorTabFile? {
@@ -182,11 +208,17 @@ open class IdeToolWindowHost(private val toolWindow: ToolWindow?) {
     }
 
     open fun onTabAdded(listener: (Any) -> Unit) {
-        installContentManagerListener(object : ContentManagerListener {
+        val toolWindow = requireToolWindow()
+        val contentManager = toolWindow.contentManager
+        val addListener = object : ContentManagerListener {
             override fun contentAdded(event: ContentManagerEvent) {
                 listener(ContentTabHandle(event.content))
             }
-        })
+        }
+        contentManager.addRecursiveContentManagerListener(addListener)
+        Disposer.register(toolWindow.disposable) {
+            contentManager.removeRecursiveContentManagerListener(addListener)
+        }
     }
 
     open fun isTabRemovedForDrag(handle: Any): Boolean =
