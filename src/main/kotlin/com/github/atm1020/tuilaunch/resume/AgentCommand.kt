@@ -53,10 +53,6 @@ class AgentCommand private constructor(
 
         private val SESSION_VARIABLES = mapOf(
             AgentCliKind.CODEX to listOf(CodexSessionStrategy.STATE_FILE_VARIABLE),
-            AgentCliKind.OPENCODE to listOf(
-                OpenCodeSessionStrategy.TUI_CONFIG_VARIABLE,
-                OpenCodeSessionStrategy.STATE_FILE_VARIABLE,
-            ),
         )
 
         fun parse(command: String): AgentCommand {

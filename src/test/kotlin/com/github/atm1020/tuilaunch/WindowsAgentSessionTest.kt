@@ -56,9 +56,10 @@ class WindowsAgentSessionTest {
     }
 
     @Test
-    fun `opencode names its tracker and state file in the environment`() {
-        val (_, environment) = restoreOn(AgentCliKind.OPENCODE)
-        assertEquals(setOf("OPENCODE_TUI_CONFIG", "TUILAUNCH_OPENCODE_STATE"), environment.keys)
+    fun `opencode restores the session named after the tab with no environment of its own`() {
+        val (arguments, environment) = restoreOn(AgentCliKind.OPENCODE)
+        assertEquals(listOf("--session", "ses_" + tab.tabUuid.replace("-", "")), arguments)
+        assertTrue(environment.isEmpty())
     }
 
     @Test

@@ -201,8 +201,8 @@ class AgentCommandTest {
         val parsed = AgentCommand.parse("headroom wrap opencode --no-serena")
 
         assertEquals(
-            "headroom wrap opencode --no-serena -- --port 45123 --hostname 127.0.0.1",
-            parsed.withArguments(listOf("--port", "45123", "--hostname", "127.0.0.1")),
+            "headroom wrap opencode --no-serena -- --session ses_8b2c7d40",
+            parsed.withArguments(listOf("--session", "ses_8b2c7d40")),
         )
     }
 
@@ -236,21 +236,6 @@ class AgentCommandTest {
     }
 
     @Test
-    fun aCommandThatSetsTheTrackerVariablesItselfIsNotManageable() {
-        for (command in listOf(
-            "OPENCODE_TUI_CONFIG=/tmp/tui.json opencode",
-            "TUILAUNCH_OPENCODE_STATE=/tmp/state.json opencode",
-            "env OPENCODE_TUI_CONFIG=/tmp/tui.json opencode",
-            "FOO=1 TUILAUNCH_OPENCODE_STATE=/tmp/state.json headroom wrap opencode --no-serena",
-        )) {
-            val parsed = AgentCommand.parse(command)
-
-            assertTrue(command, parsed.setsASessionVariableItself)
-            assertFalse(command, parsed.isManageable)
-        }
-    }
-
-    @Test
     fun aCodexCommandThatSetsTheStateVariableItselfIsNotManageable() {
         for (command in listOf(
             "TUILAUNCH_CODEX_STATE=/tmp/state.jsonl codex",
@@ -277,6 +262,8 @@ class AgentCommandTest {
             "TUILAUNCH_OPENCODE_STATE=/tmp/state.json omp",
             "opencode --model gpt-5",
             "OPENCODE_TUI_CONFIGURED=1 opencode",
+            "OPENCODE_TUI_CONFIG=/tmp/tui.json opencode",
+            "TUILAUNCH_OPENCODE_STATE=/tmp/state.json opencode",
             "TUILAUNCH_CODEX_STATED=1 codex",
         )) {
             val parsed = AgentCommand.parse(command)

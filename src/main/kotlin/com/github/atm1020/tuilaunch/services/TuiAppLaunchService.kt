@@ -19,8 +19,6 @@ import com.github.atm1020.tuilaunch.resume.AgentStateFiles
 import com.github.atm1020.tuilaunch.resume.ClaudeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.CodexSessionStrategy
 import com.github.atm1020.tuilaunch.resume.OmpSessionStrategy
-import com.github.atm1020.tuilaunch.resume.OpenCodeServer
-import com.github.atm1020.tuilaunch.resume.OpenCodeServerService
 import com.github.atm1020.tuilaunch.resume.OpenCodeSessionStrategy
 import com.github.atm1020.tuilaunch.resume.TabIdentity
 import com.github.atm1020.tuilaunch.terminal.JediTermSessionFactory
@@ -48,7 +46,6 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.Content
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.awt.Component
@@ -108,16 +105,9 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             bundledDirectory = AgentSessionEnvironment.bundledDirectory(),
         )
     }
-    var openCodeServer: () -> OpenCodeServer? = {
-        if (TuiLauncherSettings.getInstance().state.shareOpenCodeServer) {
-            OpenCodeServerService.getInstance(project)
-        } else {
-            null
-        }
-    }
     var agentSessionStrategies: (AgentCliKind, AgentSessionEnvironment, Boolean) -> AgentSessionStrategy =
         { kind, environment, hookAllowed ->
-            AgentSessionStrategies.forKind(kind, environment, hookAllowed) { openCodeServer() }
+            AgentSessionStrategies.forKind(kind, environment, hookAllowed)
         }
     var clock: () -> Long = { System.currentTimeMillis() }
     private var hostListenersInstalled = false
@@ -649,38 +639,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             disposable = disposable,
             setup = agentSetupFor(command, intent),
         )
-        if (pending.setup?.strategy?.launchWaitsForPreparation != true) {
-            startTheSession(pending)
-            return
-        }
-        val setup = pending.setup
-        scope.launch {
-            prepareInBackground(setup)
-            onTheEventThread {
-                val theLaunchIsStillOurs = pendingLaunchesBySessionId[sessionId]?.disposable === disposable
-                if (theLaunchIsStillOurs && !disposable.isDisposed) {
-                    startTheSession(pending)
-                    return@onTheEventThread
-                }
-                if (theLaunchIsStillOurs) pendingLaunchesBySessionId.remove(sessionId)
-                releaseTheServerOf(pending)
-                pending.onFailed?.invoke()
-            }
-        }
-    }
-
-    private suspend fun prepareInBackground(setup: AgentSetup) {
-        try {
-            setup.strategy.prepareLaunchInBackground(setup.tab, setup.parsed)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (failure: Exception) {
-            thisLogger().warn("Could not prepare the ${setup.kind} launch of '${setup.parsed.command}'", failure)
-        }
-    }
-
-    private fun onTheEventThread(work: () -> Unit) {
-        ApplicationManager.getApplication().invokeLater(work, ModalityState.nonModal())
+        startTheSession(pending)
     }
 
     private fun startTheSession(pending: PendingTab) {
@@ -698,7 +657,6 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             environment = agentLaunch.environment,
             onCreated = { session ->
                 if (pendingLaunchesBySessionId.remove(sessionId)?.disposable !== disposable || disposable.isDisposed) {
-                    releaseTheServerOf(pending)
                     return@createAsync
                 }
                 val promptBox = PromptBox(
@@ -740,17 +698,11 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             },
             onFailed = { throwable ->
                 pendingLaunchesBySessionId.remove(sessionId)
-                releaseTheServerOf(pending)
                 Disposer.dispose(disposable)
                 thisLogger().warn("Failed to launch TUI app: ${agentLaunch.command}", throwable)
                 pending.onFailed?.invoke()
             },
         )
-    }
-
-    private fun releaseTheServerOf(pending: PendingTab) {
-        val setup = pending.setup ?: return
-        setup.strategy.tabClosed(setup.tab)
     }
 
     private fun agentSetupFor(command: String, intent: LaunchIntent): AgentSetup? {
@@ -790,7 +742,6 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
             is LaunchIntent.Restore -> strategy.restoreEnvironment(tab)
         }
         if (arguments.isEmpty() && environment.isEmpty()) {
-            strategy.tabClosed(tab)
             return plainLaunch.alsoLog(command, "the $kind strategy had nothing to add")
         }
         val decorated = parsed.withArguments(arguments)
@@ -836,7 +787,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     ): String? = when (kind) {
         AgentCliKind.CLAUDE -> claudeSessionId(strategy, tab, intent)
         AgentCliKind.CODEX -> codexSessionIdOnRestore(strategy, tab, intent)
-        AgentCliKind.OPENCODE -> openCodeSessionIdOnRestore(strategy, tab, intent)
+        AgentCliKind.OPENCODE -> openCodeSessionId(strategy, tab, intent)
         AgentCliKind.OMP -> ompSessionIdOnRestore(strategy, tab, intent)
     }
 
@@ -860,14 +811,16 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         return codex.readSessionId(codex.stateFile(tab))
     }
 
-    private fun openCodeSessionIdOnRestore(
+    private fun openCodeSessionId(
         strategy: AgentSessionStrategy,
         tab: TabIdentity,
         intent: LaunchIntent,
     ): String? {
-        if (intent !is LaunchIntent.Restore) return null
         val openCode = strategy as? OpenCodeSessionStrategy ?: return null
-        return openCode.readSessionId(openCode.stateFile(tab))
+        return when (intent) {
+            is LaunchIntent.Fresh -> openCode.sessionIdOf(tab)
+            is LaunchIntent.Restore -> openCode.sessionToRestore(tab)
+        }
     }
 
     private fun ompSessionIdOnRestore(
@@ -1245,16 +1198,9 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     }
 
     private fun forgetTab(sessionId: String) {
-        val tab = tabsBySessionId.remove(sessionId)
+        tabsBySessionId.remove(sessionId)
         closingSessions.remove(sessionId)
         sessionIdsRemovedForDrag.remove(sessionId)
-        releaseAgentResources(tab ?: return)
-    }
-
-    private fun releaseAgentResources(tab: OpenTab) {
-        val strategy = tab.agentStrategy ?: return
-        val identity = identityOf(tab) ?: return
-        strategy.tabClosed(identity)
     }
 }
 
