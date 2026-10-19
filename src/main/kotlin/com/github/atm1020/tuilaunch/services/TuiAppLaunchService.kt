@@ -80,8 +80,8 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     var sessionFactory: TerminalSessionFactory = JediTermSessionFactory(
         project = project,
         prefixCommandActions = { prefixCommandActions() },
-        onNextTab = { nextTuiTab() },
-        onPreviousTab = { previousTuiTab() },
+        onNextTab = { nextTuiTabUnlessInTheEditor() },
+        onPreviousTab = { previousTuiTabUnlessInTheEditor() },
         onTogglePromptBoxSide = { togglePromptBoxBesideTerminal() },
     )
     var host: IdeToolWindowHost? = null
@@ -558,6 +558,21 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
     fun previousTuiTab() {
         selectRelativeTuiTab(-1, requestFocus = true)
     }
+
+    fun nextTuiTabUnlessInTheEditor(): Boolean {
+        if (anEditorSessionHadTheFocusLast()) return false
+        nextTuiTab()
+        return true
+    }
+
+    fun previousTuiTabUnlessInTheEditor(): Boolean {
+        if (anEditorSessionHadTheFocusLast()) return false
+        previousTuiTab()
+        return true
+    }
+
+    private fun anEditorSessionHadTheFocusLast(): Boolean =
+        lastFocusedSessionId?.let { tabsNotClosing()[it] }?.editorFile != null
 
     fun nextTuiTabWithoutFocus() {
         selectRelativeTuiTab(1, requestFocus = false)

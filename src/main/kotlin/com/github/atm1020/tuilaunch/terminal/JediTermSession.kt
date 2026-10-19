@@ -32,8 +32,8 @@ private const val BRACKETED_PASTE_END = "\u001B[201~"
 class JediTermSessionFactory(
     private val project: Project,
     private val prefixCommandActions: () -> Map<Int, () -> Unit> = { emptyMap() },
-    private val onNextTab: () -> Unit = {},
-    private val onPreviousTab: () -> Unit = {},
+    private val onNextTab: () -> Boolean = { false },
+    private val onPreviousTab: () -> Boolean = { false },
     private val onTogglePromptBoxSide: () -> Boolean = { false },
 ) : TerminalSessionFactory {
     override fun create(parent: Disposable, command: String, environment: Map<String, String>): TerminalSession {

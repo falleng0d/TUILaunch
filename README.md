@@ -65,7 +65,9 @@ To put it back, right-click the editor tab and choose **Move to TUILaunch**, or 
 tool window. **Rename Session** on the same menu renames the editor tab. Closing the editor tab ends the session, the
 same as closing it in the tool window.
 
-Sessions in the editor are left out of the next/previous TUI tab actions. The send, focus, prompt box and close actions
+Sessions in the editor are left out of the next/previous TUI tab actions. In an editor session TUILaunch also leaves
+the IDE's **Select Next Tab** and **Select Previous Tab** keys alone: with the terminal's **Override IDE shortcuts**
+on they reach the TUI app, and with it off the IDE switches editor tabs. The send, focus, prompt box and close actions
 act on the session that had the focus last, so after working in an editor session they target that one; the prompt box
 button in the tool window title bar always acts on the tool window's own tab. Saved tool window sizes do not apply in
 the editor.
@@ -431,6 +433,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `IdeEventQueue.dispatchKeyEvent` hands the event to AWT even after the action system consumed it, and `DefaultKeyboardFocusManager.preDispatchKeyEvent` then retargets that press to the *current* focus owner and runs every `KeyEventDispatcher` without looking at `isConsumed`, so a global dispatcher has to check that itself.
 - Requesting focus for another component of the same window enqueues the in-flight key press behind a type-ahead marker (`KeyboardFocusManager.shouldNativelyFocusHeavyweight`) and replays it once the new owner has focus, so an action that moves focus into the terminal on a key press must tell the interceptor that press is used up or the terminal receives it.
 - `NextTab`/`PreviousTab` keystrokes differ across the default, macOS and system-shortcut keymaps, so resolve them from `ActionManager` at event time rather than hardcoding them.
+- `JBTerminalPanel` with **Override IDE shortcuts** on passes only its own `ACTIONS_TO_SKIP` list to the IDE, which has no `NextTab` or `PreviousTab`, so a tab key the plugin leaves alone goes to the TUI app rather than to the editor tabs.
 - A `KeyEventDispatcher` sees one keystroke at a time and cannot arbitrate a chord, so two-stroke shortcuts must be ignored rather than matched on their first stroke.
 - `ToolWindowTabRenameActionBase` hardcodes `Balloon.Position.above`, which is wrong for a bottom-anchored tool window.
 - `JTable.getSelectedRow` returns -1 when nothing is selected, and `convertRowIndexToModel` passes that -1 straight through when no row sorter is installed, so an empty selection has to be rejected before the index is used.

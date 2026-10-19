@@ -297,4 +297,33 @@ class TuiSessionEditorTabTest : BasePlatformTestCase() {
         assertFalse(opened.service.togglePromptBoxBesideTerminal())
         assertEquals(true, opened.service.isPromptBoxBesideTerminal(file))
     }
+
+    fun testTheTabShortcutsLeaveAnEditorSessionWhereItIs() {
+        val opened = launch("claude", "codex", "omp")
+        val file = opened.moveToEditor(0)
+        val selectedBefore = opened.host.activeTab()
+
+        assertFalse(opened.service.nextTuiTabUnlessInTheEditor())
+        assertFalse(opened.service.previousTuiTabUnlessInTheEditor())
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertEquals(selectedBefore, opened.host.activeTab())
+        assertEquals(listOf(file), opened.editors.openFiles)
+    }
+
+    fun testTheTabShortcutsStillSwitchToolWindowSessions() {
+        val opened = launch("claude", "codex", "omp")
+        opened.moveToEditor(0)
+        val (codex, omp) = opened.host.tabs
+        opened.host.selectTab(codex)
+        opened.service.onFocusOwnerChanged(opened.sessions[1].component)
+
+        assertTrue(opened.service.nextTuiTabUnlessInTheEditor())
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertEquals(omp, opened.host.activeTab())
+
+        assertTrue(opened.service.previousTuiTabUnlessInTheEditor())
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+        assertEquals(codex, opened.host.activeTab())
+    }
 }

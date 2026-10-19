@@ -16,8 +16,8 @@ class TerminalKeyInterceptor(
     private val sendKey: (keyCode: Int, modifiers: Int, keyChar: Char) -> Unit = { _, _, _ -> },
     private val nextTabShortcuts: () -> List<KeyboardShortcut> = { emptyList() },
     private val previousTabShortcuts: () -> List<KeyboardShortcut> = { emptyList() },
-    private val onNextTab: () -> Unit = {},
-    private val onPreviousTab: () -> Unit = {},
+    private val onNextTab: () -> Boolean = { false },
+    private val onPreviousTab: () -> Boolean = { false },
     private val promptBoxSideShortcuts: () -> List<KeyboardShortcut> = { emptyList() },
     private val onTogglePromptBoxSide: () -> Boolean = { false },
 ) : KeyEventDispatcher {
@@ -70,10 +70,7 @@ class TerminalKeyInterceptor(
         }
 
         val tabAction = tabNavigationActionFor(e)
-        if (tabAction != null) {
-            tabAction()
-            return swallowHandledPress(e)
-        }
+        if (tabAction != null && tabAction()) return swallowHandledPress(e)
 
         val isPromptBoxSideStroke = promptBoxSideShortcuts().matchesSingleStroke(KeyStroke.getKeyStrokeForEvent(e))
         if (isPromptBoxSideStroke && onTogglePromptBoxSide()) return swallowHandledPress(e)
@@ -108,7 +105,7 @@ class TerminalKeyInterceptor(
             e.keyCode == escapeKeyCode &&
             e.modifiersEx == escapeModifierMask
 
-    private fun tabNavigationActionFor(e: KeyEvent): (() -> Unit)? {
+    private fun tabNavigationActionFor(e: KeyEvent): (() -> Boolean)? {
         val keyStroke = KeyStroke.getKeyStrokeForEvent(e)
         return when {
             nextTabShortcuts().matchesSingleStroke(keyStroke) -> onNextTab

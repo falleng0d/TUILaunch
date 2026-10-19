@@ -48,8 +48,8 @@ class TerminalKeyInterceptorTest {
         sendKey = { keyCode, modifiers, keyChar -> sentKeys += Triple(keyCode, modifiers, keyChar) },
         nextTabShortcuts = { nextTabShortcuts },
         previousTabShortcuts = { previousTabShortcuts },
-        onNextTab = { nextTabCount++ },
-        onPreviousTab = { previousTabCount++ },
+        onNextTab = { nextTabCount++; true },
+        onPreviousTab = { previousTabCount++; true },
     )
 
     private fun keyPress(
@@ -416,6 +416,26 @@ class TerminalKeyInterceptorTest {
         assertTrue(dispatcher.dispatchKeyEvent(event))
         assertTrue(dispatcher.dispatchKeyEvent(event))
         assertEquals(1, nextTabCount)
+    }
+
+    @Test
+    fun tabShortcutsReachTheTerminalWhenTheSessionDoesNotSwitch() {
+        val dispatcher = TerminalKeyInterceptor(
+            terminalComponent = terminal,
+            nextTabShortcuts = { listOf(nextTabShortcut) },
+            previousTabShortcuts = { listOf(previousTabShortcut) },
+            onNextTab = { false },
+            onPreviousTab = { false },
+        )
+
+        val next = keyPress(KeyEvent.VK_RIGHT, KeyEvent.ALT_DOWN_MASK)
+        val previous = keyPress(KeyEvent.VK_LEFT, KeyEvent.ALT_DOWN_MASK)
+
+        assertFalse(dispatcher.dispatchKeyEvent(next))
+        assertFalse(next.isConsumed)
+        assertFalse(dispatcher.dispatchKeyEvent(previous))
+        assertFalse(previous.isConsumed)
+        assertFalse(dispatcher.dispatchKeyEvent(keyTyped('a')))
     }
 
     @Test
