@@ -4,6 +4,7 @@ import com.github.atm1020.tuilaunch.action.PROMPT_BOX_BESIDE_TERMINAL_ACTION_ID
 import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.KeyboardShortcut
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.invokeLater
@@ -28,6 +29,7 @@ private const val SEND_AS_USER_INPUT = true
 private const val POWERSHELL_COMMENT = "#"
 private const val BRACKETED_PASTE_START = "\u001B[200~"
 private const val BRACKETED_PASTE_END = "\u001B[201~"
+private val ACTIONS_THE_IDE_ALWAYS_GETS = listOf("CheckinProject")
 
 class JediTermSessionFactory(
     private val project: Project,
@@ -127,11 +129,19 @@ class JediTermSessionFactory(
             onPreviousTab = onPreviousTab,
             promptBoxSideShortcuts = { currentKeyboardShortcutsOf(PROMPT_BOX_BESIDE_TERMINAL_ACTION_ID) },
             onTogglePromptBoxSide = onTogglePromptBoxSide,
+            ideActionShortcuts = { ACTIONS_THE_IDE_ALWAYS_GETS.associateWith(::currentKeyboardShortcutsOf) },
+            runIdeAction = ::runIdeAction,
         )
         session.spendKeyPressesWith(dispatcher::spendKeyPress)
         val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
         focusManager.addKeyEventDispatcher(dispatcher)
         Disposer.register(parent) { focusManager.removeKeyEventDispatcher(dispatcher) }
+    }
+
+    private fun runIdeAction(actionId: String, event: KeyEvent) {
+        val actionManager = ActionManager.getInstance()
+        val action = actionManager.getAction(actionId) ?: return
+        actionManager.tryToExecute(action, event, event.component, ActionPlaces.KEYBOARD_SHORTCUT, true)
     }
 
     private fun currentKeyboardShortcutsOf(actionId: String): List<KeyboardShortcut> {

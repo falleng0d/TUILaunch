@@ -310,6 +310,10 @@ TUILaunch registers global actions that can be bound in the IDE keymap or called
 - `TUILauncher.NextTuiTab` / `TUILauncher.PreviousTuiTab` — switch TUI tabs and focus the terminal.
 - `TUILauncher.NextTuiTabWithoutFocus` / `TUILauncher.PreviousTuiTabWithoutFocus` — switch TUI tabs without moving keyboard focus into the terminal.
 
+The IDE's **Commit...** key (<kbd>Cmd</kbd> + <kbd>K</kbd> on macOS keymaps, <kbd>Ctrl</kbd> + <kbd>K</kbd> on the
+others, or whatever your keymap binds) always opens the commit dialog, even while a TUI terminal has the focus and
+the terminal's **Override IDE shortcuts** is on. The TUI app never sees that key.
+
 ### IdeaVim + tmux-like workflow
 
 TUILaunch works well with both IntelliJ keymaps and IdeaVim. Standard IntelliJ keymap shortcuts continue to work while focus is inside a TUI app because the IDE handles those shortcuts first. This is enough if you rely mainly on IntelliJ keybindings.
@@ -434,6 +438,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - Requesting focus for another component of the same window enqueues the in-flight key press behind a type-ahead marker (`KeyboardFocusManager.shouldNativelyFocusHeavyweight`) and replays it once the new owner has focus, so an action that moves focus into the terminal on a key press must tell the interceptor that press is used up or the terminal receives it.
 - `NextTab`/`PreviousTab` keystrokes differ across the default, macOS and system-shortcut keymaps, so resolve them from `ActionManager` at event time rather than hardcoding them.
 - `JBTerminalPanel` with **Override IDE shortcuts** on passes only its own `ACTIONS_TO_SKIP` list to the IDE, which has no `NextTab` or `PreviousTab`, so a tab key the plugin leaves alone goes to the TUI app rather than to the editor tabs.
+- An IDE action that has to work from the terminal even with **Override IDE shortcuts** on, such as **Commit...** (`CheckinProject`), is matched in `TerminalKeyInterceptor` and run with `ActionManager.tryToExecute`, because returning the key to the IDE only hands it to `JBTerminalPanel`, which sends it to the TUI app.
 - A `KeyEventDispatcher` sees one keystroke at a time and cannot arbitrate a chord, so two-stroke shortcuts must be ignored rather than matched on their first stroke.
 - `ToolWindowTabRenameActionBase` hardcodes `Balloon.Position.above`, which is wrong for a bottom-anchored tool window.
 - `JTable.getSelectedRow` returns -1 when nothing is selected, and `convertRowIndexToModel` passes that -1 straight through when no row sorter is installed, so an empty selection has to be rejected before the index is used.

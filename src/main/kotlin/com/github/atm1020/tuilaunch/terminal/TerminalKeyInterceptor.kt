@@ -20,6 +20,8 @@ class TerminalKeyInterceptor(
     private val onPreviousTab: () -> Boolean = { false },
     private val promptBoxSideShortcuts: () -> List<KeyboardShortcut> = { emptyList() },
     private val onTogglePromptBoxSide: () -> Boolean = { false },
+    private val ideActionShortcuts: () -> Map<String, List<KeyboardShortcut>> = { emptyMap() },
+    private val runIdeAction: (actionId: String, event: KeyEvent) -> Unit = { _, _ -> },
 ) : KeyEventDispatcher {
 
     private var lastFiredWhen = -1L
@@ -69,6 +71,12 @@ class TerminalKeyInterceptor(
             return swallowHandledPress(e)
         }
 
+        val ideActionId = ideActionFor(e)
+        if (ideActionId != null) {
+            runIdeAction(ideActionId, e)
+            return swallowHandledPress(e)
+        }
+
         val tabAction = tabNavigationActionFor(e)
         if (tabAction != null && tabAction()) return swallowHandledPress(e)
 
@@ -112,6 +120,11 @@ class TerminalKeyInterceptor(
             previousTabShortcuts().matchesSingleStroke(keyStroke) -> onPreviousTab
             else -> null
         }
+    }
+
+    private fun ideActionFor(e: KeyEvent): String? {
+        val keyStroke = KeyStroke.getKeyStrokeForEvent(e)
+        return ideActionShortcuts().entries.firstOrNull { (_, shortcuts) -> shortcuts.matchesSingleStroke(keyStroke) }?.key
     }
 
     private fun List<KeyboardShortcut>.matchesSingleStroke(keyStroke: KeyStroke): Boolean =

@@ -439,6 +439,40 @@ class TerminalKeyInterceptorTest {
     }
 
     @Test
+    fun theCommitShortcutRunsTheIdeActionInsteadOfReachingTheTerminal() {
+        val ran = mutableListOf<String>()
+        val dispatcher = TerminalKeyInterceptor(
+            terminalComponent = terminal,
+            nextTabShortcuts = { listOf(KeyboardShortcut(KeyStroke.getKeyStroke("meta K"), null)) },
+            onNextTab = { nextTabCount++; true },
+            ideActionShortcuts = { mapOf("CheckinProject" to listOf(KeyboardShortcut(KeyStroke.getKeyStroke("meta K"), null))) },
+            runIdeAction = { actionId, _ -> ran += actionId },
+        )
+
+        val press = keyPress(KeyEvent.VK_K, KeyEvent.META_DOWN_MASK)
+
+        assertTrue(dispatcher.dispatchKeyEvent(press))
+        assertTrue(press.isConsumed)
+        assertTrue(dispatcher.dispatchKeyEvent(keyTyped('k')))
+        assertEquals(listOf("CheckinProject"), ran)
+        assertEquals(0, nextTabCount)
+    }
+
+    @Test
+    fun theCommitShortcutIsLeftAloneOutsideTheTerminal() {
+        val ran = mutableListOf<String>()
+        val dispatcher = TerminalKeyInterceptor(
+            terminalComponent = terminal,
+            ideActionShortcuts = { mapOf("CheckinProject" to listOf(KeyboardShortcut(KeyStroke.getKeyStroke("meta K"), null))) },
+            runIdeAction = { actionId, _ -> ran += actionId },
+        )
+
+        assertFalse(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_K, KeyEvent.META_DOWN_MASK, source = elsewhere)))
+        assertFalse(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_K)))
+        assertTrue(ran.isEmpty())
+    }
+
+    @Test
     fun promptBoxSideShortcutIsSwallowedWhenTheSessionTogglesIt() {
         var toggles = 0
         val dispatcher = TerminalKeyInterceptor(
