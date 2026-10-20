@@ -416,6 +416,11 @@ internal class FakeEditorHost : SessionEditorHost(null) {
         service.editorTabClosed(file)
     }
 
+    fun tabLimitCloses(file: TuiSessionFile, service: TuiAppLaunchService) {
+        openFiles.remove(file)
+        service.editorTabClosed(file, closedByTheEditorTabLimit = true)
+    }
+
     fun moveToAnotherSplit(file: TuiSessionFile, service: TuiAppLaunchService) {
         openFiles.remove(file)
         service.editorTabClosed(file)

@@ -2,6 +2,8 @@ package com.github.atm1020.tuilaunch
 
 import com.github.atm1020.tuilaunch.editor.SessionEditorHost
 import com.github.atm1020.tuilaunch.editor.TuiSessionFile
+import com.github.atm1020.tuilaunch.editor.callersAreTheEditorTabLimit
+import com.github.atm1020.tuilaunch.editor.theEditorTabLimitIsClosingATab
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
 import com.github.atm1020.tuilaunch.services.TuiAppLaunchService
@@ -297,6 +299,36 @@ class TuiSessionEditorTabTest : BasePlatformTestCase() {
         opened.service.onFocusOwnerChanged(opened.sessions[1].component)
         assertFalse(opened.service.togglePromptBoxBesideTerminal())
         assertEquals(true, opened.service.isPromptBoxBesideTerminal(file))
+    }
+
+    fun testASessionTheEditorTabLimitClosesGoesBackToTheToolWindow() {
+        TuiLauncherSettings.getInstance().state.restoreOpenTabs = true
+        val opened = launch("claude", "codex")
+        val file = opened.moveToEditor(0)
+        val codex = opened.host.tabs.single()
+        opened.host.selectTab(codex)
+
+        opened.editors.tabLimitCloses(file, opened.service)
+        PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+        assertFalse(opened.host.disposables[0].isDisposed)
+        assertEquals(2, opened.host.tabs.size)
+        assertEquals(codex, opened.host.activeTab())
+        assertFalse(file.isValid)
+        assertEquals(listOf("codex", "claude"), savedTitles())
+
+        opened.host.selectTab(opened.host.tabs.last())
+        opened.service.sendTextToActiveSession("still alive")
+        assertEquals(listOf("still alive"), opened.sessions[0].sentText)
+    }
+
+    fun testOnlyTheEditorWindowTabLimitCountsAsTheTabLimit() {
+        val editorWindow = "com.intellij.openapi.fileEditor.impl.EditorWindow"
+
+        assertTrue(callersAreTheEditorTabLimit(listOf("a.B" to "run", editorWindow to "doTrimSize")))
+        assertFalse(callersAreTheEditorTabLimit(listOf(editorWindow to "closeFile")))
+        assertFalse(callersAreTheEditorTabLimit(listOf("other.EditorWindow" to "doTrimSize")))
+        assertFalse(theEditorTabLimitIsClosingATab())
     }
 
     fun testASessionMovedIntoTheEditorOpensPinnedAndFocused() {

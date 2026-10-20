@@ -80,7 +80,7 @@ class TuiSessionFileEditor(
         if (file.newestEditor === this) file.newestEditor = null
         val closingToOpenElsewhere = file.getUserData(FileEditorManagerKeys.CLOSING_TO_REOPEN) == true
         if (closingToOpenElsewhere || project.isDisposed) return
-        project.service<TuiAppLaunchService>().editorTabClosed(file)
+        project.service<TuiAppLaunchService>().editorTabClosed(file, theEditorTabLimitIsClosingATab())
     }
 }
 

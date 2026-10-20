@@ -12,6 +12,15 @@ import com.intellij.openapi.project.Project
 import javax.swing.JComponent
 import javax.swing.SwingUtilities
 
+private const val EDITOR_WINDOW_CLASS = "com.intellij.openapi.fileEditor.impl.EditorWindow"
+private const val TAB_LIMIT_METHOD = "doTrimSize"
+
+internal fun theEditorTabLimitIsClosingATab(): Boolean =
+    callersAreTheEditorTabLimit(StackWalker.getInstance().walk { frames -> frames.map { it.className to it.methodName }.toList() })
+
+internal fun callersAreTheEditorTabLimit(callers: List<Pair<String, String>>): Boolean =
+    (EDITOR_WINDOW_CLASS to TAB_LIMIT_METHOD) in callers
+
 open class SessionEditorHost(private val project: Project?) {
 
     open fun open(file: TuiSessionFile, window: EditorWindow?) {

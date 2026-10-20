@@ -1108,19 +1108,28 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         val host = hostWithListeners() ?: return
         val tab = tabIn(file) ?: return
         if (tab.sessionId in closingSessions) return
-        editorHost.close(file)
+        putBackInTheToolWindow(host, tab)
+        selectTuiTab(host, tab)
+    }
+
+    private fun putBackInTheToolWindow(host: IdeToolWindowHost, tab: OpenTab) {
+        tab.editorFile?.let(editorHost::close)
         tab.layout.setDockedHorizontally(host.isDockedHorizontally())
         val handle = host.addTab(tab.layout.component, tab.title, tab.disposable)
         tab.place = SessionPlace.InToolWindow(handle)
         recordOpenTabs()
-        selectTuiTab(host, tab)
     }
 
-    fun editorTabClosed(file: TuiSessionFile) {
+    fun editorTabClosed(file: TuiSessionFile, closedByTheEditorTabLimit: Boolean = false) {
         ApplicationManager.getApplication().invokeLater(
             {
                 if (projectIsClosing || editorHost.isOpen(file)) return@invokeLater
                 val tab = tabIn(file) ?: return@invokeLater
+                val host = hostWithListeners()
+                if (closedByTheEditorTabLimit && host != null && tab.sessionId !in closingSessions) {
+                    putBackInTheToolWindow(host, tab)
+                    return@invokeLater
+                }
                 closeTab(tab.sessionId, theUserClosedTheTab = true)
             },
             ModalityState.nonModal(),
