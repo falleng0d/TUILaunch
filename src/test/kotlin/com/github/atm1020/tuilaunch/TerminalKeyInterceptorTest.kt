@@ -419,23 +419,40 @@ class TerminalKeyInterceptorTest {
     }
 
     @Test
-    fun tabShortcutsReachTheTerminalWhenTheSessionDoesNotSwitch() {
+    fun tabShortcutsRunTheIdeTabActionsWhenTheSessionDoesNotSwitch() {
+        val ran = mutableListOf<String>()
         val dispatcher = TerminalKeyInterceptor(
             terminalComponent = terminal,
             nextTabShortcuts = { listOf(nextTabShortcut) },
             previousTabShortcuts = { listOf(previousTabShortcut) },
             onNextTab = { false },
             onPreviousTab = { false },
+            runIdeAction = { actionId, _ -> ran += actionId },
         )
 
         val next = keyPress(KeyEvent.VK_RIGHT, KeyEvent.ALT_DOWN_MASK)
         val previous = keyPress(KeyEvent.VK_LEFT, KeyEvent.ALT_DOWN_MASK)
 
-        assertFalse(dispatcher.dispatchKeyEvent(next))
-        assertFalse(next.isConsumed)
-        assertFalse(dispatcher.dispatchKeyEvent(previous))
-        assertFalse(previous.isConsumed)
-        assertFalse(dispatcher.dispatchKeyEvent(keyTyped('a')))
+        assertTrue(dispatcher.dispatchKeyEvent(next))
+        assertTrue(next.isConsumed)
+        assertTrue(dispatcher.dispatchKeyEvent(previous))
+        assertTrue(previous.isConsumed)
+        assertEquals(listOf("NextTab", "PreviousTab"), ran)
+    }
+
+    @Test
+    fun tabShortcutsThatSwitchTuiTabsRunNoIdeAction() {
+        val ran = mutableListOf<String>()
+        val dispatcher = TerminalKeyInterceptor(
+            terminalComponent = terminal,
+            nextTabShortcuts = { listOf(nextTabShortcut) },
+            onNextTab = { nextTabCount++; true },
+            runIdeAction = { actionId, _ -> ran += actionId },
+        )
+
+        assertTrue(dispatcher.dispatchKeyEvent(keyPress(KeyEvent.VK_RIGHT, KeyEvent.ALT_DOWN_MASK)))
+        assertEquals(1, nextTabCount)
+        assertTrue(ran.isEmpty())
     }
 
     @Test

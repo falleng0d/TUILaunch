@@ -7,6 +7,9 @@ import java.awt.event.KeyEvent
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 
+internal const val NEXT_TAB_ACTION_ID = "NextTab"
+internal const val PREVIOUS_TAB_ACTION_ID = "PreviousTab"
+
 class TerminalKeyInterceptor(
     private val terminalComponent: Component,
     private val escapeModifierMask: Int = 0,
@@ -77,8 +80,12 @@ class TerminalKeyInterceptor(
             return swallowHandledPress(e)
         }
 
-        val tabAction = tabNavigationActionFor(e)
-        if (tabAction != null && tabAction()) return swallowHandledPress(e)
+        val tabNavigation = tabNavigationFor(e)
+        if (tabNavigation != null) {
+            val (ideActionId, switchTuiTab) = tabNavigation
+            if (!switchTuiTab()) runIdeAction(ideActionId, e)
+            return swallowHandledPress(e)
+        }
 
         val isPromptBoxSideStroke = promptBoxSideShortcuts().matchesSingleStroke(KeyStroke.getKeyStrokeForEvent(e))
         if (isPromptBoxSideStroke && onTogglePromptBoxSide()) return swallowHandledPress(e)
@@ -113,11 +120,11 @@ class TerminalKeyInterceptor(
             e.keyCode == escapeKeyCode &&
             e.modifiersEx == escapeModifierMask
 
-    private fun tabNavigationActionFor(e: KeyEvent): (() -> Boolean)? {
+    private fun tabNavigationFor(e: KeyEvent): Pair<String, () -> Boolean>? {
         val keyStroke = KeyStroke.getKeyStrokeForEvent(e)
         return when {
-            nextTabShortcuts().matchesSingleStroke(keyStroke) -> onNextTab
-            previousTabShortcuts().matchesSingleStroke(keyStroke) -> onPreviousTab
+            nextTabShortcuts().matchesSingleStroke(keyStroke) -> NEXT_TAB_ACTION_ID to onNextTab
+            previousTabShortcuts().matchesSingleStroke(keyStroke) -> PREVIOUS_TAB_ACTION_ID to onPreviousTab
             else -> null
         }
     }
