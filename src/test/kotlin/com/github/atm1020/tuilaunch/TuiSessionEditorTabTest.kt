@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.editor.SessionEditorHost
 import com.github.atm1020.tuilaunch.editor.TuiSessionFile
 import com.github.atm1020.tuilaunch.model.TuiAppConfig
 import com.github.atm1020.tuilaunch.model.TuiSessionRecord
@@ -296,6 +297,14 @@ class TuiSessionEditorTabTest : BasePlatformTestCase() {
         opened.service.onFocusOwnerChanged(opened.sessions[1].component)
         assertFalse(opened.service.togglePromptBoxBesideTerminal())
         assertEquals(true, opened.service.isPromptBoxBesideTerminal(file))
+    }
+
+    fun testASessionMovedIntoTheEditorOpensPinnedAndFocused() {
+        val options = SessionEditorHost.OPEN_PINNED_AND_FOCUSED
+
+        assertTrue(options.pin)
+        assertTrue(options.requestFocus)
+        assertTrue(options.selectAsCurrent)
     }
 
     fun testTheTabShortcutsLeaveAnEditorSessionWhereItIs() {

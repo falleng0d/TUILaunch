@@ -51,8 +51,9 @@ TUILaunch remembers the last tool window size used by each app and restores it w
 ### Move a session into an editor tab
 
 Right-click a TUILaunch tab and choose **Move to Editor**, or drag the tab onto the editor area, to keep the running
-session in an editor tab instead. The process, its scrollback and the prompt box move with it. The editor tab can be
-moved to another split or window like any other tab.
+session in an editor tab instead. The process, its scrollback and the prompt box move with it. The editor tab opens
+pinned, so closing other tabs or reaching the tab limit leaves it open. It can be unpinned and moved to another split
+or window like any other tab.
 
 The prompt box sits under the terminal in an editor tab. <kbd>Cmd</kbd> + <kbd>Alt</kbd> + <kbd>\\</kbd> on macOS keymaps,
 <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>\\</kbd> on the others, or **Prompt Box Beside Terminal** on the editor tab's
@@ -404,6 +405,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `EditorWindow.split` ignores `FORBID_TAB_SPLIT` and opens a second copy of a session file, and 2026.2 builds that copy's editor a few event-queue turns later; the newest shown copy takes the terminal and closes the others, but never one whose editor is not built yet, because the old window re-shows during the split before the new editor exists.
 - With **Override IDE shortcuts** on, `JBTerminalPanel` consumes every keystroke not bound to its fixed `ACTIONS_TO_SKIP` list before `IdeKeyEventDispatcher` sees it, so the prompt box side key is matched against the keymap in `TerminalKeyInterceptor`, like the tab switching keys.
 - Swing fires `HierarchyEvent.SHOWING_CHANGED` from inside `addNotify`, so a component added to the panel from that listener gets `addNotify` twice; `OnePixelDivider` then registers its glass pane listener twice, leaves one behind with a null glass pane once removed, and that listener throws on every mouse event and swallows drag releases. The session editor moves the terminal one event later.
+- `FileEditorOpenRequest(pin = true)` is ignored in 2026.2 because `buildFileEditorOpenOptions` never copies `pin`, so a tab that has to open pinned goes through `openFile(file, window, FileEditorOpenOptions(pin = true))`, which `EditorWindow` honours.
 - An editor tab dropped on a registered `DockContainer` is closed in its window with `CLOSING_TO_REOPEN` set before `DockContainer.add` runs; holding Ctrl makes it a copy that is not closed at all.
 - `DockManagerImpl` hit-tests the screen rectangle of every registered `DockContainer`, including a hidden tool window's stale bounds, so the TUILaunch dock container is registered only while the tool window component is showing.
 - `ToolWindow.getComponent` leaves out the tool window header and its tab strip, so the TUILaunch dock container uses `ToolWindowEx.decorator` for its drop area and paints the drop highlight itself on the glass pane with `JBUI.CurrentTheme.ToolWindow.DragAndDrop.AREA_BACKGROUND` like `ToolWindowDragHelper` does in the new UI; a `DockContainer` gets no highlight from the platform, and `DragAndDrop.Area.BACKGROUND` is a faint white in new UI themes.
