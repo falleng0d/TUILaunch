@@ -352,6 +352,16 @@ class TuiSessionEditorTabTest : BasePlatformTestCase() {
         assertEquals(listOf(file), opened.editors.openFiles)
     }
 
+    fun testOnlyAnEditorSessionWithTheFocusCountsAsBeingInTheEditor() {
+        val opened = launch("claude", "codex")
+        opened.moveToEditor(0)
+
+        assertTrue(opened.service.anEditorSessionHadTheFocusLast())
+
+        opened.service.onFocusOwnerChanged(opened.sessions[1].component)
+        assertFalse(opened.service.anEditorSessionHadTheFocusLast())
+    }
+
     fun testTheTabShortcutsStillSwitchToolWindowSessions() {
         val opened = launch("claude", "codex", "omp")
         opened.moveToEditor(0)

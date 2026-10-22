@@ -29,7 +29,11 @@ private const val SEND_AS_USER_INPUT = true
 private const val POWERSHELL_COMMENT = "#"
 private const val BRACKETED_PASTE_START = "\u001B[200~"
 private const val BRACKETED_PASTE_END = "\u001B[201~"
-internal val ACTIONS_THE_IDE_ALWAYS_GETS = listOf("CheckinProject", "RecentFiles")
+private val ACTIONS_THE_IDE_ALWAYS_GETS = listOf("CheckinProject")
+private val ACTIONS_THE_IDE_GETS_FROM_AN_EDITOR_SESSION = listOf("RecentFiles")
+
+internal fun actionsTheIdeGets(fromAnEditorSession: Boolean): List<String> =
+    if (fromAnEditorSession) ACTIONS_THE_IDE_ALWAYS_GETS + ACTIONS_THE_IDE_GETS_FROM_AN_EDITOR_SESSION else ACTIONS_THE_IDE_ALWAYS_GETS
 
 class JediTermSessionFactory(
     private val project: Project,
@@ -37,6 +41,7 @@ class JediTermSessionFactory(
     private val onNextTab: () -> Boolean = { false },
     private val onPreviousTab: () -> Boolean = { false },
     private val onTogglePromptBoxSide: () -> Boolean = { false },
+    private val isInTheEditor: () -> Boolean = { false },
 ) : TerminalSessionFactory {
     override fun create(parent: Disposable, command: String, environment: Map<String, String>): TerminalSession {
         val shellPath = TerminalProjectOptionsProvider.getInstance(project).shellPath
@@ -129,7 +134,7 @@ class JediTermSessionFactory(
             onPreviousTab = onPreviousTab,
             promptBoxSideShortcuts = { currentKeyboardShortcutsOf(PROMPT_BOX_BESIDE_TERMINAL_ACTION_ID) },
             onTogglePromptBoxSide = onTogglePromptBoxSide,
-            ideActionShortcuts = { ACTIONS_THE_IDE_ALWAYS_GETS.associateWith(::currentKeyboardShortcutsOf) },
+            ideActionShortcuts = { actionsTheIdeGets(isInTheEditor()).associateWith(::currentKeyboardShortcutsOf) },
             runIdeAction = ::runIdeAction,
         )
         session.spendKeyPressesWith(dispatcher::spendKeyPress)

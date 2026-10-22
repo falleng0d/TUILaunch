@@ -1,6 +1,6 @@
 package com.github.atm1020.tuilaunch
 
-import com.github.atm1020.tuilaunch.terminal.ACTIONS_THE_IDE_ALWAYS_GETS
+import com.github.atm1020.tuilaunch.terminal.actionsTheIdeGets
 import com.github.atm1020.tuilaunch.terminal.TerminalKeyInterceptor
 import com.intellij.openapi.actionSystem.KeyboardShortcut
 import org.junit.Assert.assertEquals
@@ -477,8 +477,9 @@ class TerminalKeyInterceptorTest {
     }
 
     @Test
-    fun commitAndRecentFilesAlwaysGoToTheIde() {
-        assertEquals(listOf("CheckinProject", "RecentFiles"), ACTIONS_THE_IDE_ALWAYS_GETS)
+    fun recentFilesGoesToTheIdeOnlyFromAnEditorSession() {
+        assertEquals(listOf("CheckinProject"), actionsTheIdeGets(fromAnEditorSession = false))
+        assertEquals(listOf("CheckinProject", "RecentFiles"), actionsTheIdeGets(fromAnEditorSession = true))
     }
 
     @Test

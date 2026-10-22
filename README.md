@@ -312,12 +312,13 @@ TUILaunch registers global actions that can be bound in the IDE keymap or called
 - `TUILauncher.NextTuiTab` / `TUILauncher.PreviousTuiTab` — switch TUI tabs and focus the terminal.
 - `TUILauncher.NextTuiTabWithoutFocus` / `TUILauncher.PreviousTuiTabWithoutFocus` — switch TUI tabs without moving keyboard focus into the terminal.
 
-The IDE's **Commit...** and **Recent Files** keys always reach the IDE, even while a TUI terminal has the focus and the
-terminal's **Override IDE shortcuts** is on. The TUI app never sees them. TUILaunch reads both keys from your keymap
-when you press them: by default **Commit...** is <kbd>Cmd</kbd> + <kbd>K</kbd> on macOS keymaps and
+The IDE's **Commit...** key always reaches the IDE, even while a TUI terminal has the focus and the terminal's
+**Override IDE shortcuts** is on. So does **Recent Files** while the focus is in a session in an editor tab; in the tool
+window that key still goes to the TUI app. The TUI app never sees a key that goes to the IDE. TUILaunch reads both keys
+from your keymap when you press them: by default **Commit...** is <kbd>Cmd</kbd> + <kbd>K</kbd> on macOS keymaps and
 <kbd>Ctrl</kbd> + <kbd>K</kbd> on the others, and **Recent Files** is <kbd>Cmd</kbd> + <kbd>E</kbd> on macOS keymaps and
 <kbd>Ctrl</kbd> + <kbd>E</kbd> on the others. On a keymap where **Recent Files** is <kbd>Ctrl</kbd> + <kbd>E</kbd>, that
-key no longer moves the cursor to the end of the line in the TUI app.
+key no longer moves the cursor to the end of the line in a TUI app in an editor tab.
 
 ### IdeaVim + tmux-like workflow
 

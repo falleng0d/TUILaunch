@@ -83,6 +83,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         onNextTab = { nextTuiTabUnlessInTheEditor() },
         onPreviousTab = { previousTuiTabUnlessInTheEditor() },
         onTogglePromptBoxSide = { togglePromptBoxBesideTerminal() },
+        isInTheEditor = { anEditorSessionHadTheFocusLast() },
     )
     var host: IdeToolWindowHost? = null
     var editorHost: SessionEditorHost = SessionEditorHost(project)
@@ -571,7 +572,7 @@ class TuiAppLaunchService(private val project: Project, private val scope: Corou
         return true
     }
 
-    private fun anEditorSessionHadTheFocusLast(): Boolean =
+    fun anEditorSessionHadTheFocusLast(): Boolean =
         lastFocusedSessionId?.let { tabsNotClosing()[it] }?.editorFile != null
 
     fun nextTuiTabWithoutFocus() {
