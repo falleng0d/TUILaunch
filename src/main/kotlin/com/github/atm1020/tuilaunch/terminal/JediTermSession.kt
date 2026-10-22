@@ -29,7 +29,7 @@ private const val SEND_AS_USER_INPUT = true
 private const val POWERSHELL_COMMENT = "#"
 private const val BRACKETED_PASTE_START = "\u001B[200~"
 private const val BRACKETED_PASTE_END = "\u001B[201~"
-private val ACTIONS_THE_IDE_ALWAYS_GETS = listOf("CheckinProject")
+internal val ACTIONS_THE_IDE_ALWAYS_GETS = listOf("CheckinProject", "RecentFiles")
 
 class JediTermSessionFactory(
     private val project: Project,

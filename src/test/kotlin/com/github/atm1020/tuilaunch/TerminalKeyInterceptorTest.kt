@@ -1,5 +1,6 @@
 package com.github.atm1020.tuilaunch
 
+import com.github.atm1020.tuilaunch.terminal.ACTIONS_THE_IDE_ALWAYS_GETS
 import com.github.atm1020.tuilaunch.terminal.TerminalKeyInterceptor
 import com.intellij.openapi.actionSystem.KeyboardShortcut
 import org.junit.Assert.assertEquals
@@ -473,6 +474,11 @@ class TerminalKeyInterceptorTest {
         assertTrue(dispatcher.dispatchKeyEvent(keyTyped('k')))
         assertEquals(listOf("CheckinProject"), ran)
         assertEquals(0, nextTabCount)
+    }
+
+    @Test
+    fun commitAndRecentFilesAlwaysGoToTheIde() {
+        assertEquals(listOf("CheckinProject", "RecentFiles"), ACTIONS_THE_IDE_ALWAYS_GETS)
     }
 
     @Test
