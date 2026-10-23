@@ -312,12 +312,13 @@ TUILaunch registers global actions that can be bound in the IDE keymap or called
 - `TUILauncher.NextTuiTab` / `TUILauncher.PreviousTuiTab` — switch TUI tabs and focus the terminal.
 - `TUILauncher.NextTuiTabWithoutFocus` / `TUILauncher.PreviousTuiTabWithoutFocus` — switch TUI tabs without moving keyboard focus into the terminal.
 
-The IDE's **Commit...** key always reaches the IDE, even while a TUI terminal has the focus and the terminal's
-**Override IDE shortcuts** is on. So does **Recent Files** while the focus is in a session in an editor tab; in the tool
-window that key still goes to the TUI app. The TUI app never sees a key that goes to the IDE. TUILaunch reads both keys
+The IDE's **Commit...** and Git **Branches...** keys always reach the IDE, even while a TUI terminal has the focus and
+the terminal's **Override IDE shortcuts** is on. So does **Recent Files** while the focus is in a session in an editor
+tab; in the tool window that key still goes to the TUI app. The TUI app never sees a key that goes to the IDE. TUILaunch reads these keys
 from your keymap when you press them: by default **Commit...** is <kbd>Cmd</kbd> + <kbd>K</kbd> on macOS keymaps and
-<kbd>Ctrl</kbd> + <kbd>K</kbd> on the others, and **Recent Files** is <kbd>Cmd</kbd> + <kbd>E</kbd> on macOS keymaps and
-<kbd>Ctrl</kbd> + <kbd>E</kbd> on the others. On a keymap where **Recent Files** is <kbd>Ctrl</kbd> + <kbd>E</kbd>, that
+<kbd>Ctrl</kbd> + <kbd>K</kbd> on the others, **Branches...** is <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>`</kbd> on the
+non-macOS keymaps and unbound on the macOS ones, and **Recent Files** is <kbd>Cmd</kbd> + <kbd>E</kbd> on macOS keymaps
+and <kbd>Ctrl</kbd> + <kbd>E</kbd> on the others. On a keymap where **Recent Files** is <kbd>Ctrl</kbd> + <kbd>E</kbd>, that
 key no longer moves the cursor to the end of the line in a TUI app in an editor tab.
 
 ### IdeaVim + tmux-like workflow
@@ -447,7 +448,7 @@ Platform behaviour this plugin depends on, collected so it does not have to be r
 - `NextTab`/`PreviousTab` keystrokes differ across the default, macOS and system-shortcut keymaps, so resolve them from `ActionManager` at event time rather than hardcoding them.
 - `JBTerminalPanel` with **Override IDE shortcuts** on passes only its own `ACTIONS_TO_SKIP` list to the IDE, which has no `NextTab` or `PreviousTab`, so in an editor session the interceptor runs those actions itself; they switch editor tabs because `TabNavigationActionBase` checks `ToolWindowManager.isEditorComponentActive`, which is true for a terminal inside an editor tab.
 - `JBTerminalPanel` lists `RecentFiles` among the actions it leaves to the IDE but keeps <kbd>Ctrl</kbd> + <kbd>E</kbd> for the shell unless the registry key `terminal.Ctrl-E.opens.RecentFiles.popup` is on, so on a keymap that binds Recent Files to that key it never reaches the IDE by itself.
-- An IDE action that has to work from the terminal even with **Override IDE shortcuts** on, such as **Commit...** (`CheckinProject`) or **Recent Files** (`RecentFiles`), is matched in `TerminalKeyInterceptor` and run with `ActionManager.tryToExecute`, because returning the key to the IDE only hands it to `JBTerminalPanel`, which sends it to the TUI app.
+- An IDE action that has to work from the terminal even with **Override IDE shortcuts** on, such as **Commit...** (`CheckinProject`), **Branches...** (`Git.Branches`) or **Recent Files** (`RecentFiles`), is matched in `TerminalKeyInterceptor` and run with `ActionManager.tryToExecute`, because returning the key to the IDE only hands it to `JBTerminalPanel`, which sends it to the TUI app.
 - A `KeyEventDispatcher` sees one keystroke at a time and cannot arbitrate a chord, so two-stroke shortcuts must be ignored rather than matched on their first stroke.
 - `ToolWindowTabRenameActionBase` hardcodes `Balloon.Position.above`, which is wrong for a bottom-anchored tool window.
 - `JTable.getSelectedRow` returns -1 when nothing is selected, and `convertRowIndexToModel` passes that -1 straight through when no row sorter is installed, so an empty selection has to be rejected before the index is used.

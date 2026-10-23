@@ -478,8 +478,11 @@ class TerminalKeyInterceptorTest {
 
     @Test
     fun recentFilesGoesToTheIdeOnlyFromAnEditorSession() {
-        assertEquals(listOf("CheckinProject"), actionsTheIdeGets(fromAnEditorSession = false))
-        assertEquals(listOf("CheckinProject", "RecentFiles"), actionsTheIdeGets(fromAnEditorSession = true))
+        assertEquals(listOf("CheckinProject", "Git.Branches"), actionsTheIdeGets(fromAnEditorSession = false))
+        assertEquals(
+            listOf("CheckinProject", "Git.Branches", "RecentFiles"),
+            actionsTheIdeGets(fromAnEditorSession = true),
+        )
     }
 
     @Test

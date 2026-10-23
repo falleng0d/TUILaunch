@@ -29,7 +29,7 @@ private const val SEND_AS_USER_INPUT = true
 private const val POWERSHELL_COMMENT = "#"
 private const val BRACKETED_PASTE_START = "\u001B[200~"
 private const val BRACKETED_PASTE_END = "\u001B[201~"
-private val ACTIONS_THE_IDE_ALWAYS_GETS = listOf("CheckinProject")
+private val ACTIONS_THE_IDE_ALWAYS_GETS = listOf("CheckinProject", "Git.Branches")
 private val ACTIONS_THE_IDE_GETS_FROM_AN_EDITOR_SESSION = listOf("RecentFiles")
 
 internal fun actionsTheIdeGets(fromAnEditorSession: Boolean): List<String> =
