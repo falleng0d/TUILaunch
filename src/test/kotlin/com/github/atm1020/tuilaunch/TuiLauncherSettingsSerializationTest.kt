@@ -165,6 +165,22 @@ class TuiLauncherSettingsSerializationTest {
     }
 
     @Test
+    fun `a session moved into the editor is pinned by default`() {
+        val state = TuiLauncherSettings.State()
+
+        assertTrue(state.pinSessionsMovedToEditor)
+        assertFalse(optionNames(state).contains("pinSessionsMovedToEditor"))
+    }
+
+    @Test
+    fun `turning pinning in the editor off survives serialization`() {
+        val restored = roundTrip(TuiLauncherSettings.State(pinSessionsMovedToEditor = false))
+
+        assertFalse(restored.pinSessionsMovedToEditor)
+        assertTrue(restored.submitPromptOnSend)
+    }
+
+    @Test
     fun `the prompt box stays open after a send by default`() {
         val state = TuiLauncherSettings.State()
 

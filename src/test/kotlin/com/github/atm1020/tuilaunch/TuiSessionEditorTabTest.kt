@@ -46,6 +46,7 @@ class TuiSessionEditorTabTest : BasePlatformTestCase() {
             promptBoxVisible = false
             rememberPromptBoxVisibilityPerApp = false
             editorPromptBoxBesideTerminal = false
+            pinSessionsMovedToEditor = true
         }
     }
 
@@ -332,11 +333,20 @@ class TuiSessionEditorTabTest : BasePlatformTestCase() {
     }
 
     fun testASessionMovedIntoTheEditorOpensPinnedAndFocused() {
-        val options = SessionEditorHost.OPEN_PINNED_AND_FOCUSED
+        val options = SessionEditorHost.openOptions()
 
         assertTrue(options.pin)
         assertTrue(options.requestFocus)
         assertTrue(options.selectAsCurrent)
+    }
+
+    fun testASessionMovedIntoTheEditorOpensUnpinnedWhenPinningIsOff() {
+        TuiLauncherSettings.getInstance().state.pinSessionsMovedToEditor = false
+
+        val options = SessionEditorHost.openOptions()
+
+        assertFalse(options.pin)
+        assertTrue(options.requestFocus)
     }
 
     fun testTheTabShortcutsLeaveAnEditorSessionWhereItIs() {

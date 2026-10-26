@@ -52,9 +52,10 @@ TUILaunch remembers the last tool window size used by each app and restores it w
 
 Right-click a TUILaunch tab and choose **Move to Editor**, or drag the tab onto the editor area, to keep the running
 session in an editor tab instead. The process, its scrollback and the prompt box move with it. The editor tab opens
-pinned, so closing other tabs or reaching the tab limit leaves it open. It can be unpinned and moved to another split
-or window like any other tab. If you unpin it and the editor later closes it to stay under its tab limit, the session
-goes back to the TUILaunch tool window instead of ending, without taking the focus or selecting its tab.
+pinned, so closing other tabs or reaching the tab limit leaves it open. Turn off **Pin the editor tab of a session
+moved into the editor** to have it open like any other tab instead. It can be pinned, unpinned and moved to another
+split or window like any other tab. If the tab is unpinned and the editor closes it to stay under its tab limit, the
+session goes back to the TUILaunch tool window instead of ending, without taking the focus or selecting its tab.
 
 The prompt box sits under the terminal in an editor tab. <kbd>Cmd</kbd> + <kbd>Alt</kbd> + <kbd>\\</kbd> on macOS keymaps,
 <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>\\</kbd> on the others, or **Prompt Box Beside Terminal** on the editor tab's

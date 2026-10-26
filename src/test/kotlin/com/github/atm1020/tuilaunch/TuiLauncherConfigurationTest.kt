@@ -20,6 +20,7 @@ import com.github.atm1020.tuilaunch.ui.COPILOT_STATUS_NAME
 import com.github.atm1020.tuilaunch.ui.DETECTING_COPILOT_SERVER_TEXT
 import com.github.atm1020.tuilaunch.ui.FOCUS_PROMPT_FILE_LABEL
 import com.github.atm1020.tuilaunch.ui.FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL
+import com.github.atm1020.tuilaunch.ui.PIN_SESSIONS_MOVED_TO_EDITOR_LABEL
 import com.github.atm1020.tuilaunch.ui.HIDE_PROMPT_BOX_AFTER_SEND_LABEL
 import com.github.atm1020.tuilaunch.ui.JETBRAINS_AI_COMPLETION_SOURCE_ITEM
 import com.github.atm1020.tuilaunch.ui.PROMPT_BOX_COMPLETIONS_TITLE
@@ -70,6 +71,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             rememberPromptBoxSizePerApp = false
             focusTuiAfterPromptBoxSend = false
             hidePromptBoxAfterSend = false
+            pinSessionsMovedToEditor = true
             promptBoxCompletionSource = PromptBoxCompletionSource.JETBRAINS_AI
             copilotLanguageServerPath = ""
             copilotPromptHistoryContext = true
@@ -986,6 +988,37 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
         assertFalse(configurable.isModified())
     }
 
+    fun testThePinInTheEditorCheckBoxIsPresentAndOnByDefault() {
+        val component = configuration().createComponent() as JPanel
+
+        assertTrue(findCheckBox(component, PIN_SESSIONS_MOVED_TO_EDITOR_LABEL)!!.isSelected)
+    }
+
+    fun testTurningPinningInTheEditorOffIsPersisted() {
+        val settings = TuiLauncherSettings.getInstance()
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+
+        findCheckBox(component, PIN_SESSIONS_MOVED_TO_EDITOR_LABEL)!!.doClick()
+        assertTrue(configurable.isModified())
+        configurable.apply()
+
+        assertFalse(settings.state.pinSessionsMovedToEditor)
+        assertFalse(configurable.isModified())
+    }
+
+    fun testResetRestoresThePinInTheEditorCheckBox() {
+        val configurable = configuration()
+        val component = configurable.createComponent() as JPanel
+        val checkbox = findCheckBox(component, PIN_SESSIONS_MOVED_TO_EDITOR_LABEL)!!
+
+        checkbox.doClick()
+        configurable.reset()
+
+        assertTrue(checkbox.isSelected)
+        assertFalse(configurable.isModified())
+    }
+
     fun testTheHidePromptBoxAfterSendCheckBoxIsPresentAndOffByDefault() {
         val component = configuration().createComponent() as JPanel
 
@@ -1502,6 +1535,7 @@ class TuiLauncherConfigurationTest : BasePlatformTestCase() {
             PROMPT_BOX_SIZE_PER_APP_LABEL,
             FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL,
             HIDE_PROMPT_BOX_AFTER_SEND_LABEL,
+            PIN_SESSIONS_MOVED_TO_EDITOR_LABEL,
         )
     }
 }

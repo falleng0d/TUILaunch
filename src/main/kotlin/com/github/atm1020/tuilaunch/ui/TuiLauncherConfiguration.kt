@@ -57,6 +57,7 @@ internal const val PROMPT_BOX_SIZE_PER_APP_LABEL = "Remember the prompt box size
 internal const val FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL =
     "Move focus to the TUI after sending from the prompt box"
 internal const val HIDE_PROMPT_BOX_AFTER_SEND_LABEL = "Hide the prompt box after sending from it"
+internal const val PIN_SESSIONS_MOVED_TO_EDITOR_LABEL = "Pin the editor tab of a session moved into the editor"
 internal const val PROMPT_BOX_COMPLETIONS_TITLE = "Prompt box completions"
 internal const val COMPLETION_SOURCE_LABEL = "Completion source"
 internal const val JETBRAINS_AI_COMPLETION_SOURCE_ITEM = "JetBrains AI Assistant"
@@ -109,6 +110,7 @@ class TuiLauncherConfiguration internal constructor(
     private var promptBoxSizePerAppCheckBox: JBCheckBox? = null
     private var focusTuiAfterPromptBoxSendCheckBox: JBCheckBox? = null
     private var hidePromptBoxAfterSendCheckBox: JBCheckBox? = null
+    private var pinSessionsMovedToEditorCheckBox: JBCheckBox? = null
     private var completionSourceCombo: JComboBox<String>? = null
     private var copilotServerPathField: TextFieldWithBrowseButton? = null
     private var copilotServerHintLabel: JBLabel? = null
@@ -247,6 +249,8 @@ class TuiLauncherConfiguration internal constructor(
             JBCheckBox(FOCUS_TUI_AFTER_PROMPT_BOX_SEND_LABEL, settings.state.focusTuiAfterPromptBoxSend)
         val hideAfterSendCheckBox =
             JBCheckBox(HIDE_PROMPT_BOX_AFTER_SEND_LABEL, settings.state.hidePromptBoxAfterSend)
+        val pinInTheEditorCheckBox =
+            JBCheckBox(PIN_SESSIONS_MOVED_TO_EDITOR_LABEL, settings.state.pinSessionsMovedToEditor)
         restoreOpenTabsCheckBox = restoreCheckBox
         restoreAgentSessionsCheckBox = agentSessionsCheckBox
         restoreCheckBox.addActionListener { updateSessionOptionsEnabled() }
@@ -258,6 +262,7 @@ class TuiLauncherConfiguration internal constructor(
         promptBoxSizePerAppCheckBox = promptBoxSizeCheckBox
         focusTuiAfterPromptBoxSendCheckBox = focusTuiAfterSendCheckBox
         hidePromptBoxAfterSendCheckBox = hideAfterSendCheckBox
+        pinSessionsMovedToEditorCheckBox = pinInTheEditorCheckBox
         val sessionOptions = listOf(
             restoreCheckBox,
             agentSessionsCheckBox,
@@ -268,6 +273,7 @@ class TuiLauncherConfiguration internal constructor(
             promptBoxSizeCheckBox,
             focusTuiAfterSendCheckBox,
             hideAfterSendCheckBox,
+            pinInTheEditorCheckBox,
         )
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -640,6 +646,7 @@ class TuiLauncherConfiguration internal constructor(
         promptBoxSizePerAppCheckBox?.isSelected = settings.state.rememberPromptBoxSizePerApp
         focusTuiAfterPromptBoxSendCheckBox?.isSelected = settings.state.focusTuiAfterPromptBoxSend
         hidePromptBoxAfterSendCheckBox?.isSelected = settings.state.hidePromptBoxAfterSend
+        pinSessionsMovedToEditorCheckBox?.isSelected = settings.state.pinSessionsMovedToEditor
         completionSourceCombo?.selectedItem = completionSourceItem()
         copilotServerPathField?.text = settings.state.copilotLanguageServerPath
         copilotPromptHistoryContextCheckBox?.isSelected = settings.state.copilotPromptHistoryContext
@@ -672,6 +679,7 @@ class TuiLauncherConfiguration internal constructor(
         promptBoxSizePerAppCheckBox = null
         focusTuiAfterPromptBoxSendCheckBox = null
         hidePromptBoxAfterSendCheckBox = null
+        pinSessionsMovedToEditorCheckBox = null
         completionSourceCombo = null
         copilotServerPathField = null
         copilotServerHintLabel = null
@@ -700,6 +708,7 @@ class TuiLauncherConfiguration internal constructor(
         rememberPromptBoxSizePerApp = promptBoxSizePerAppCheckBox?.isSelected == true,
         focusTuiAfterPromptBoxSend = focusTuiAfterPromptBoxSendCheckBox?.isSelected == true,
         hidePromptBoxAfterSend = hidePromptBoxAfterSendCheckBox?.isSelected == true,
+        pinSessionsMovedToEditor = pinSessionsMovedToEditorCheckBox?.isSelected == true,
         promptBoxCompletionSource = selectedCompletionSource(),
         copilotLanguageServerPath = typedCopilotServerPath(),
         copilotPromptHistoryContext = copilotPromptHistoryContextCheckBox?.isSelected == true,
@@ -729,6 +738,7 @@ class TuiLauncherConfiguration internal constructor(
         settings.state.rememberPromptBoxSizePerApp = promptBoxSizePerAppCheckBox?.isSelected == true
         settings.state.focusTuiAfterPromptBoxSend = focusTuiAfterPromptBoxSendCheckBox?.isSelected == true
         settings.state.hidePromptBoxAfterSend = hidePromptBoxAfterSendCheckBox?.isSelected == true
+        settings.state.pinSessionsMovedToEditor = pinSessionsMovedToEditorCheckBox?.isSelected == true
         applyCompletionSource()
         settings.state.escapeModifier = selectedEscapeModifier()
         builtInShortcuts.forEach { it.stateProperty.set(settings.state, it.keyCode) }

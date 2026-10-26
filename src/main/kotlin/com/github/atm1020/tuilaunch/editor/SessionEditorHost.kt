@@ -8,6 +8,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.fileEditor.impl.EditorWindow
 import com.intellij.openapi.fileEditor.impl.FileEditorOpenOptions
+import com.github.atm1020.tuilaunch.services.TuiLauncherSettings
 import com.intellij.openapi.project.Project
 import javax.swing.JComponent
 import javax.swing.SwingUtilities
@@ -24,7 +25,7 @@ internal fun callersAreTheEditorTabLimit(callers: List<Pair<String, String>>): B
 open class SessionEditorHost(private val project: Project?) {
 
     open fun open(file: TuiSessionFile, window: EditorWindow?) {
-        FileEditorManagerEx.getInstanceEx(requireProject()).openFile(file, window, OPEN_PINNED_AND_FOCUSED)
+        FileEditorManagerEx.getInstanceEx(requireProject()).openFile(file, window, openOptions())
     }
 
     open fun select(file: TuiSessionFile) {
@@ -82,6 +83,7 @@ open class SessionEditorHost(private val project: Project?) {
     private fun requireProject(): Project = requireNotNull(project) { "Project is required" }
 
     companion object {
-        internal val OPEN_PINNED_AND_FOCUSED = FileEditorOpenOptions(requestFocus = true, pin = true)
+        internal fun openOptions(): FileEditorOpenOptions =
+            FileEditorOpenOptions(requestFocus = true, pin = TuiLauncherSettings.getInstance().state.pinSessionsMovedToEditor)
     }
 }
